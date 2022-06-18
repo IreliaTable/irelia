@@ -1,0 +1,56 @@
+.record-add .field_clip {
+  background-color: inherit;
+}
+.transform_field {
+  background-color: #FEFFE8;
+}
+
+@media not print {
+  .formula_field, .formula_field_edit {
+    padding-left: 18px;
+  }
+  .formula_field_edit {
+    color: #D0D0D0;
+  }
+
+  .formula_field::before, .formula_field_edit::before, .formula_field_sidepane::before {
+    /* based on standard icon styles */
+    content: "";
+    position: absolute;
+    top: 4px;
+    left: 2px;
+    display: inline-block;
+    vertical-align: middle;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    -webkit-mask-size: contain;
+    -webkit-mask-image: var(--icon-FunctionResult);
+    width: 16px;
+    height: 16px;
+    background-color: var(--icon-color, black);
+    cursor: pointer;
+  }
+
+  .formula_field::before, .formula_field_edit::before {
+    background-color: #D0D0D0;
+  }
+  .formula_field_edit:not(.readonly)::before {
+    background-color: var(--grist-color-cursor);
+  }
+  .formula_field.invalid::before {
+    background-color: white;
+    color: #ffb6c1;
+  }
+  .formula_field_edit.invalid::before {
+    background-color: var(--grist-color-cursor);
+    color: #ffb6c1;
+  }
+
+  .readonly_editor .formula_field_edit::before {
+    display: none;
+  }
+}
+
+.invalid-text input {
+  background-color: #ffb6c1;
+}

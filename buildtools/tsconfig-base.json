@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "es2016",
+    "module": "commonjs",
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "sourceMap": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "moduleResolution": "node",
+    "allowJs": true,
+    "baseUrl": "..",
+    "rootDir": "..",
+    "outDir": "../_build",
+    "paths": {
+      "*": [
+        "*",
+        "grist-core/*",
+        "stubs/*",
+        "ext/*"
+      ],
+    },
+    "composite": true,
+    "plugins": [{
+      "name": "typescript-eslint-language-service"
+    }],
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "jsx": "react"
+  }
+}

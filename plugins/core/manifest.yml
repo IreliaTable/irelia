@@ -1,0 +1,23 @@
+name: core
+version: 0.0.0
+description: Grist core features
+components:
+  safePython: sandbox/main.py
+contributions:
+  fileParsers:
+    - fileExtensions: ["csv", "tsv", "txt"]
+      parseFile:
+        component: safePython
+        name: csv_parser
+    - fileExtensions: ["xlsx", "xlsm"]
+      parseFile:
+        component: safePython
+        name: xls_parser
+    - fileExtensions: ["json"]
+      parseFile:
+        component: safePython
+        name: json_parser
+
+scripts:
+  build:
+  test:

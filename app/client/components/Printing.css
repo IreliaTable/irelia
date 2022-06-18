@@ -1,0 +1,71 @@
+@media print {
+  /* Various style overrides needed to print a single section (page widget). */
+
+  .print-hide {
+    display: none;
+  }
+
+  .print-parent {
+    display: block !important;
+    position: relative !important;
+    height: max-content !important;
+    overflow: visible !important;
+  }
+
+  .print-widget {
+    margin: 0px !important;
+  }
+  .print-row {
+    break-inside: avoid;
+  }
+
+  .print-widget .viewsection_title {
+    display: none !important;
+  }
+  .print-widget .view_data_pane_container {
+    border: none !important;
+  }
+  .print-widget .viewsection_content {
+    margin: 0px !important;
+  }
+
+  .print-widget .detailview_single {
+    overflow: visible;
+  }
+
+  .print-widget .gridview_data_pane {
+    display: block !important;
+    position: relative !important;
+    height: max-content !important;
+    overflow: visible !important;
+  }
+
+  .print-widget .scrolly_outer {
+    display: none;
+  }
+
+  .print-widget .custom_view {
+    height: calc(100vh - 24px);
+  }
+
+  .ui-resizable-handle {
+    display: none !important;
+  }
+}
+
+/*
+ * The chart div needs to be measured before its relayout() call, and "@media print" is not in
+ * effect for that measurement, so we temporarily resize the chart for all @media, to a plausible
+ * size for printing.
+ */
+.print-widget .chart_container {
+  width: 6.5in !important;
+  height: 6.5in !important;
+  overflow: visible !important;
+}
+
+@media not print {
+  .print-all-rows {
+    display: none;
+  }
+}

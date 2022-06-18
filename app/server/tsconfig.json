@@ -1,0 +1,11 @@
+{
+  "extends": "../../buildtools/tsconfig-base.json",
+  "references": [
+    { "path": "../common" },
+  ],
+  "include": [
+    "**/*",
+    "../gen-server/**/*",
+    "../../stubs/app/server/**/*"
+  ]
+}

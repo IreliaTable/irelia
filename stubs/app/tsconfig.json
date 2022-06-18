@@ -1,0 +1,10 @@
+{
+  "extends": "../../buildtools/tsconfig-base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    { "path": "../../app/client" },
+    { "path": "../../app/common" },
+    { "path": "../../app/server" }
+  ]
+}

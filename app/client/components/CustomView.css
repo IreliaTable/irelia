@@ -1,0 +1,10 @@
+iframe.custom_view {
+  border: none;
+  height: 100%;
+  flex: auto;
+}
+
+.custom_view_notification {
+  padding: 15px;
+  margin: 15px;
+}

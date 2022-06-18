@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="48px" height="48px" viewBox="0 0 48 48" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>ThumbPreview2</title>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" opacity="0.900000036">
+        <g id="preview---favourite">
+            <rect id="Rectangle" x="0" y="0" width="48" height="48"></rect>
+            <g id="Group" transform="translate(1.000000, 1.000000)">
+                <polygon id="Path" fill="#820D1B" fill-rule="nonzero" points="43 26 3 26 0 22 4 18 42 18 46 22"></polygon>
+                <path d="M40,46 L6,46 C4.895,46 4,45.105 4,44 L4,2 C4,0.895 4.895,0 6,0 L30,0 L42,12 L42,44 C42,45.105 41.105,46 40,46 Z" id="Path" fill="#E6E6E6" fill-rule="nonzero"></path>
+                <path d="M30,0 L30,10 C30,11.105 30.895,12 32,12 L42,12 L30,0 Z" id="Path" fill="#B3B3B3" fill-rule="nonzero"></path>
+                <path d="M44,40 L2,40 C0.895,40 0,39.105 0,38 L0,22 L46,22 L46,38 C46,39.105 45.105,40 44,40 Z" id="Path" fill="#AE182A" fill-rule="nonzero"></path>
+                <text id="IDG" font-family="SIL-Hei-Med-Jian, Hei" font-size="18" font-weight="normal" fill="#FFFFFF">
+                    <tspan x="6" y="37">IDG</tspan>
+                </text>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -1,0 +1,16 @@
+# explicitly list the files needed by docker.
+*
+!package.json
+!yarn.lock
+!tsconfig.json
+!tsconfig-ext.json
+!stubs
+!app
+!buildtools
+!ormconfig.js
+!static
+!bower_components
+!sandbox
+!plugins
+!test
+!ext
