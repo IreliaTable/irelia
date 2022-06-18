@@ -1,6 +1,6 @@
 {
   "name": "irelia-grist-core",
-  "version": "0.7.9",
+  "version": "0.7.9-alpha",
   "license": "Apache-2.0",
   "description": "Grist is the evolution of spreadsheets",
   "homepage": "https://github.com/gristlabs/grist-core",
