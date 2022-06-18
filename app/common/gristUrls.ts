@@ -57,10 +57,10 @@ export const MIN_URLID_PREFIX_LENGTH = 12;
  */
 
 export const commonUrls = {
-  help: "https://support.getgrist.com",
-  plans: "https://www.getgrist.com/pricing",
-  createTeamSite: "https://www.getgrist.com/create-team-site",
-  sproutsProgram: "https://www.getgrist.com/sprouts-program",
+  help: "https://github.com/ElixirNote/irelia",
+  plans: "https://github.com/ElixirNote/irelia",
+  createTeamSite: "https://github.com/ElixirNote/irelia",
+  sproutsProgram: "https://github.com/ElixirNote/irelia",
 
   efcrConnect: 'https://efc-r.com/connect',
   efcrHelp: 'https://www.nioxus.info/eFCR-Help',
