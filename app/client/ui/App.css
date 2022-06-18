@@ -36,3 +36,52 @@ body {
   width: 100%;
   margin-bottom: 2rem;
 }
+
+.g-leftNavBar {
+  background-color: var(--color-nav-bg);
+  position: absolute;
+  width: 60px;
+  height: calc(100vh - 24px);
+  left: 0;
+  top: 48px;
+  z-index: 888;
+}
+
+.g-leftNavList {
+  padding-left: 0;
+}
+
+.g-leftNavListItem {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  list-style: none;
+}
+
+.g-leftNavListItemLine {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  list-style: none;
+}
+
+.g-leftNavListItemHelp {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 60px;
+  width: 60px;
+}
+
+.g-icon {
+  width: 16px;
+}
+
+.g-icon-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  list-style: none;
+}
