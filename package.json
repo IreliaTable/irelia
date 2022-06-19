@@ -2,9 +2,9 @@
   "name": "irelia-grist-core",
   "version": "0.7.9-alpha",
   "license": "Apache-2.0",
-  "description": "Grist is the evolution of spreadsheets",
-  "homepage": "https://github.com/gristlabs/grist-core",
-  "repository": "git://github.com/gristlabs/grist-core.git",
+  "description": "Auto data modeling for VC/PE",
+  "homepage": "https://github.com/ElixirNote/irelia",
+  "repository": "git@github.com:ElixirNote/irelia.git",
   "scripts": {
     "start": "sandbox/watch.sh",
     "install:python": "buildtools/prepare_python.sh",
@@ -18,10 +18,11 @@
     "test:docker": "./test/test_under_docker.sh"
   },
   "keywords": [
-    "grist",
+    "excel",
     "spreadsheet",
     "database",
-    "rows"
+    "rows",
+    "data-modeling"
   ],
   "author": {
     "name": "ciusji",
