@@ -58,7 +58,7 @@ export class WelcomePage extends Disposable {
 
   public buildPageContent(): Element {
     return cssScrollContainer(cssContainer(
-      cssTitle('Welcome to Grist'),
+      cssTitle('Welcome to Irelia'),
       testId('welcome-page'),
 
       domComputed(urlState().state, (state) => (
