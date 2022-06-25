@@ -108,7 +108,7 @@ export const vars = {
   controlFg:      new CustomProp('control-fg', '#364151'),
   controlFgHover: new CustomProp('primary-fg-hover', '#1c507f'),
 
-  controlBorder:        new CustomProp('control-border', '1px solid #1990ff'),
+  controlBorder:        new CustomProp('control-border', '1px solid #1c507f'),
   controlBorderRadius:  new CustomProp('border-radius', '4px'),
 
   logoBg: new CustomProp('logo-bg', '#ffffff'),
