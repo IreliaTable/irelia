@@ -28,7 +28,7 @@ function makeTeamSiteIntro(homeModel: HomeModel) {
     css.docListHeader(`Welcome to ${homeModel.app.currentOrgName}`,
       productPill(homeModel.app.currentOrg, {large: true}),
       testId('welcome-title')),
-    cssIntroLine('Get started by inviting your team and creating your first Grist document.'),
+    cssIntroLine('Get started by inviting your team and creating your first Irelia document.'),
     cssIntroLine('Learn more in our ', helpCenterLink(), ', or find an expert via our ', sproutsProgram, '.',
       testId('welcome-text')),
     makeCreateButtons(homeModel),
@@ -37,8 +37,8 @@ function makeTeamSiteIntro(homeModel: HomeModel) {
 
 function makePersonalIntro(homeModel: HomeModel, user: FullUser) {
   return [
-    css.docListHeader(`Welcome to Grist, ${user.name}!`, testId('welcome-title')),
-    cssIntroLine('Get started by creating your first Grist document.'),
+    css.docListHeader(`Welcome to Irelia, ${user.name}!`, testId('welcome-title')),
+    cssIntroLine('Get started by creating your first Irelia document.'),
     cssIntroLine('Visit our ', helpCenterLink(), ' to learn more.',
       testId('welcome-text')),
     makeCreateButtons(homeModel),
@@ -48,8 +48,8 @@ function makePersonalIntro(homeModel: HomeModel, user: FullUser) {
 function makeAnonIntro(homeModel: HomeModel) {
   const signUp = cssLink({href: getLoginOrSignupUrl()}, 'Sign up');
   return [
-    css.docListHeader(`Welcome to Grist!`, testId('welcome-title')),
-    cssIntroLine('Get started by exploring templates, or creating your first Grist document.'),
+    css.docListHeader(`Welcome to Irelia!`, testId('welcome-title')),
+    cssIntroLine('Get started by exploring templates, or creating your first Irelia document.'),
     cssIntroLine(signUp, ' to save your work. Visit our ', helpCenterLink(), ' to learn more.',
       testId('welcome-text')),
     makeCreateButtons(homeModel),

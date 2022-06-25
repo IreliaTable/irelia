@@ -187,6 +187,7 @@ const cssDocInitials = styled('div', `
   width: 48px;
   height: 48px;
   text-align: center;
+  overflow: hidden;
 `);
 
 const pinnedDocOptions = styled('div', `

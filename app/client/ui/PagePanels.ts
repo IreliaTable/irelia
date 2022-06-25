@@ -221,11 +221,11 @@ const cssContentMain = styled(cssHBox, `
 `);
 export const cssLeftPane = styled(cssVBox, `
   position: relative;
-  background-color: ${colors.lightGreen};
-  width: 60px;
+  // background-color: ${colors.lightGreen};
   margin-right: 0px;
   overflow: hidden;
   transition: margin-right 0.4s;
+  width: 110px;
   @media ${mediaSmall} {
     & {
       width: 240px;

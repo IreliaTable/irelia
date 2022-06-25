@@ -158,7 +158,7 @@ export class FlexServer implements GristServer {
     this.app.set('port', port);
     this.appRoot = getAppRoot();
     this.host = process.env.GRIST_HOST || "localhost";
-    log.info(`== Grist version is ${version.version} (commit ${version.gitcommit})`);
+    log.info(`== Irelia version is ${version.version} (commit ${version.gitcommit})`);
     this.info.push(['appRoot', this.appRoot]);
     // This directory hold Grist documents.
     let docsRoot = path.resolve((this.options && this.options.dataDir) ||

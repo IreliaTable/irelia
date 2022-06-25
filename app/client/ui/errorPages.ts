@@ -68,7 +68,7 @@ export function createNotFoundPage(appModel: AppModel, message?: string) {
       "Please check the URL and try again."),
     cssButtonWrap(bigPrimaryButtonLink('Go to main page', testId('error-primary-btn'),
       urlState().setLinkUrl({}))),
-    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://getgrist.com/contact'})),
+    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://github.com/ElixirNote/irelia'})),
   ]);
 }
 
@@ -81,7 +81,7 @@ export function createOtherErrorPage(appModel: AppModel, message?: string) {
       "There was an unknown error."),
     cssButtonWrap(bigPrimaryButtonLink('Go to main page', testId('error-primary-btn'),
       urlState().setLinkUrl({}))),
-    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://getgrist.com/contact'})),
+    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://github.com/ElixirNote/irelia'})),
   ]);
 }
 

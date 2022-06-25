@@ -1,4 +1,4 @@
-// version tracking not set up in grist-core yet
-export const version = "0.1.1";
+// version tracking not set up in irelia-core yet
+export const version = "0.7.9-alpha";
 export const channel = "core";
 export const gitcommit = "unknown";
