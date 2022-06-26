@@ -69,7 +69,6 @@ export const cssLeftPanel = styled('div', `
   display: flex;
   flex-direction: column;
   background-color: ${colors.light};
-  margin-left: 60px;
 `);
 
 export const cssScrollPane = styled('div', `

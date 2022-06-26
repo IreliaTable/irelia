@@ -82,27 +82,6 @@ export class App extends DisposableWithEvents {
 
     G.document.querySelector('#grist-logo-wrapper').remove();
 
-    document.body.appendChild(
-      dom('div.g-leftNavBar',
-        dom.show(true),
-        dom('ul.g-leftNavList',
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Project.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Search.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Monitor.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Person.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Files.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Apps.svg'})),
-          dom('li.g-leftNavListItemLine', dom('img', {src: 'ui-icons/Nav/Line.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/History.svg'})),
-          dom('li.g-leftNavListItem', dom('img.g-icon', {src: 'ui-icons/Nav/Setting.svg'})),
-          dom('li.g-leftNavListItemLine', dom('img', {src: 'ui-icons/Nav/Line.svg'})),
-          dom('li.g-leftNavListItemHelp', dom('div.g-icon-bottom', dom('img.g-icon',
-            {src: 'ui-icons/Nav/Help.svg'}))
-          )
-        )
-      )
-    );
-
     // Help pop-up pane
     const helpDiv = document.body.appendChild(
       dom('div.g-help',

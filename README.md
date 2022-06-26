@@ -2,7 +2,7 @@
     <img src="/static/icons/grist.svg" width=120 alt="logo" />
     <br />
     <br />
-    <small>Auto data modeling for VC/PE</small>
+    <small>a modern relational spreadsheet</small>
 </div>
 
 # Irelia
