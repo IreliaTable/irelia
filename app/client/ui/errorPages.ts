@@ -51,6 +51,7 @@ export function createForbiddenPage(appModel: AppModel, message?: string) {
  * Creates a page that shows the user is logged out.
  */
 export function createSignedOutPage(appModel: AppModel) {
+  document.title = "Sign out - Irelia";
   return pagePanelsError(appModel, 'Signed out', [
     cssErrorText("You are now signed out."),
     cssButtonWrap(bigPrimaryButtonLink(
@@ -68,7 +69,7 @@ export function createNotFoundPage(appModel: AppModel, message?: string) {
       "Please check the URL and try again."),
     cssButtonWrap(bigPrimaryButtonLink('Go to main page', testId('error-primary-btn'),
       urlState().setLinkUrl({}))),
-    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://github.com/ElixirNote/irelia'})),
+    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://ciusji.gitbook.io/irelia/'})),
   ]);
 }
 
@@ -81,7 +82,7 @@ export function createOtherErrorPage(appModel: AppModel, message?: string) {
       "There was an unknown error."),
     cssButtonWrap(bigPrimaryButtonLink('Go to main page', testId('error-primary-btn'),
       urlState().setLinkUrl({}))),
-    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://github.com/ElixirNote/irelia'})),
+    cssButtonWrap(bigBasicButtonLink('Contact support', {href: 'https://ciusji.gitbook.io/irelia/'})),
   ]);
 }
 
