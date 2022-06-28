@@ -73,7 +73,7 @@ export class AccountWidget extends Disposable {
         menuItemLink({href: getLoginOrSignupUrl()}, 'Sign in'),
         menuDivider(),
         documentSettingsItem,
-        menuItemLink({href: commonUrls.plans}, 'Pricing'),
+        menuItemLink({href: commonUrls.learnMore}, 'Learn more'),
         mobileModeToggle,
       ];
     }
@@ -108,7 +108,7 @@ export class AccountWidget extends Disposable {
           menuItemLink(urlState().setLinkUrl({billing: 'billing'}), 'Billing Account') :
           menuItem(() => null, 'Billing Account', dom.cls('disabled', true))
         ) :
-        menuItemLink({href: commonUrls.plans}, 'Upgrade Plan'),
+        menuItemLink({href: commonUrls.plans, target: "_blank"}, 'Irela on GuinsooLab'),
 
       mobileModeToggle,
 

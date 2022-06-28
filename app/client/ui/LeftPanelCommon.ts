@@ -68,7 +68,7 @@ export const cssLeftPanel = styled('div', `
   font-size: ${vars.mediumFontSize};
   display: flex;
   flex-direction: column;
-  background-color: ${colors.light};
+  // background-color: ${colors.light};
 `);
 
 export const cssScrollPane = styled('div', `
@@ -135,7 +135,7 @@ export const cssPageLink = styled('a', `
     color: inherit;
   }
   .${cssTools.className}-collapsed & {
-    padding-left: 16px;
+    padding-left: 22px;
   }
 `);
 

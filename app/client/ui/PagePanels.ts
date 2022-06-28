@@ -221,7 +221,8 @@ const cssContentMain = styled(cssHBox, `
 `);
 export const cssLeftPane = styled(cssVBox, `
   position: relative;
-  // background-color: ${colors.lightGreen};
+  background-color: ${colors.lightGreen};
+  width: 60px;
   margin-right: 0px;
   overflow: hidden;
   transition: margin-right 0.4s;
@@ -244,9 +245,10 @@ export const cssLeftPane = styled(cssVBox, `
     }
   }
   &-open {
-    width: 300px;
-    min-width: 300px;
-    max-width: 360px;
+    width: 240px;
+    min-width: 160px;
+    max-width: 320px;
+    background-color: ${colors.light};
   }
   @media print {
     & {
