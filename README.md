@@ -5,11 +5,11 @@
     <small>a modern relational spreadsheet</small>
 </div>
 
+# Irelia
+
 [Irelia Overview](https://ciusji.gitbook.io/irelia/) |
 [Irelia on GuinsooLab](https://guinsoolab.github.io/glab) |
 [Irelia FAQ](https://ciusji.gitbook.io/irelia/appendix/faq)
-
-# Irelia
 
 Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a 
 database to organize your data and make you more productive.
