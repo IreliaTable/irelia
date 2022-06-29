@@ -38,7 +38,7 @@
  *   https://auth0.com/docs/protocols/saml-protocol/configure-auth0-as-saml-identity-provider
  * When running on localhost and http, the settings tested were with:
  *   - GRIST_SAML_IDP_SKIP_SLO not set
- *   - GRIST_SAML_SP_HOST=http://localhost:8080 or 8484
+ *   - GRIST_SAML_SP_HOST=http://localhost:8080 or 8585
  *   - GRIST_SAML_IDP_UNENCRYPTED=1
  *   - GRIST_SAML_IDP_LOGIN=https://...auth0.com/samlp/xxxx
  *   - GRIST_SAML_IDP_LOGOUT=https://...auth0.com/samlp/xxxx  # these are same for Auth0

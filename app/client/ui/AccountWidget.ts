@@ -60,6 +60,7 @@ export class AccountWidget extends Disposable {
         testId('dm-doc-settings')) :
       null);
 
+    console.log(this._appModel);
     // The item to toggle mobile mode (presence of viewport meta tag).
     const mobileModeToggle = menuItem(viewport.toggleViewport,
       cssSmallDeviceOnly.cls(''),   // Only show this toggle on small devices.
