@@ -113,13 +113,13 @@ const cssAppHeader = styled('div', `
 const cssAppLogo = styled('a', `
   flex: none;
   height: 47px;
-  width: 150px;
+  width: 60px;
   // background-image: var(--icon-GristLogo);
   background-image: url("ui-icons/Logo/GristLogo2.svg");
-  background-size: 150px 40px;
+  background-size: 60px 47px;
   background-repeat: no-repeat;
   background-position: center;
-  background-color: ${vars.logoBg};
+  // background-color: ${vars.logoBg};
   .${cssAppHeader.className}-widelogo & {
     width: 100%;
     background-size: contain;
@@ -128,6 +128,11 @@ const cssAppLogo = styled('a', `
   }
   .${cssLeftPane.className}-open .${cssAppHeader.className}-widelogo & {
     background-image: var(--icon-GristWideLogo, var(--icon-GristLogo));
+  }
+  .${cssLeftPane.className}-open & {
+    width: 150px;
+    background-size: 150px 47px;
+    background-image: url("ui-icons/Logo/GristLogo3.svg");
   }
 `);
 

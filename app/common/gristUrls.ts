@@ -57,9 +57,10 @@ export const MIN_URLID_PREFIX_LENGTH = 12;
  */
 
 export const commonUrls = {
-  help: "https://github.com/ElixirNote/irelia",
-  plans: "https://github.com/ElixirNote/irelia",
-  createTeamSite: "https://github.com/ElixirNote/irelia",
+  help: "https://ciusji.gitbook.io/irelia/",
+  plans: "https://guinsoolab.github.io/glab",
+  learnMore: "https://ciusji.gitbook.io/irelia/",
+  createTeamSite: "https://ciusji.gitbook.io/irelia/",
   sproutsProgram: "https://github.com/ElixirNote/irelia",
 
   efcrConnect: 'https://efc-r.com/connect',
@@ -755,7 +756,9 @@ function shouldIncludeSlug(doc: {id: string, urlId: string|null}): boolean {
 // deleting it, seems unfair to languages using anything other than unaccented
 // Latin characters.
 function nameToSlug(name: string): string {
-  return name.trim().replace(/ /g, '-').replace(/[^-a-zA-Z0-9]/g, '').replace(/---*/g, '-');
+  return name.trim().replace(/ /g, '-')
+    .replace(/[^-a-zA-Z0-9]/g, '')
+    .replace(/---*/g, '-');
 }
 
 // Returns a slug for the given docId/urlId/name, or undefined if a slug should

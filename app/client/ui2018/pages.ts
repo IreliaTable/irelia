@@ -96,7 +96,8 @@ const cssPageItem = styled('a', `
   align-items: center;
   flex-grow: 1;
   .${treeViewContainer.className}-close & {
-    margin-left: 16px;
+    // margin-left: 22px;
+    justify-content: center;
   }
   &, &:hover, &:focus {
     text-decoration: none;
@@ -113,13 +114,14 @@ const cssPageInitial = styled('div', `
   width: 16px;
   height: 16px;
   text-align: center;
-  margin-right: 8px;
+  // margin-right: 8px;
 `);
 
 const cssPageName = styled('div', `
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-left: 8px;
   .${treeViewContainer.className}-close & {
     display: none;
   }
