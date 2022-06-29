@@ -376,6 +376,7 @@ export class HomeDBManager extends EventEmitter {
       // TODO: it should now be possible to remove all this; the only remaining
       // issue is what workspace to associate with documents created by
       // anonymous users.
+      log.debug("support user id: %s", this.getSupportUserId());
       const supportWorkspaces = await this._workspaces()
         .leftJoinAndSelect('workspaces.org', 'orgs')
         .where('orgs.owner_id = :userId', { userId: this.getSupportUserId() })

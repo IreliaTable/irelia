@@ -1,8 +1,8 @@
 {
-  "name": "irelia-grist-core",
-  "version": "0.7.9-alpha",
+  "name": "irelia-core",
+  "version": "0.0.0",
   "license": "Apache-2.0",
-  "description": "Auto data modeling for VC/PE",
+  "description": "a software product to organize, analyze, and share data.",
   "homepage": "https://github.com/ElixirNote/irelia",
   "repository": "git@github.com:ElixirNote/irelia.git",
   "scripts": {
