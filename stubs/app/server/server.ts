@@ -46,7 +46,7 @@ function setDefaultEnv(name: string, value: string) {
 
 // tslint:disable:no-console
 export async function main() {
-  console.log('Welcome to Grist.');
+  console.log('Welcome to Irelia.');
   if (!debugging) {
     console.log(`In quiet mode, see http://localhost:${G.port} to use.`);
     console.log('For full logs, re-run with DEBUG=1');

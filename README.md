@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="/static/icons/grist.svg" width=120 alt="logo" />
+    <img src="/static/ui-icons/Logo/GristLogo3.svg" width=120 alt="logo" />
     <br />
     <br />
     <small>a modern relational spreadsheet</small>
@@ -24,36 +24,35 @@ Here are some specific feature highlights of Irelia:
 
 * Python formulas.
     - Full Python syntax is supported, and the standard library.
-    - Many [Excel functions](https://support.getgrist.com/functions/) also available.
+    - Many [Excel functions](https://ciusji.gitbook.io/irelia/using-formulas/function-reference) also available.
 * A portable, self-contained format.
     - Based on SQLite, the most widely deployed database engine.
     - Any tool that can read SQLite can read numeric and text data from a Irelia file.
-    - Irelia format for [backups](https://support.getgrist.com/exports/#backing-up-an-entire-document) that you can be confident you can restore in full.
+    - Irelia format for [backups](https://ciusji.gitbook.io/irelia/managing-documents/exports-and-backups#backuping-up-an-entire-document) that you can be confident you can restore in full.
     - Irelia format for moving between different hosts.
 * Convenient editing and formatting features.
-    - Choices and [choice lists](https://support.getgrist.com/col-types/#choice-list-columns), for adding colorful tags to records without fuss.
-    - [References](https://support.getgrist.com/col-refs/#creating-a-new-reference-list-column) and reference lists, for cross-referencing records in other tables.
-    - [Attachments](https://support.getgrist.com/col-types/#attachment-columns), to include media or document files in records.
+    - Choices and choice lists, for adding colorful tags to records without fuss.
+    - References and reference lists, for cross-referencing records in other tables.
+    - Attachments, to include media or document files in records.
     - Dates and times, toggles, and special numerics such as currency all have specialized editors and formatting options.
 * Irelia for dashboards, visualizations, and data entry.
-    - [Charts](https://support.getgrist.com/widget-chart/) for visualization.
-    - [Summary tables](https://support.getgrist.com/summary-tables/) for summing and counting across groups.
-    - [Widget linking](https://support.getgrist.com/linking-widgets/) streamlines filtering and editing data.
+    - [Charts](https://ciusji.gitbook.io/irelia/pages-and-tables/chart) for visualization.
+    - [Summary tables](https://ciusji.gitbook.io/irelia/pages-and-tables/table-widget) for summing and counting across groups.
+    - Widget linking streamlines filtering and editing data.
       Irelia has a unique approach to visualization, where you can lay out and link distinct widgets to show together,
       without cramming mixed material into a table.
-    - The [Filter bar](https://support.getgrist.com/search-sort-filter/#filter-buttons) is great for quick slicing and dicing.
-* [Incremental imports](https://support.getgrist.com/imports/#updating-existing-records).
+    - The Filter bar is great for quick slicing and dicing.
+* [Incremental imports](https://ciusji.gitbook.io/irelia/managing-documents/importing-data#import-to-an-existing-table).
     - So you can import a CSV of the last three months activity from your bank...
     - ... and import new activity a month later without fuss or duplicates.
 * Integrations.
-    - A [REST API](https://support.getgrist.com/api/), [Zapier actions/triggers](https://support.getgrist.com/integrators/#integrations-via-zapier), and support from similar [integrators](https://support.getgrist.com/integrators/).
+    - A [REST API](https://ciusji.gitbook.io/irelia/appendix/faq).
     - Import/export to Google drive, Excel format, CSV.
     - Can link data with custom widgets hosted externally.
-* [Many templates](https://templates.getgrist.com/) to get you started, from investment research to organizing treasure hunts.
 * Access control options.
     - (You'll need SSO logins set up to make use of these options)
-    - Share [individual documents](https://support.getgrist.com/sharing/), or workspaces, or [team sites](https://support.getgrist.com/team-sharing/).
-    - Control access to [individual rows, columns, and tables](https://support.getgrist.com/access-rules/).
+    - Share [individual documents](https://app.gitbook.com/s/nkD4RCjP1WLRakyVkU17/managing-documents/sharing-a-document), or workspaces.
+    - Control access to individual rows, columns, and tables.
     - Control access based on cell values and user attributes.
 * Can be self-maintained.
     - Useful for intranet operation and specific compliance requirements.
@@ -62,13 +61,7 @@ Here are some specific feature highlights of Irelia:
       [gVisor](https://github.com/google/gvisor) sandboxing at the individual
       document level.
     - On OSX, you can use native sandboxing.
-
-If you are curious about where Irelia is going heading,
-see [our roadmap](https://github.com/gristlabs/grist-core/projects/1), drop a
-question in [our forum](https://community.getgrist.com),
-or browse [our extensive documentation](https://support.getgrist.com).
-
-
+    
 ## Building from source
 
 To build Irelia from source, follow these steps:
@@ -107,7 +100,7 @@ IRELIA_BACKUP_DELAY_SECS | wait this long after a doc change before making a bac
 IRELIA_DATA_DIR      | directory in which to store document caches.
 IRELIA_DEFAULT_EMAIL | if set, login as this user if no other credentials presented
 IRELIA_DEFAULT_PRODUCT  | if set, this controls enabled features and limits of new sites. See names of PRODUCTS in Product.ts.
-IRELIA_DOMAIN        | in hosted Irelia, Irelia is served from subdomains of this domain.  Defaults to "getgrist.com".
+IRELIA_DOMAIN        | in hosted Irelia, Irelia is served from subdomains of this domain.
 IRELIA_EXPERIMENTAL_PLUGINS | enables experimental plugins
 IRELIA_HIDE_UI_ELEMENTS | comma-separated list of parts of the UI to hide. Allowed names of parts: `helpCenter,billing,templates,multiSite,multiAccounts`
 IRELIA_HOME_INCLUDE_STATIC | if set, home server also serves static resources
@@ -116,7 +109,7 @@ IRELIA_ID_PREFIX | for subdomains of form o-*, expect or produce o-${IRELIA_ID_P
 IRELIA_INST_DIR      | path to Irelia instance configuration files, for Irelia server.
 IRELIA_MANAGED_WORKERS | if set, Irelia can assume that if a url targeted at a doc worker returns a 404, that worker is gone
 IRELIA_MAX_UPLOAD_ATTACHMENT_MB | max allowed size for attachments (0 or empty for unlimited).
-IRELIA_MAX_UPLOAD_IMPORT_MB | max allowed size for imports (except .grist files) (0 or empty for unlimited).
+IRELIA_MAX_UPLOAD_IMPORT_MB | max allowed size for imports (0 or empty for unlimited).
 IRELIA_ORG_IN_PATH | if true, encode org in path rather than domain
 IRELIA_PAGE_TITLE_SUFFIX | a string to append to the end of the `<title>` in HTML documents. Defaults to `" - Irelia"`. Set to `_blank` for no suffix at all.
 IRELIA_PROXY_AUTH_HEADER | header which will be set by a (reverse) proxy webserver with an authorized users' email. This can be used as an alternative to a SAML service.
@@ -131,7 +124,7 @@ IRELIA_SUPPORT_ANON | if set to 'true', show UI for anonymous access (not shown 
 IRELIA_THROTTLE_CPU | if set, CPU throttling is enabled
 IRELIA_USER_ROOT     | an extra path to look for plugins in.
 COOKIE_MAX_AGE      | session cookie max age, defaults to 90 days; can be set to "none" to make it a session cookie
-HOME_PORT           | port number to listen on for REST API server; if set to "share", add API endpoints to regular grist port.
+HOME_PORT           | port number to listen on for REST API server; if set to "share", add API endpoints to regular port.
 PORT                | port number to listen on for Irelia server
 REDIS_URL           | optional redis server for browser sessions and db query caching
 
