@@ -16,110 +16,27 @@
  *
  * Implementation
  * --------------
- * Messages are serialized as follows. Note that this is a matter between the client's and the
- * server's communication libraries, and code outside of them should not rely on these details.
- *   Requests: {
- *      reqId: Number,
- *      method: String,
- *      args: Array
- *   }
- *   Responses: {
- *      reqId: Number,          // distinguishes responses from async messages
- *      error: String           // if the request failed
- *      data: Object            // if the request succeeded, may be undefined if nothing to return
- *   }
- *   Async messages from server: {
- *      type: String,     // 'docListAction' or 'docUserAction' or 'clientConnect'
- *      docFD: Number,    // For 'docUserAction', the file descriptor of the open document.
- *      data: Object      // The message data.
- *      // other keys may exist depending on message type.
- *   }
+ * Messages are serialized as JSON using types CommRequest, CommResponse, CommResponseError for
+ * method calls, and CommMessage for async messages from the server. These are all defined in
+ * app/common/CommTypes. Note that this is a matter between the client's and the server's
+ * communication libraries, and code outside of them should not rely on these details.
  */
 
 import {GristWSConnection} from 'app/client/components/GristWSConnection';
 import * as dispose from 'app/client/lib/dispose';
+import * as log from 'app/client/lib/log';
+import {CommRequest, CommResponse, CommResponseBase, CommResponseError, ValidEvent} from 'app/common/CommTypes';
 import {UserAction} from 'app/common/DocActions';
 import {DocListAPI, OpenLocalDocResult} from 'app/common/DocListAPI';
 import {GristServerAPI} from 'app/common/GristServerAPI';
-import {StringUnion} from 'app/common/StringUnion';
 import {getInitialDocAssignment} from 'app/common/urlUtils';
 import {Events as BackboneEvents} from 'backbone';
-
-// tslint:disable:no-console
-
-/**
- * Event for a change to the document list.
- * These are sent to all connected clients, regardless of which documents they have open.
- * TODO: implement and document.
- * @event docListAction
- */
-
-/**
- * Event for a user action on a document, or part of one. Sent to all clients that have this
- * document open.
- * @event docUserAction
- * @property {Number}  docFD - The file descriptor of the open document, specific to each client.
- * @property {Array}   data.actionGroup - ActionGroup object containing user action, and doc actions.
- * @property {Boolean} fromSelf - Flag to indicate whether the action originated from this client.
- */
-
-/**
- * Event for when a document is forcibly shutdown, and requires the client to re-open it.
- * @event docShutdown
- * @property {Number}  docFD - The file descriptor of the open document, specific to each client.
- */
-
-/**
- * Event sent by server received when a client first connects.
- * @event clientConnect
- * @property {Number} clientId - The ID for the client, which may be reused if a client reconnects
- *    to reattach to its state on the server.
- * @property {Number} missedMessages - Array of messages missed from the server.
- * @property {Object} settings - Object containing server settings and features which
- *    should be used to initialize the client.
- * @property {Object} profile - Object containing session profile information if the user
- *    is signed in, or null otherwise. See "clientLogin" message below for fields.
- */
-
-/**
- * Event sent by server to all clients in the session when the updated profile is retrieved.
- * Does not necessarily contain all properties, may only include updated properties.
- * Gets sent on login with all properties.
- * @event profileFetch
- * @property {String}  email            User email.
- * @property {String}  name             User name,
- * @property {String}  imageUrl         The url of the user's profile image.
- */
-
-/**
- * Event sent by server to all clients in the session when the user settings are updated.
- * @event userSettings
- * @property {Object} features - Object containing feature flags such as login, indicating
- *  which features are activated.
- */
-
-/**
- * Event sent by server to all clients in the session when a client logs out.
- * @event clientLogout
- */
-
-/**
- * Event sent by server to all clients when an invite is received or for all invites received
- * while away when a user logs in.
- * @event receiveInvites
- * @property {Number} data - An array of unread invites (see app/common/sharing).
- */
-
-const ValidEvent = StringUnion('docListAction', 'docUserAction', 'docShutdown', 'docError',
-                               'clientConnect', 'clientLogout',
-                               'profileFetch', 'userSettings', 'receiveInvites');
-type ValidEvent = typeof ValidEvent.type;
 
 /**
  * A request that is currently being processed.
  */
 export interface CommRequestInFlight {
-  resolve: (result: any) => void;
+  resolve: (result: unknown) => void;
   reject: (err: Error) => void;
   // clientId is non-null for those requests which should not be re-sent on reconnect if
   // the clientId has changed; it is null when it's safe to re-send.
@@ -130,48 +47,8 @@ export interface CommRequestInFlight {
   sent: boolean;
 }
 
-/**
- * A request in the appropriate form for sending to the server.
- */
-export interface CommRequest {
-  reqId: number;
-  method: string;
-  args: any[];
-}
-
-/**
- * A regular, successful response from the server.
- */
-export interface CommResponse {
-  reqId: number;
-  data: any;
-  error?: null;  // TODO: keep until sure server never sets this on regular responses.
-}
-
-/**
- * An exceptional response from the server when there is an error.
- */
-export interface CommResponseError {
-  reqId: number;
-  error: string;
-  errorCode: string;
-  shouldFork?: boolean;  // if set, the server suggests forking the document.
-  details?: any;  // if set, error has extra details available. TODO - the treatment of
-                  // details could do with some harmonisation between rest API and ws API,
-                  // and between front-end and back-end types.
-}
-
 function isCommResponseError(msg: CommResponse | CommResponseError): msg is CommResponseError {
   return Boolean(msg.error);
-}
-
-/**
- * A message pushed from the server, not in response to a request.
- */
-export interface CommMessage {
-  type: ValidEvent;
-  docFD: number;
-  data: any;
 }
 
 /**
@@ -285,7 +162,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
   public useDocConnection(docId: string): GristWSConnection {
     const connection = this._connection(docId);
     connection.useCount += 1;
-    console.log(`Comm.useDocConnection(${docId}): useCount now ${connection.useCount}`);
+    log.debug(`Comm.useDocConnection(${docId}): useCount now ${connection.useCount}`);
     return connection;
   }
 
@@ -299,7 +176,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
     const connection = this._connections.get(docId);
     if (connection) {
       connection.useCount -= 1;
-      console.log(`Comm.releaseDocConnection(${docId}): useCount now ${connection.useCount}`);
+      log.debug(`Comm.releaseDocConnection(${docId}): useCount now ${connection.useCount}`);
       // Dispose the connection if it is no longer in use (except in "classic grist").
       if (!this._singleWorkerMode && connection.useCount <= 0) {
         this.stopListening(connection);
@@ -373,7 +250,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
                             methodName: string, ...args: any[]): Promise<any> {
     const connection = this._connection(docId);
     if (clientId !== null && clientId !== connection.clientId) {
-      console.log("Comm: Rejecting " + methodName + " for outdated clientId %s (current %s)",
+      log.warn("Comm: Rejecting " + methodName + " for outdated clientId %s (current %s)",
                   clientId, connection.clientId);
       return Promise.reject(new Error('Comm: outdated session'));
     }
@@ -382,7 +259,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
       method: methodName,
       args
     };
-    console.log("Comm request #" + request.reqId + " " + methodName, request.args);
+    log.debug("Comm request #" + request.reqId + " " + methodName, request.args);
     return new Promise((resolve, reject) => {
       const requestMsg = JSON.stringify(request);
       const sent = connection.send(requestMsg);
@@ -428,7 +305,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
     const error = "GristWSConnection disposed";
     for (const [reqId, req] of this.pendingRequests) {
       if (reqMatchesConnection(req.docId, docId)) {
-        console.log(`Comm: Rejecting req #${reqId} ${req.methodName}: ${error}`);
+        log.warn(`Comm: Rejecting req #${reqId} ${req.methodName}: ${error}`);
         this.pendingRequests.delete(reqId);
         req.reject(new Error('Comm: ' + error));
       }
@@ -443,8 +320,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
    * We should watch timeouts, and log something when there is no response for a while.
    *    There is probably no need for callers to deal with timeouts.
    */
-  private _onServerMessage(docId: string|null,
-                           message: CommResponse | CommResponseError | CommMessage) {
+  private _onServerMessage(docId: string|null, message: CommResponseBase) {
     if ('reqId' in message) {
       const reqId = message.reqId;
       const r = this.pendingRequests.get(reqId);
@@ -455,7 +331,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
             // We should not let the user see the document any more.  Let's reload the
             // page, reducing this to the problem of arriving at a document the user
             // doesn't have access to, which is already handled.
-            console.log(`Comm response #${reqId} ${r.methodName} issued AUTH_NO_VIEW - closing`);
+            log.warn(`Comm response #${reqId} ${r.methodName} issued AUTH_NO_VIEW - closing`);
             window.location.reload();
           }
           if (isCommResponseError(message)) {
@@ -469,19 +345,19 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
               err.details = message.details;
             }
             err.shouldFork = message.shouldFork;
-            console.log(`Comm response #${reqId} ${r.methodName} ERROR:${code} ${message.error}`
+            log.warn(`Comm response #${reqId} ${r.methodName} ERROR:${code} ${message.error}`
                         + (message.shouldFork ? ` (should fork)` : ''));
             this._reportError?.(err);
             r.reject(err);
           } else {
-            console.log(`Comm response #${reqId} ${r.methodName} OK`);
+            log.debug(`Comm response #${reqId} ${r.methodName} OK`);
             r.resolve(message.data);
           }
         } finally {
           this.pendingRequests.delete(reqId);
         }
       } else {
-        console.log("Comm: Response to unknown reqId " + reqId);
+        log.warn("Comm: Response to unknown reqId " + reqId);
       }
     } else {
       if (message.type === 'clientConnect') {
@@ -496,10 +372,10 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
 
       // Another asynchronous message that's not a response. Broadcast it as an event.
       if (ValidEvent.guard(message.type)) {
-        console.log("Comm: Triggering event " + message.type);
+        log.debug("Comm: Triggering event " + message.type);
         this.trigger(message.type, message);
       } else {
-        console.log("Comm: Server message of unknown type " + message.type);
+        log.warn("Comm: Server message of unknown type " + message.type);
       }
     }
   }
@@ -519,7 +395,7 @@ export class Comm extends dispose.Disposable implements GristServerAPI, DocListA
       r.sent = connection.send(r.requestMsg);
     }
     if (error) {
-      console.log("Comm: Rejecting req #" + reqId + " " + r.methodName + ": " + error);
+      log.warn("Comm: Rejecting req #" + reqId + " " + r.methodName + ": " + error);
       r.reject(new Error('Comm: ' + error));
       this.pendingRequests.delete(reqId);
     }

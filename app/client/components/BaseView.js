@@ -319,8 +319,13 @@ BaseView.prototype.filterByThisCellValue = function() {
   // ChoiceList and Reflist values get 'flattened' out so we filter by each element within.
   // In any other column type, complex values (even lists) get converted to JSON.
   let filterValues;
-  if (gristTypes.isList(value) && gristTypes.isListType(col.type.peek())) {
+  const colType = col.type.peek();
+  if (gristTypes.isList(value) && gristTypes.isListType(colType)) {
     filterValues = value.slice(1);
+    if (!filterValues.length) {
+      // If the list is empty, filter instead by an empty value for the whole list
+      filterValues = [colType === "ChoiceList" ? "" : null];
+    }
   } else {
     if (Array.isArray(value)) {
       value = JSON.stringify(value);
@@ -656,18 +661,10 @@ BaseView.prototype.scrollToCursor = function() {
  * with the returned positions will place them in between index-1 and index.
  * when the GridView is sorted by MANUALSORT
  **/
- BaseView.prototype._getRowInsertPos = function(index, numInserts) {
-  var lowerRowId = this.viewData.getRowId(index-1);
-  var upperRowId = this.viewData.getRowId(index);
-  if (lowerRowId === 'new') {
-    // set the lowerRowId to the rowId of the row before 'new'.
-    lowerRowId = this.viewData.getRowId(index - 2);
-  }
-
-  var lowerPos = this.tableModel.tableData.getValue(lowerRowId, MANUALSORT);
-  var upperPos = this.tableModel.tableData.getValue(upperRowId, MANUALSORT);
-  // tableUtil.insertPositions takes care of cases where upper/lowerPos are non-zero & falsy
-  return tableUtil.insertPositions(lowerPos, upperPos, numInserts);
+BaseView.prototype._getRowInsertPos = function(index, numInserts) {
+  var rowId = this.viewData.getRowId(index);
+  var insertPos = this.tableModel.tableData.getValue(rowId, MANUALSORT);
+  return Array(numInserts).fill(insertPos);
 };
 
 /**

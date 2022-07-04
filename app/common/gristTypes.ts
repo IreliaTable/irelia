@@ -200,19 +200,7 @@ const rightType: {[key in GristType]: (value: CellValue) => boolean} = {
   ManualSortPos:  isNumber,
   Ref:            isNumber,
   RefList:        isListOrNull,
-  Choice:         (v: CellValue, options?: any) => {
-    // TODO widgets options should not be used outside of the client. They are an instance of
-    // modelUtil.jsonObservable, passed in by FieldBuilder.
-    if (v === '') {
-      // Accept empty-string values as valid
-      return true;
-    } else if (options) {
-      const choices = options().choices;
-      return Array.isArray(choices) && choices.includes(v);
-    } else {
-      return false;
-    }
-  },
+  Choice:         isString,
   ChoiceList:     isListOrNull,
 };
 
@@ -339,6 +327,10 @@ export function isListType(type: string) {
 
 export function isNumberType(type: string|undefined) {
   return ['Numeric', 'Int'].includes(type || '');
+}
+
+export function isDateLikeType(type: string) {
+  return type === 'Date' || type.startsWith('DateTime');
 }
 
 export function isFullReferencingType(type: string) {

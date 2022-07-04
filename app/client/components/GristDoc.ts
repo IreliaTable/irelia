@@ -11,7 +11,7 @@ import {CodeEditorPanel} from 'app/client/components/CodeEditorPanel';
 import * as commands from 'app/client/components/commands';
 import {CursorPos} from 'app/client/components/Cursor';
 import {CursorMonitor, ViewCursorPos} from "app/client/components/CursorMonitor";
-import {DocComm, DocUserAction} from 'app/client/components/DocComm';
+import {DocComm} from 'app/client/components/DocComm';
 import * as DocConfigTab from 'app/client/components/DocConfigTab';
 import {Drafts} from "app/client/components/Drafts";
 import {EditorMonitor} from "app/client/components/EditorMonitor";
@@ -51,17 +51,19 @@ import {FieldEditor} from "app/client/widgets/FieldEditor";
 import {MinimalActionGroup} from 'app/common/ActionGroup';
 import {ClientQuery} from "app/common/ActiveDocAPI";
 import {delay} from 'app/common/delay';
+import {CommDocUsage, CommDocUserAction} from 'app/common/CommTypes';
 import {DisposableWithEvents} from 'app/common/DisposableWithEvents';
 import {isSchemaAction, UserAction} from 'app/common/DocActions';
 import {OpenLocalDocResult} from 'app/common/DocListAPI';
-import {isList, isRefListType, RecalcWhen} from 'app/common/gristTypes';
+import {isList, isListType, isRefListType, RecalcWhen} from 'app/common/gristTypes';
 import {HashLink, IDocPage, isViewDocPage, SpecialDocPage, ViewDocPage} from 'app/common/gristUrls';
 import {undef, waitObs} from 'app/common/gutil';
 import {LocalPlugin} from "app/common/plugin";
 import {StringUnion} from 'app/common/StringUnion';
 import {TableData} from 'app/common/TableData';
 import {DocStateComparison} from 'app/common/UserAPI';
-import {Computed, dom, Emitter, Holder, IDisposable, IDomComponent, Observable, styled, subscribe, toKo} from 'grainjs';
+import {bundleChanges, Computed, dom, Emitter, Holder, IDisposable, IDomComponent, Observable,
+        styled, subscribe, toKo} from 'grainjs';
 import * as ko from 'knockout';
 import cloneDeepWith = require('lodash/cloneDeepWith');
 import isEqual = require('lodash/isEqual');
@@ -298,6 +300,8 @@ export class GristDoc extends DisposableWithEvents {
 
     this.listenTo(app.comm, 'docUserAction', this.onDocUserAction);
 
+    this.listenTo(app.comm, 'docUsage', this.onDocUsageMessage);
+
     this.autoDispose(DocConfigTab.create({gristDoc: this}));
 
     this.rightPanelTool = Computed.create(this, (use) => this._getToolContent(use(this._rightPanelTool)));
@@ -438,7 +442,7 @@ export class GristDoc extends DisposableWithEvents {
    * Process actions received from the server by forwarding them to `docData.receiveAction()` and
    * pushing them to actionLog.
    */
-  public onDocUserAction(message: DocUserAction) {
+  public onDocUserAction(message: CommDocUserAction) {
     console.log("GristDoc.onDocUserAction", message);
     let schemaUpdated = false;
     /**
@@ -480,6 +484,19 @@ export class GristDoc extends DisposableWithEvents {
       }
       this.docPageModel.updateCurrentDocUsage(message.data.docUsage);
     }
+  }
+
+  /**
+   * Process usage and product received from the server by updating their respective
+   * observables.
+   */
+  public onDocUsageMessage(message: CommDocUsage) {
+    if (!this.docComm.isActionFromThisDoc(message)) { return; }
+
+    bundleChanges(() => {
+      this.docPageModel.updateCurrentDocUsage(message.data.docUsage);
+      this.docPageModel.currentProduct.set(message.data.product ?? null);
+    });
   }
 
   public getTableModel(tableId: string): DataTableModel {
@@ -839,9 +856,12 @@ export class GristDoc extends DisposableWithEvents {
             // must be a summary -- otherwise dealt with earlier.
             const destTable = await this._getTableData(section);
             for (const srcCol of srcSection.table.peek().groupByColumns.peek()) {
-              const filterColId = srcCol.summarySource.peek().colId.peek();
+              const filterCol = srcCol.summarySource.peek();
+              const filterColId = filterCol.colId.peek();
               controller = destTable.getValue(cursorPos.rowId, filterColId);
-              query.operations[filterColId] = 'in';
+              // If the source groupby column is a ChoiceList or RefList, then null or '' in the summary table
+              // should match against an empty list in the source table.
+              query.operations[filterColId] = isListType(filterCol.type.peek()) && !controller ? 'empty' : 'in';
               query.filters[filterColId] = isList(controller) ? controller.slice(1) : [controller];
             }
           }
