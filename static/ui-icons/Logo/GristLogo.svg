@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="700px" height="700px" viewBox="0 0 700 700" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>irelia-logo</title>
-    <g id="irelia-logo" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <polygon id="Path-2" fill="#2E3E52" points="50 486.9619 601.42909 50 650 269.462312 187.652729 650"></polygon>
+<svg width="600px" height="470px" viewBox="0 0 600 470" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>GristLogo2</title>
+    <g id="GristLogo2" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="Group" transform="translate(171.000000, 95.000000)" fill="#2E3E52">
+            <polygon id="Path-8" points="126.999118 0 4.56938013e-15 140.314643 0 280 92.0073327 280 92.0073327 99.8489342 258.378378 99.8489342 258.378378 0"></polygon>
+            <polygon id="Path-9" points="184.197617 116.756757 108.108108 196.643544 184.197617 280 258.378378 196.643544"></polygon>
+        </g>
     </g>
 </svg>
