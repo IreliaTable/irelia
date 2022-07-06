@@ -2,9 +2,12 @@
 <svg width="1500px" height="470px" viewBox="0 0 1500 470" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
     <title>GristLogo3</title>
     <g id="GristLogo3" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <polygon id="Path-2" fill="#2E3E52" points="84 302.915553 341.333575 99 364 201.415746 148.23794 379"></polygon>
         <text id="Irelia" font-family="Arial-Black, Arial Black" font-size="280" font-weight="700" fill="#2E3E52">
             <tspan x="526" y="345">Irelia</tspan>
         </text>
+        <g id="Group" transform="translate(171.000000, 95.000000)" fill="#2E3E52">
+            <polygon id="Path-8" points="126.999118 0 4.56938013e-15 140.314643 0 280 92.0073327 280 92.0073327 99.8489342 258.378378 99.8489342 258.378378 0"></polygon>
+            <polygon id="Path-9" points="184.197617 116.756757 108.108108 196.643544 184.197617 280 258.378378 196.643544"></polygon>
+        </g>
     </g>
 </svg>
