@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="/static/icons/grist.svg" width=120 alt="logo" />
+    <img src="/static/ui-icons/Logo/GristLogo.svg" width=120 alt="logo" />
     <br />
     <br />
     <small>a modern relational spreadsheet</small>
