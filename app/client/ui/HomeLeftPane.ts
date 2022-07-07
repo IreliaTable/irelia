@@ -10,7 +10,7 @@ import {cssLinkText, cssPageEntry, cssPageIcon, cssPageLink} from 'app/client/ui
 import {transientInput} from 'app/client/ui/transientInput';
 import {colors, testId} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
-import {menu, menuIcon, menuItem, upgradableMenuItem, upgradeText} from 'app/client/ui2018/menus';
+import {menu, menuIcon, menuItem, upgradableMenuItem} from 'app/client/ui2018/menus';
 import {confirmModal} from 'app/client/ui2018/modals';
 import {shouldHideUiElement} from 'app/common/gristUrls';
 import * as roles from 'app/common/roles';
@@ -188,7 +188,7 @@ function addMenu(home: HomeModel, creating: Observable<boolean>): DomElementArg[
              dom.cls('disabled', (use) => !roles.canEdit(orgAccess) || !use(home.available)),
              testId("dm-new-workspace")
     ),
-    upgradeText(needUpgrade),
+    // upgradeText(needUpgrade),
   ];
 }
 
@@ -223,7 +223,7 @@ function workspaceMenu(home: HomeModel, ws: Workspace, renaming: Observable<Work
     upgradableMenuItem(needUpgrade, manageWorkspaceUsers,
       roles.canEditAccess(ws.access) ? "Manage Users" : "Access Details",
       testId('dm-workspace-access')),
-    upgradeText(needUpgrade),
+    // upgradeText(needUpgrade),
   ];
 }
 

@@ -801,7 +801,7 @@ function renderTitle(resourceType: ResourceType, resource?: Resource, personal?:
         'Manage members of team site',
         !resource ? null : cssOrgName(
           `${(resource as Organization).name} (`,
-          cssOrgDomain(`${(resource as Organization).domain}.getgrist.com`),
+          cssOrgDomain(`${(resource as Organization).domain}.irelia.com`),
           ')',
         )
       ];

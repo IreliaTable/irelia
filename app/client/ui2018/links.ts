@@ -8,11 +8,10 @@ import { dom, IDomArgs, Observable, styled } from 'grainjs';
  */
 
 export const cssLink = styled('a', `
-  color: ${colors.lightGreen};
+  // color: ${colors.mediumGrey};
   --icon-color: ${colors.lightGreen};
   text-decoration: none;
   &:hover, &:focus {
-    color: ${colors.lightGreen};
     --icon-color: ${colors.lightGreen};
     text-decoration: underline;
   }
