@@ -69,7 +69,7 @@ export const welcomeTour: IOnBoardingMsg[] = [
   },
   {
     selector: '.tour-welcome',
-    title: 'Welcome to Grist!',
+    title: 'Welcome to Irelia!',
     body: () => [
       dom('p', 'Browse our ',
         cssLink({target: '_blank', href: urlState().makeUrl({homePage: "templates"})},
