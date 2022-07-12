@@ -16,7 +16,9 @@ database to organize your data and make you more productive.
 
 ## Overview
 
-<img src="/static/img/overview.png" alt="overview" />
+![overview-1](/static/img/overview-1.png)
+
+![overview-2](/static/img/overview-2.png)
 
 ## Features
 
