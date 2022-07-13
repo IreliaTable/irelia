@@ -57,8 +57,8 @@ Here are some specific feature highlights of Irelia:
     - Attachments, to include media or document files in records.
     - Dates and times, toggles, and special numerics such as currency all have specialized editors and formatting options.
 * Irelia for dashboards, visualizations, and data entry.
-    - [Charts](https://ciusji.gitbook.io/irelia/pages-and-tables/chart) for visualization.
-    - [Summary tables](https://ciusji.gitbook.io/irelia/pages-and-tables/table-widget) for summing and counting across groups.
+    - [Charts](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize) for visualization.
+    - [Summary tables](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize) for summing and counting across groups.
     - Widget linking streamlines filtering and editing data.
       Irelia has a unique approach to visualization, where you can lay out and link distinct widgets to show together,
       without cramming mixed material into a table.
