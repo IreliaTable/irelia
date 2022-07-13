@@ -7,9 +7,12 @@
 
 # Irelia
 
-[Irelia Overview](https://ciusji.gitbook.io/irelia/) |
-[Irelia on GuinsooLab](https://guinsoolab.github.io/glab) |
-[Irelia FAQ](https://ciusji.gitbook.io/irelia/appendix/faq)
+[Welcome](https://ciusji.gitbook.io/irelia/) |
+[Quickstart](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize) |
+[Document Management](https://ciusji.gitbook.io/irelia/managing-documents/create-a-document) |
+[Pag and Table](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data) |
+[Using Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas) |
+[FAQ](https://ciusji.gitbook.io/irelia/appendix/faq)
 
 Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a 
 database to organize your data and make you more productive.
