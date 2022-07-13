@@ -16,9 +16,25 @@ database to organize your data and make you more productive.
 
 ## Overview
 
+### Trigger formula
+
 ![overview-1](/static/img/overview-1.png)
 
+### Making charts
+
 ![overview-2](/static/img/overview-2.png)
+
+### Add widget
+
+![overview-3](/static/img/overview-3.png)
+
+### Group data
+
+![overview-4](/static/img/overview-4.png)
+
+### Dynamic table
+
+![overview-5](/static/img/overview-5.png)
 
 ## Features
 
@@ -53,7 +69,7 @@ Here are some specific feature highlights of Irelia:
     - Can link data with custom widgets hosted externally.
 * Access control options.
     - (You'll need SSO logins set up to make use of these options)
-    - Share [individual documents](https://app.gitbook.com/s/nkD4RCjP1WLRakyVkU17/managing-documents/sharing-a-document), or workspaces.
+    - Share [individual documents](https://ciusji.gitbook.io/irelia/managing-documents/sharing-a-document), or workspaces.
     - Control access to individual rows, columns, and tables.
     - Control access based on cell values and user attributes.
 * Can be self-maintained.
