@@ -3,7 +3,7 @@
 set -e
 
 PROJECT=""
-export GRIST_EXT=stubs
+export IRELIA_EXT=stubs
 if [[ -e ext/app ]]; then
   PROJECT="tsconfig-ext.json"
 fi
