@@ -485,7 +485,7 @@ function createRpcLogger(): IRpcLogger {
   } else if (typeof process === 'undefined') {
     prefix = `PLUGIN VIEW ${getPluginPath(self.location)}:`;
   } else if (typeof process.send !== 'undefined') {
-    prefix = `PLUGIN NODE ${process.env.GRIST_PLUGIN_PATH || "<unset-plugin-id>"}:`;
+    prefix = `PLUGIN NODE ${process.env.IRELIA_PLUGIN_PATH || "<unset-plugin-id>"}:`;
   } else {
     return {};
   }

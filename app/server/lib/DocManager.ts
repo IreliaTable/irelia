@@ -286,7 +286,7 @@ export class DocManager extends EventEmitter {
       }
       auth = new DocAuthorizer(dbManager, key, mode, linkParameters, docAuth, client.getProfile() || undefined);
     } else {
-      log.debug(`DocManager.openDoc not using authorization for ${docId} because GRIST_SINGLE_USER`);
+      log.debug(`DocManager.openDoc not using authorization for ${docId} because IRELIA_SINGLE_USER`);
       auth = new DummyAuthorizer('owners', docId);
     }
 

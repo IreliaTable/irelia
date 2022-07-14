@@ -84,9 +84,9 @@ export function makeSimpleCreator(opts: {
       return createSandbox('unsandboxed', options);
     },
     sessionSecret() {
-      const secret = process.env.GRIST_SESSION_SECRET || opts.sessionSecret;
+      const secret = process.env.IRELIA_SESSION_SECRET || opts.sessionSecret;
       if (!secret) {
-        throw new Error('need GRIST_SESSION_SECRET');
+        throw new Error('need IRELIA_SESSION_SECRET');
       }
       return secret;
     },

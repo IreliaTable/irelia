@@ -71,7 +71,7 @@ import {Client} from 'app/server/lib/Client';
 import {DEFAULT_CACHE_TTL, DocManager} from 'app/server/lib/DocManager';
 import {ICreateActiveDocOptions} from 'app/server/lib/ICreate';
 import {makeForkIds} from 'app/server/lib/idUtils';
-import {GRIST_DOC_SQL, GRIST_DOC_WITH_TABLE1_SQL} from 'app/server/lib/initialDocSql';
+import {IRELIA_DOC_SQL, IRELIA_DOC_WITH_TABLE1_SQL} from 'app/server/lib/initialDocSql';
 import {ISandbox} from 'app/server/lib/ISandbox';
 import * as log from 'app/server/lib/log';
 import {LogMethods} from "app/server/lib/LogMethods";
@@ -1660,7 +1660,7 @@ export class ActiveDoc extends EventEmitter {
     this._log.debug(docSession, "createDoc");
     await this._docManager.storageManager.prepareToCreateDoc(this.docName);
     await this.docStorage.createFile();
-    const sql = options?.skipInitialTable ? GRIST_DOC_SQL : GRIST_DOC_WITH_TABLE1_SQL;
+    const sql = options?.skipInitialTable ? IRELIA_DOC_SQL : IRELIA_DOC_WITH_TABLE1_SQL;
     await this.docStorage.exec(sql);
     const timezone = docSession.browserSettings?.timezone ?? DEFAULT_TIMEZONE;
     const locale = docSession.browserSettings?.locale ?? DEFAULT_LOCALE;
@@ -1775,7 +1775,7 @@ export class ActiveDoc extends EventEmitter {
    */
   private async _prepAttachment(docSession: OptDocSession, fileData: FileUploadInfo): Promise<UserAction> {
     // Check that upload size is within the configured limits.
-    const limit = (Number(process.env.GRIST_MAX_UPLOAD_ATTACHMENT_MB) * 1024 * 1024) || Infinity;
+    const limit = (Number(process.env.IRELIA_MAX_UPLOAD_ATTACHMENT_MB) * 1024 * 1024) || Infinity;
     if (fileData.size > limit) {
       throw new ApiError(`Attachments must not exceed ${byteString(limit)}`, 413);
     }

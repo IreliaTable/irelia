@@ -94,16 +94,16 @@ export class TestServerMerged implements IMochaServer {
     const env: Record<string, string> = {
       TYPEORM_DATABASE: this._getDatabaseFile(),
       TEST_CLEAN_DATABASE: reset ? 'true' : '',
-      GRIST_DATA_DIR: this.testDocDir,
-      GRIST_INST_DIR: this.testDir,
+      IRELIA_DATA_DIR: this.testDocDir,
+      IRELIA_INST_DIR: this.testDir,
       // uses the test installed plugins folder as the user installed plugins.
-      GRIST_USER_ROOT: path.resolve(getAppRoot(), 'test/fixtures/plugins/browserInstalledPlugins/'),
-      GRIST_TESTING_SOCKET: testingSocket,
+      IRELIA_USER_ROOT: path.resolve(getAppRoot(), 'test/fixtures/plugins/browserInstalledPlugins/'),
+      IRELIA_TESTING_SOCKET: testingSocket,
       // Set low limits for uploads, for testing.
-      GRIST_MAX_UPLOAD_IMPORT_MB: '1',
-      GRIST_MAX_UPLOAD_ATTACHMENT_MB: '2',
+      IRELIA_MAX_UPLOAD_IMPORT_MB: '1',
+      IRELIA_MAX_UPLOAD_ATTACHMENT_MB: '2',
       // The following line only matters for testing with non-localhost URLs, which some tests do.
-      GRIST_SERVE_SAME_ORIGIN: 'true',
+      IRELIA_SERVE_SAME_ORIGIN: 'true',
       APP_UNTRUSTED_URL : "http://localhost:18096",
       // Run with HOME_PORT, STATIC_PORT, DOC_PORT, DOC_WORKER_COUNT in the environment to override.
       ...(isCore ? {

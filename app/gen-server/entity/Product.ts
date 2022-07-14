@@ -127,7 +127,7 @@ export const PRODUCTS: IProduct[] = [
  * Get names of products for different situations.
  */
 export function getDefaultProductNames() {
-  const defaultProduct = process.env.GRIST_DEFAULT_PRODUCT;
+  const defaultProduct = process.env.IRELIA_DEFAULT_PRODUCT;
   return {
     personal: defaultProduct || 'starter',  // Personal site start off on a functional plan.
     teamInitial: defaultProduct || 'stub',  // Team site starts off on a limited plan, requiring subscription.

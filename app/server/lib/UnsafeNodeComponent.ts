@@ -98,8 +98,8 @@ export class UnsafeNodeComponent extends BaseComponent {
     ]);
     const env = Object.assign({}, process.env, {
       NODE_PATH: paths.join(path.delimiter),
-      GRIST_PLUGIN_PATH: `${this._pluginId}/${this._mainPath}`,
-      GRIST_DOC_PATH: this._gristDocPath,
+      IRELIA_PLUGIN_PATH: `${this._pluginId}/${this._mainPath}`,
+      IRELIA_DOC_PATH: this._gristDocPath,
     });
     const electronVersion: string = (process.versions as any).electron;
     if (electronVersion) {

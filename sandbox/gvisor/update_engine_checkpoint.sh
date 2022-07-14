@@ -21,13 +21,13 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 export NODE_PATH=_build:_build/core:_build/stubs:_build/ext
 source $SCRIPT_DIR/get_checkpoint_path.sh
 
-if [[ -z "GRIST_CHECKPOINT" ]]; then
+if [[ -z "IRELIA_CHECKPOINT" ]]; then
   echo "Skipping checkpoint generation"
   return
 fi
 
-export GRIST_CHECKPOINT_MAKE=1
-export GRIST_SANDBOX_FLAVOR=gvisor
+export IRELIA_CHECKPOINT_MAKE=1
+export IRELIA_SANDBOX_FLAVOR=gvisor
 export PYTHON_VERSION=3
 
 BUILD=$(test -e _build/core && echo "_build/core" || echo "_build")

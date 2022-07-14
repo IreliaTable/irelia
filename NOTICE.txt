@@ -1,5 +1,5 @@
 Grist Software
-Copyright 2014-2022 Grist Labs Inc.
+Copyright 2022 IreliaTable.
 
 This product includes software developed at
 Grist Labs Inc. (https://www.getgrist.com/).

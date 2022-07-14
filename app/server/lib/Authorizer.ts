@@ -90,18 +90,18 @@ export function isAnonymousUser(req: Request) {
 // True if Grist is configured for a single user without specific authorization
 // (classic standalone/electron mode).
 export function isSingleUserMode(): boolean {
-  return process.env.GRIST_SINGLE_USER === '1';
+  return process.env.IRELIA_SINGLE_USER === '1';
 }
 
 
 /**
  * Returns a profile if it can be deduced from the request. This requires a
  * header to specify the users' email address. The header to set comes from the
- * environment variable GRIST_PROXY_AUTH_HEADER, or may be passed in.
+ * environment variable IRELIA_PROXY_AUTH_HEADER, or may be passed in.
  */
 export function getRequestProfile(req: Request|IncomingMessage,
                                   header?: string): UserProfile|undefined {
-  header = header || process.env.GRIST_PROXY_AUTH_HEADER;
+  header = header || process.env.IRELIA_PROXY_AUTH_HEADER;
   let profile: UserProfile|undefined;
 
   if (header) {
@@ -579,7 +579,7 @@ export function getTransitiveHeaders(req: Request): {[key: string]: string} {
     ...(XRequestedWith ? { 'X-Requested-With': XRequestedWith } : undefined),
     ...(Origin ? { Origin } : undefined),
   };
-  const extraHeader = process.env.GRIST_PROXY_AUTH_HEADER;
+  const extraHeader = process.env.IRELIA_PROXY_AUTH_HEADER;
   const extraHeaderValue = extraHeader && req.get(extraHeader);
   if (extraHeader && extraHeaderValue) {
     result[extraHeader] = extraHeaderValue;

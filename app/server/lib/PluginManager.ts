@@ -91,8 +91,8 @@ export class PluginManager {
       this._entries.push(...await scanDirectory(this._dirs.builtIn, "builtIn"));
     }
 
-    if (!process.env.GRIST_EXPERIMENTAL_PLUGINS ||
-       process.env.GRIST_EXPERIMENTAL_PLUGINS === '0') {
+    if (!process.env.IRELIA_EXPERIMENTAL_PLUGINS ||
+       process.env.IRELIA_EXPERIMENTAL_PLUGINS === '0') {
       // Remove experimental plugins
       this._entries = this._entries.filter(entry => {
         if (entry.manifest && entry.manifest.experimental) {

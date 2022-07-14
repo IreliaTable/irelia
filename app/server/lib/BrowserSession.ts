@@ -163,9 +163,9 @@ export class ScopedSession {
               private _sessionStore: SessionStore,
               private _org: string,
               private _userSelector: string) {
-    // Assume we need to skip cache in a hosted environment. GRIST_HOST is always set there.
+    // Assume we need to skip cache in a hosted environment. IRELIA_HOST is always set there.
     // TODO: find a cleaner way to configure this flag.
-    this._live = Boolean(process.env.GRIST_HOST || process.env.GRIST_HOSTED);
+    this._live = Boolean(process.env.IRELIA_HOST || process.env.IRELIA_HOSTED);
   }
 
   /**

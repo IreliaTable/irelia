@@ -92,7 +92,7 @@ yarn install
 yarn run build:prod
 yarn run install:python
 yarn start
-# Irelia will be available at http://localhost:8484/
+# Irelia will be available at http://localhost:8585/
 ```
 Irelia formulas in documents will be run using Python executed directly on your machine. 
 You can configure sandboxing using a `IRELIA_SANDBOX_FLAVOR` environment variable.

@@ -15,10 +15,10 @@ import trimStart = require('lodash/trimStart');
  *   https://github.com/thomseddon/traefik-forward-auth
  *
  * To make it function:
- *   - Set GRIST_FORWARD_AUTH_HEADER to a header that will contain
+ *   - Set IRELIA_FORWARD_AUTH_HEADER to a header that will contain
  *     authorized user emails, say "x-forwarded-user"
  *   - Make sure /auth/login is processed by forward auth middleware
- *   - Set GRIST_FORWARD_AUTH_LOGOUT_PATH to a path that will trigger
+ *   - Set IRELIA_FORWARD_AUTH_LOGOUT_PATH to a path that will trigger
  *     a logout (for traefik-forward-auth by default that is /_oauth/logout).
  *   - Make sure that logout path is processed by forward auth middleware
  *   - If you want to allow anonymous access in some cases, make sure all
@@ -30,8 +30,8 @@ import trimStart = require('lodash/trimStart');
  * Redirection logic currently assumes a single-site installation.
  */
 export async function getForwardAuthLoginSystem(): Promise<GristLoginSystem|undefined> {
-  const header = process.env.GRIST_FORWARD_AUTH_HEADER;
-  const logoutPath = process.env.GRIST_FORWARD_AUTH_LOGOUT_PATH || '';
+  const header = process.env.IRELIA_FORWARD_AUTH_HEADER;
+  const logoutPath = process.env.IRELIA_FORWARD_AUTH_LOGOUT_PATH || '';
   if (!header) { return; }
   return {
     async getMiddleware(gristServer: GristServer) {
