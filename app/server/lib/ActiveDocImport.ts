@@ -234,7 +234,7 @@ export class ActiveDocImport {
                              isHidden: boolean): Promise<ImportResult> {
 
     // Check that upload size is within the configured limits.
-    const limit = (Number(process.env.GRIST_MAX_UPLOAD_IMPORT_MB) * 1024 * 1024) || Infinity;
+    const limit = (Number(process.env.IRELIA_MAX_UPLOAD_IMPORT_MB) * 1024 * 1024) || Infinity;
     const totalSize = upload.files.reduce((acc, f) => acc + f.size, 0);
     if (totalSize > limit) {
       throw new ApiError(`Imported files must not exceed ${gutil.byteString(limit)}`, 413);

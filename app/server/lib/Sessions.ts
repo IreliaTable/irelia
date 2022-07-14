@@ -66,7 +66,7 @@ export class Sessions {
     org?: string|null,
     sessionID?: string,
   }) {
-    if (!(process.env.GRIST_HOST || process.env.GRIST_HOSTED)) {
+    if (!(process.env.IRELIA_HOST || process.env.IRELIA_HOSTED)) {
       this._sessions.clear();
     }
   }

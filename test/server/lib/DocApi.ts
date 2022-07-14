@@ -2814,14 +2814,14 @@ class TestServer {
 
     // env
     const env = {
-      GRIST_DATA_DIR: dataDir,
-      GRIST_INST_DIR: tmpDir,
-      GRIST_SERVERS: this._serverTypes,
+      IRELIA_DATA_DIR: dataDir,
+      IRELIA_INST_DIR: tmpDir,
+      IRELIA_SERVERS: this._serverTypes,
       // with port '0' no need to hard code a port number (we can use testing hooks to find out what
       // port server is listening on).
-      GRIST_PORT: '0',
-      GRIST_TESTING_SOCKET: this.testingSocket,
-      GRIST_DISABLE_S3: 'true',
+      IRELIA_PORT: '0',
+      IRELIA_TESTING_SOCKET: this.testingSocket,
+      IRELIA_DISABLE_S3: 'true',
       REDIS_URL: process.env.TEST_REDIS_URL,
       APP_HOME_URL: _homeUrl,
       ALLOWED_WEBHOOK_DOMAINS: `example.com,localhost:${webhooksTestPort}`,
@@ -2860,7 +2860,7 @@ class TestServer {
 
   public async isServerReady(): Promise<boolean> {
     // Let's wait for the testingSocket to be created, then get the port the server is listening on,
-    // and then do an api check. This approach allow us to start server with GRIST_PORT set to '0',
+    // and then do an api check. This approach allow us to start server with IRELIA_PORT set to '0',
     // which will listen on first available port, removing the need to hard code a port number.
     try {
 

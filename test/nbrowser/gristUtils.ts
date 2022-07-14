@@ -1660,7 +1660,7 @@ export class Session {
 
   // Return a session configured for a particular team site and the current session's user.
   public customTeamSite(orgDomain: string = 'test-grist', orgName = 'Test Grist') {
-    const deployment = process.env.GRIST_ID_PREFIX;
+    const deployment = process.env.IRELIA_ID_PREFIX;
     if (deployment) {
       orgDomain = `${orgDomain}-${deployment}`;
     }

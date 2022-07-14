@@ -578,19 +578,19 @@ export function isClient() {
 
 /**
  * Returns a known org "subdomain" if Grist is configured in single-org mode
- * (GRIST_SINGLE_ORG=<org> on the server) or if the page includes an org in gristConfig.
+ * (IRELIA_SINGLE_ORG=<org> on the server) or if the page includes an org in gristConfig.
  */
 export function getKnownOrg(): string|null {
   if (isClient()) {
     const gristConfig: GristLoadConfig = (window as any).gristConfig;
     return (gristConfig && gristConfig.singleOrg) || null;
   } else {
-    return process.env.GRIST_SINGLE_ORG || null;
+    return process.env.IRELIA_SINGLE_ORG || null;
   }
 }
 
 /**
- * Like getKnownOrg, but respects singleOrg/GRIST_SINGLE_ORG strictly.
+ * Like getKnownOrg, but respects singleOrg/IRELIA_SINGLE_ORG strictly.
  * The main difference in behavior would be for orgs with custom domains
  * served from a shared pool of servers, for which gristConfig.org would
  * be set, but not gristConfig.singleOrg.
@@ -600,14 +600,14 @@ export function getSingleOrg(): string|null {
     const gristConfig: GristLoadConfig = (window as any).gristConfig;
     return (gristConfig && gristConfig.singleOrg) || null;
   } else {
-    return process.env.GRIST_SINGLE_ORG || null;
+    return process.env.IRELIA_SINGLE_ORG || null;
   }
 }
 
 /**
  * Returns true if org must be encoded in path, not in domain.  Determined from
  * gristConfig on the client.  On the server, returns true if the host is
- * supplied and is 'localhost', or if GRIST_ORG_IN_PATH is set to 'true'.
+ * supplied and is 'localhost', or if IRELIA_ORG_IN_PATH is set to 'true'.
  */
 export function isOrgInPathOnly(host?: string): boolean {
   if (isClient()) {
@@ -615,7 +615,7 @@ export function isOrgInPathOnly(host?: string): boolean {
     return (gristConfig && gristConfig.pathOnly) || false;
   } else {
     if (host && host.match(localhostRegex)) { return true; }
-    return (process.env.GRIST_ORG_IN_PATH === 'true');
+    return (process.env.IRELIA_ORG_IN_PATH === 'true');
   }
 }
 

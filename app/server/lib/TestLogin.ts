@@ -3,7 +3,7 @@ import {Request} from 'express';
 
 /**
  * Return a login system for testing. Just enough to use the test/login endpoint
- * available when GRIST_TEST_LOGIN=1 is set.
+ * available when IRELIA_TEST_LOGIN=1 is set.
  */
 export async function getTestLoginSystem(): Promise<GristLoginSystem> {
   return {

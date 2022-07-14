@@ -19,8 +19,8 @@ import {User} from './entity/User';
 import {HomeDBManager} from './lib/HomeDBManager';
 
 // Special public organization that contains examples and templates.
-const TEMPLATES_ORG_DOMAIN = process.env.GRIST_ID_PREFIX ?
-  `templates-${process.env.GRIST_ID_PREFIX}` :
+const TEMPLATES_ORG_DOMAIN = process.env.IRELIA_ID_PREFIX ?
+  `templates-${process.env.IRELIA_ID_PREFIX}` :
   'templates';
 
 // exposed for testing purposes

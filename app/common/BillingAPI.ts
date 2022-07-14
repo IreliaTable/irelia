@@ -24,7 +24,7 @@ export interface IBillingPlan {
   interval: string;           // billing frequency - one of day, week, month or year
   amount: number;             // amount in cents charged at each interval
   metadata: {
-    family?: string;          // groups plans for filtering by GRIST_STRIPE_FAMILY env variable
+    family?: string;          // groups plans for filtering by IRELIA_STRIPE_FAMILY env variable
     isStandard: boolean;      // indicates that the plan should be returned by the API to be offered.
     supportAvailable: boolean;
     gristProduct: string;     // name of grist product that should be used with this plan.

@@ -205,7 +205,7 @@ export class HomeUtil {
   public async getGristSid(): Promise<string|null> {
     // Load a cheap page on our server to get the session-id cookie from browser.
     await this.driver.get(`${this.server.getHost()}/test/session`);
-    const cookie = await this.driver.manage().getCookie(process.env.GRIST_SESSION_COOKIE || 'grist_sid');
+    const cookie = await this.driver.manage().getCookie(process.env.IRELIA_SESSION_COOKIE || 'grist_sid');
     if (!cookie) { return null; }
     return decodeURIComponent(cookie.value);
   }

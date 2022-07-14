@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as shortUUID from "short-uuid";
 
 
-export const cookieName = process.env.GRIST_SESSION_COOKIE || 'grist_sid';
+export const cookieName = process.env.IRELIA_SESSION_COOKIE || 'grist_sid';
 
 export const COOKIE_MAX_AGE =
       process.env.COOKIE_MAX_AGE === 'none' ? null :
@@ -155,8 +155,8 @@ export function getCookieDomain(req: express.Request) {
     return undefined;
   }
 
-  const adaptDomain = process.env.GRIST_ADAPT_DOMAIN === 'true';
-  const fixedDomain = process.env.GRIST_SESSION_DOMAIN || process.env.GRIST_DOMAIN;
+  const adaptDomain = process.env.IRELIA_ADAPT_DOMAIN === 'true';
+  const fixedDomain = process.env.IRELIA_SESSION_DOMAIN || process.env.IRELIA_DOMAIN;
 
   if (adaptDomain) {
     const reqDomain = parseSubdomain(req.get('host'));

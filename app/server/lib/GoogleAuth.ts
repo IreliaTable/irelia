@@ -62,7 +62,7 @@ const authHandlerPath = "/auth/google";
 
 // Redirect host after the Google Auth login form is completed. This reuses the same domain name
 // as for Cognito login.
-const AUTH_SUBDOMAIN = process.env.GRIST_ID_PREFIX ? `docs-${process.env.GRIST_ID_PREFIX}` : 'docs';
+const AUTH_SUBDOMAIN = process.env.IRELIA_ID_PREFIX ? `docs-${process.env.IRELIA_ID_PREFIX}` : 'docs';
 
 /**
  * Return a full url for Google Auth handler. Examples are:

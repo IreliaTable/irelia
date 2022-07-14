@@ -12,7 +12,7 @@ export interface IWidgetRepository {
 }
 
 // Static url for StaticWidgetRepository
-const STATIC_URL = process.env.GRIST_WIDGET_LIST_URL;
+const STATIC_URL = process.env.IRELIA_WIDGET_LIST_URL;
 
 /**
  * Default repository that gets list of available widgets from a static URL.
@@ -31,7 +31,7 @@ export class WidgetRepositoryImpl implements IWidgetRepository {
     if (!this._staticUrl) {
       log.warn(
         'WidgetRepository: Widget repository is not configured.' + !STATIC_URL
-          ? ' Missing GRIST_WIDGET_LIST_URL environmental variable.'
+          ? ' Missing IRELIA_WIDGET_LIST_URL environmental variable.'
           : ''
       );
       return [];

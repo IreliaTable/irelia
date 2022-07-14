@@ -33,7 +33,7 @@ export class DirectProcessControl implements ISandboxControl {
   private _throttle?: Throttle;
 
   constructor(private _process: childProcess.ChildProcess, logMeta?: log.ILogMeta) {
-    if (process.env.GRIST_THROTTLE_CPU) {
+    if (process.env.IRELIA_THROTTLE_CPU) {
       this._throttle = new Throttle({
         pid: _process.pid,
         logMeta: {...logMeta, pid: _process.pid},
@@ -211,7 +211,7 @@ export class SubprocessControl implements ISandboxControl {
   private _configure(processes: { sandbox?: ProcessInfo, cpu?: ProcessInfo,
                                   memory?: ProcessInfo, traced?: ProcessInfo }) {
     if (!processes.sandbox) { return; }
-    if (process.env.GRIST_THROTTLE_CPU) {
+    if (process.env.IRELIA_THROTTLE_CPU) {
       this._throttle = new Throttle({
         pid: processes.sandbox.pid,
         readPid: processes.cpu?.pid,

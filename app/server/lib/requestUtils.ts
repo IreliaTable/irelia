@@ -10,12 +10,12 @@ import {Permit} from 'app/server/lib/Permit';
 import {Request, Response} from 'express';
 import {URL} from 'url';
 
-// log api details outside of dev environment (when GRIST_HOSTED_VERSION is set)
-const shouldLogApiDetails = Boolean(process.env.GRIST_HOSTED_VERSION);
+// log api details outside of dev environment (when IRELIA_HOSTED_VERSION is set)
+const shouldLogApiDetails = Boolean(process.env.IRELIA_HOSTED_VERSION);
 
 // Offset to https ports in dev/testing environment.
-export const TEST_HTTPS_OFFSET = process.env.GRIST_TEST_HTTPS_OFFSET ?
-  parseInt(process.env.GRIST_TEST_HTTPS_OFFSET, 10) : undefined;
+export const TEST_HTTPS_OFFSET = process.env.IRELIA_TEST_HTTPS_OFFSET ?
+  parseInt(process.env.IRELIA_TEST_HTTPS_OFFSET, 10) : undefined;
 
 // Database fields that we permit in entities but don't want to cross the api.
 const INTERNAL_FIELDS = new Set([
@@ -26,7 +26,7 @@ const INTERNAL_FIELDS = new Set([
 
 /**
  * Adapt a home-server or doc-worker URL to match the hostname in the request URL. For custom
- * domains and when GRIST_SERVE_SAME_ORIGIN is set, we replace the full hostname; otherwise just
+ * domains and when IRELIA_SERVE_SAME_ORIGIN is set, we replace the full hostname; otherwise just
  * the base of the hostname. The changes to url are made in-place.
  *
  * For dev purposes, port is kept but possibly adjusted for TEST_HTTPS_OFFSET. Note that if port
@@ -36,7 +36,7 @@ const INTERNAL_FIELDS = new Set([
 export function adaptServerUrl(url: URL, req: RequestWithOrg): void {
   const reqBaseDomain = parseSubdomain(req.hostname).base;
 
-  if (process.env.GRIST_SERVE_SAME_ORIGIN === 'true' || req.isCustomHost) {
+  if (process.env.IRELIA_SERVE_SAME_ORIGIN === 'true' || req.isCustomHost) {
     url.hostname = req.hostname;
   } else if (reqBaseDomain) {
     const subdomain: string|undefined = parseSubdomain(url.hostname).org || DEFAULT_HOME_SUBDOMAIN;
@@ -84,7 +84,7 @@ export function trustOrigin(req: Request, resp: Response): boolean {
   // Note that the request origin is undefined for non-CORS requests.
   const origin = req.get('origin');
   if (!origin) { return true; } // Not a CORS request.
-  if (process.env.GRIST_HOST && req.hostname === process.env.GRIST_HOST) { return true; }
+  if (process.env.IRELIA_HOST && req.hostname === process.env.IRELIA_HOST) { return true; }
   if (!allowHost(req, new URL(origin))) { return false; }
 
   // For a request to a custom domain, the full hostname must match.

@@ -26,7 +26,7 @@ import { OpenMode, SQLiteDB } from './SQLiteDB';
 const docIdRegex = /^[-=_\w~%]+$/;
 
 // Wait this long after a change to the document before trying to make a backup of it.
-const GRIST_BACKUP_DELAY_SECS = parseInt(process.env.GRIST_BACKUP_DELAY_SECS || '15', 10);
+const IRELIA_BACKUP_DELAY_SECS = parseInt(process.env.IRELIA_BACKUP_DELAY_SECS || '15', 10);
 
 // This constant controls how many pages of the database we back up in a single step.
 // The larger it is, the faster the backup overall, but the slower each step is.
@@ -58,7 +58,7 @@ export interface HostedStorageOptions {
 }
 
 const defaultOptions: HostedStorageOptions = {
-  secondsBeforePush: GRIST_BACKUP_DELAY_SECS,
+  secondsBeforePush: IRELIA_BACKUP_DELAY_SECS,
   secondsBeforeFirstRetry: 3.0,
   pushDocUpdateTimes: true
 };

@@ -74,7 +74,7 @@ describe('Authorizer', function() {
     this.timeout(5000);
     setUpDB(this);
     oldEnv = new testUtils.EnvironmentSnapshot();
-    process.env.GRIST_PROXY_AUTH_HEADER = 'X-email';
+    process.env.IRELIA_PROXY_AUTH_HEADER = 'X-email';
     await createInitialDb();
     await activateServer(server, docTools.getDocManager());
     await loadFixtureDocs();
@@ -270,7 +270,7 @@ describe('Authorizer', function() {
     assert.equal(parts.forkUserId, undefined);
   });
 
-  it("can set user via GRIST_PROXY_AUTH_HEADER", async function() {
+  it("can set user via IRELIA_PROXY_AUTH_HEADER", async function() {
     // User can access a doc by setting header.
     const docUrl = `${serverUrl}/o/pr/api/docs/sample_6`;
     const resp = await axios.get(docUrl, {

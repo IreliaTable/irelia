@@ -2,7 +2,7 @@
 
 /* eslint-disable max-len */
 
-export const GRIST_DOC_SQL = `
+export const IRELIA_DOC_SQL = `
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE IF NOT EXISTS "_grist_DocInfo" (id INTEGER PRIMARY KEY, "docId" TEXT DEFAULT '', "peers" TEXT DEFAULT '', "basketId" TEXT DEFAULT '', "schemaVersion" INTEGER DEFAULT 0, "timezone" TEXT DEFAULT '', "documentSettings" TEXT DEFAULT '');
@@ -38,7 +38,7 @@ CREATE INDEX _grist_Attachments_fileIdent ON _grist_Attachments(fileIdent);
 COMMIT;
 `;
 
-export const GRIST_DOC_WITH_TABLE1_SQL = `
+export const IRELIA_DOC_WITH_TABLE1_SQL = `
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE IF NOT EXISTS "_grist_DocInfo" (id INTEGER PRIMARY KEY, "docId" TEXT DEFAULT '', "peers" TEXT DEFAULT '', "basketId" TEXT DEFAULT '', "schemaVersion" INTEGER DEFAULT 0, "timezone" TEXT DEFAULT '', "documentSettings" TEXT DEFAULT '');

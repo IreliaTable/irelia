@@ -157,16 +157,16 @@ export class FlexServer implements GristServer {
     this.app = express();
     this.app.set('port', port);
     this.appRoot = getAppRoot();
-    this.host = process.env.GRIST_HOST || "localhost";
+    this.host = process.env.IRELIA_HOST || "localhost";
     log.info(`== Irelia version is ${version.version} (commit ${version.gitcommit})`);
     this.info.push(['appRoot', this.appRoot]);
     // This directory hold Grist documents.
     let docsRoot = path.resolve((this.options && this.options.dataDir) ||
-                                  process.env.GRIST_DATA_DIR ||
+                                  process.env.IRELIA_DATA_DIR ||
                                   getAppPathTo(this.appRoot, 'samples'));
     // In testing, it can be useful to separate out document roots used
     // by distinct FlexServers.
-    if (process.env.GRIST_TEST_ADD_PORT_TO_DOCS_ROOT === 'true') {
+    if (process.env.IRELIA_TEST_ADD_PORT_TO_DOCS_ROOT === 'true') {
       docsRoot = path.resolve(docsRoot, String(port));
     }
     // Create directory if it doesn't exist.
@@ -305,7 +305,7 @@ export class FlexServer implements GristServer {
 
   public addLogging() {
     if (this._check('logging')) { return; }
-    if (process.env.GRIST_LOG_SKIP_HTTP) { return; }
+    if (process.env.IRELIA_LOG_SKIP_HTTP) { return; }
     // Add a timestamp token that matches exactly the formatting of non-morgan logs.
     morganLogger.token('logTime', (req: Request) => log.timestamp());
     // Add an optional gristInfo token that can replace the url, if the url is sensitive.
@@ -325,7 +325,7 @@ export class FlexServer implements GristServer {
         host: tokens.host(req, res)
       });
     }
-    this.app.use(morganLogger(process.env.GRIST_HOSTED_VERSION ? outputJson : msg, {
+    this.app.use(morganLogger(process.env.IRELIA_HOSTED_VERSION ? outputJson : msg, {
       skip: this._shouldSkipRequestLogging.bind(this)
     }));
   }
@@ -406,7 +406,7 @@ export class FlexServer implements GristServer {
 
   public get instanceRoot() {
     if (!this._instanceRoot) {
-      this._instanceRoot = path.resolve(process.env.GRIST_INST_DIR || this.appRoot);
+      this._instanceRoot = path.resolve(process.env.IRELIA_INST_DIR || this.appRoot);
       this.info.push(['instanceRoot', this._instanceRoot]);
     }
     return this._instanceRoot;
@@ -468,7 +468,7 @@ export class FlexServer implements GristServer {
   public async initHomeDBManager() {
     if (this._check('homedb')) { return; }
     this._dbManager = new HomeDBManager();
-    this._dbManager.setPrefix(process.env.GRIST_ID_PREFIX || "");
+    this._dbManager.setPrefix(process.env.IRELIA_ID_PREFIX || "");
     await this._dbManager.connect();
     await this._dbManager.initializeSpecialIds();
     // Report which database we are using, without sensitive credentials.
@@ -666,12 +666,12 @@ export class FlexServer implements GristServer {
   }
 
   public async createWorkerUrl(): Promise<{url: string, host: string}> {
-    if (!process.env.GRIST_ROUTER_URL) {
+    if (!process.env.IRELIA_ROUTER_URL) {
       throw new Error('No service available to create worker url');
     }
-    const w = await axios.get(process.env.GRIST_ROUTER_URL,
+    const w = await axios.get(process.env.IRELIA_ROUTER_URL,
                               {params: {act: 'add', port: this.getOwnPort()}});
-    log.info(`DocWorker registered itself via ${process.env.GRIST_ROUTER_URL} as ${w.data.url}`);
+    log.info(`DocWorker registered itself via ${process.env.IRELIA_ROUTER_URL} as ${w.data.url}`);
     const statusUrl = `${w.data.url}/status`;
     // We now wait for the worker to be available from the url that clients will
     // use to connect to it.  This may take some time.  The main delay is the
@@ -722,7 +722,7 @@ export class FlexServer implements GristServer {
       baseDomain: this._defaultBaseDomain,
     });
 
-    const forcedLoginMiddleware = process.env.GRIST_FORCE_LOGIN === 'true' ?
+    const forcedLoginMiddleware = process.env.IRELIA_FORCE_LOGIN === 'true' ?
       this._redirectToLoginWithoutExceptionsMiddleware : noop;
 
     const welcomeNewUser: express.RequestHandler = isSingleUserMode() ?
@@ -744,7 +744,7 @@ export class FlexServer implements GristServer {
             recordSignUpEvent: true,
           }});
 
-          if (process.env.GRIST_SINGLE_ORG) {
+          if (process.env.IRELIA_SINGLE_ORG) {
             // Merged org is not meaningful in this case.
             return res.redirect(this.getHomeUrl(req));
           }
@@ -828,7 +828,7 @@ export class FlexServer implements GristServer {
 
     // TODO: We could include a third mock provider of login/logout URLs for better tests. Or we
     // could create a mock SAML identity provider for testing this using the SAML flow.
-    const loginSystem = await (process.env.GRIST_TEST_LOGIN ? getTestLoginSystem() : getLoginSystem());
+    const loginSystem = await (process.env.IRELIA_TEST_LOGIN ? getTestLoginSystem() : getLoginSystem());
     this._loginMiddleware = await loginSystem.getMiddleware(this);
     this._getLoginRedirectUrl = tbind(this._loginMiddleware.getLoginRedirectUrl, this._loginMiddleware);
     this._getSignUpRedirectUrl = tbind(this._loginMiddleware.getSignUpRedirectUrl, this._loginMiddleware);
@@ -902,14 +902,14 @@ export class FlexServer implements GristServer {
     if (allowTestLogin()) {
       // This is an endpoint for the dev environment that lets you log in as anyone.
       // For a standard dev environment, it will be accessible at localhost:8080/test/login
-      // and localhost:8080/o/<org>/test/login.  Only available when GRIST_TEST_LOGIN is set.
+      // and localhost:8080/o/<org>/test/login.  Only available when IRELIA_TEST_LOGIN is set.
       // Handy when without network connectivity to reach Cognito.
 
-      log.warn("Adding a /test/login endpoint because GRIST_TEST_LOGIN is set. " +
+      log.warn("Adding a /test/login endpoint because IRELIA_TEST_LOGIN is set. " +
         "Users will be able to login as anyone.");
 
       this.app.get('/test/login', expressWrap(async (req, res) => {
-        log.warn("Serving unauthenticated /test/login endpoint, made available because GRIST_TEST_LOGIN is set.");
+        log.warn("Serving unauthenticated /test/login endpoint, made available because IRELIA_TEST_LOGIN is set.");
 
         // Query parameter is called "username" for compatibility with Cognito.
         const email = optStringParam(req.query.username);
@@ -982,8 +982,8 @@ export class FlexServer implements GristServer {
   }
 
   public async addTestingHooks(workerServers?: FlexServer[]) {
-    if (process.env.GRIST_TESTING_SOCKET) {
-      await startTestingHooks(process.env.GRIST_TESTING_SOCKET, this.port, this._comm, this,
+    if (process.env.IRELIA_TESTING_SOCKET) {
+      await startTestingHooks(process.env.IRELIA_TESTING_SOCKET, this.port, this._comm, this,
                               workerServers || []);
       this._hasTestingHooks = true;
     }
@@ -1013,7 +1013,7 @@ export class FlexServer implements GristServer {
       const haveExternalStorage = Object.values(externalStorage.nested)
         .some(storage => storage.flag('active').getAsBool());
       const disabled = externalStorage.flag('disable')
-        .read({ envVar: 'GRIST_DISABLE_S3' }).getAsBool();
+        .read({ envVar: 'IRELIA_DISABLE_S3' }).getAsBool();
       if (disabled || !haveExternalStorage) {
         this._disableExternalStorage = true;
         externalStorage.flag('active').set(false);
@@ -1383,7 +1383,7 @@ export class FlexServer implements GristServer {
       // worker.  We only need to determine docWorkerId and this.worker once.
       if (!this.worker) {
 
-        if (process.env.GRIST_ROUTER_URL) {
+        if (process.env.IRELIA_ROUTER_URL) {
           // register ourselves with the load balancer first.
           const w = await this.createWorkerUrl();
           const url = `${w.url}/v/${this.tag}/`;
@@ -1397,18 +1397,18 @@ export class FlexServer implements GristServer {
           const url = (process.env.APP_DOC_URL || this.getOwnUrl()) + `/v/${this.tag}/`;
           this.worker = {
             // The worker id should be unique to this worker.
-            id: process.env.GRIST_DOC_WORKER_ID || `testDocWorkerId_${this.port}`,
+            id: process.env.IRELIA_DOC_WORKER_ID || `testDocWorkerId_${this.port}`,
             publicUrl: url,
             internalUrl: process.env.APP_DOC_INTERNAL_URL || url,
           };
         }
         this.info.push(['docWorkerId', this.worker.id]);
 
-        if (process.env.GRIST_WORKER_GROUP) {
-          this.worker.group = process.env.GRIST_WORKER_GROUP;
+        if (process.env.IRELIA_WORKER_GROUP) {
+          this.worker.group = process.env.IRELIA_WORKER_GROUP;
         }
       } else {
-        if (process.env.GRIST_ROUTER_URL) {
+        if (process.env.IRELIA_ROUTER_URL) {
           await this.createWorkerUrl();
         }
       }
@@ -1424,10 +1424,10 @@ export class FlexServer implements GristServer {
   private async _removeSelfAsWorker(workers: IDocWorkerMap, docWorkerId: string) {
     this._healthy = false;
     await workers.removeWorker(docWorkerId);
-    if (process.env.GRIST_ROUTER_URL) {
-      await axios.get(process.env.GRIST_ROUTER_URL,
+    if (process.env.IRELIA_ROUTER_URL) {
+      await axios.get(process.env.IRELIA_ROUTER_URL,
                       {params: {act: 'remove', port: this.getOwnPort()}});
-      log.info(`DocWorker unregistered itself via ${process.env.GRIST_ROUTER_URL}`);
+      log.info(`DocWorker unregistered itself via ${process.env.IRELIA_ROUTER_URL}`);
     }
   }
 
@@ -1559,7 +1559,7 @@ export class FlexServer implements GristServer {
   private async _addPluginManager() {
     if (this._pluginManager) { return this._pluginManager; }
     // Only used as {userRoot}/plugins as a place for plugins in addition to {appRoot}/plugins
-    const userRoot = path.resolve(process.env.GRIST_USER_ROOT || getAppPathTo(this.appRoot, '.grist'));
+    const userRoot = path.resolve(process.env.IRELIA_USER_ROOT || getAppPathTo(this.appRoot, '.grist'));
     this.info.push(['userRoot', userRoot]);
 
     const pluginManager = new PluginManager(this.appRoot, userRoot);
@@ -1606,10 +1606,10 @@ export class FlexServer implements GristServer {
     const server = configServer(http.createServer(this.app));
     let httpsServer;
     if (TEST_HTTPS_OFFSET) {
-      const certFile = process.env.GRIST_TEST_SSL_CERT;
-      const privateKeyFile = process.env.GRIST_TEST_SSL_KEY;
-      if (!certFile) { throw new Error('Set GRIST_TEST_SSL_CERT to location of certificate file'); }
-      if (!privateKeyFile) { throw new Error('Set GRIST_TEST_SSL_KEY to location of private key file'); }
+      const certFile = process.env.IRELIA_TEST_SSL_CERT;
+      const privateKeyFile = process.env.IRELIA_TEST_SSL_KEY;
+      if (!certFile) { throw new Error('Set IRELIA_TEST_SSL_CERT to location of certificate file'); }
+      if (!privateKeyFile) { throw new Error('Set IRELIA_TEST_SSL_KEY to location of private key file'); }
       log.debug(`https support: reading cert from ${certFile}`);
       log.debug(`https support: reading private key from ${privateKeyFile}`);
       httpsServer = configServer(https.createServer({
@@ -1705,7 +1705,7 @@ function configServer<T extends https.Server|http.Server>(server: T): T {
 
 // Returns true if environment is configured to allow unauthenticated test logins.
 function allowTestLogin() {
-  return Boolean(process.env.GRIST_TEST_LOGIN);
+  return Boolean(process.env.IRELIA_TEST_LOGIN);
 }
 
 // Check OPTIONS requests for allowed origins, and return heads to allow the browser to proceed

@@ -231,7 +231,7 @@ export function setupRequirement(options: TestSuiteOptions) {
       const api = gu.createHomeApi('support', 'docs');
       for (const suffix of ['', '2'] as const) {
         let orgName = `test${suffix}-grist`;
-        const deployment = process.env.GRIST_ID_PREFIX;
+        const deployment = process.env.IRELIA_ID_PREFIX;
         if (deployment) { orgName = `${orgName}-${deployment}`; }
         let isNew: boolean = false;
         try {

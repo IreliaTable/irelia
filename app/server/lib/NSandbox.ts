@@ -377,9 +377,9 @@ function isFlavor(flavor: string): flavor is keyof typeof spawners {
  * grist-core), and trying to regularize creation options a bit.
  *
  * The flavor of sandbox to use can be overridden by some environment variables:
- *   - GRIST_SANDBOX_FLAVOR: should be one of the spawners (pynbox, unsandboxed, docker,
+ *   - IRELIA_SANDBOX_FLAVOR: should be one of the spawners (pynbox, unsandboxed, docker,
  *     gvisor, macSandboxExec)
- *   - GRIST_SANDBOX: a program or image name to run as the sandbox.  Not needed for
+ *   - IRELIA_SANDBOX: a program or image name to run as the sandbox.  Not needed for
  *     pynbox (it is either built in or not available).  For unsandboxed, should be an
  *     absolute path to python within a virtualenv with all requirements installed.
  *     For docker, it should be `grist-docker-sandbox` (an image built via makefile
@@ -492,7 +492,7 @@ function pynbox(options: ISandboxOptions): SandboxProcess {
 }
 
 /**
- * Helper function to run python without sandboxing.  GRIST_SANDBOX should have
+ * Helper function to run python without sandboxing.  IRELIA_SANDBOX should have
  * been set with an absolute path to a version of python within a virtualenv that
  * has all the dependencies installed (e.g. the sandbox_venv3 virtualenv created
  * by `./build python3`.  Using system python works too, if all dependencies have
@@ -524,7 +524,7 @@ function unsandboxed(options: ISandboxOptions): SandboxProcess {
 
 /**
  * Helper function to run python in gvisor's runsc, with multiple
- * sandboxes run within the same container.  GRIST_SANDBOX should
+ * sandboxes run within the same container.  IRELIA_SANDBOX should
  * point to `sandbox/gvisor/run.py` (to map call onto gvisor's runsc
  * directly) or `wrap_in_docker.sh` (to use runsc within a container).
  * Be sure to read setup instructions in that directory.
@@ -577,28 +577,28 @@ function gvisor(options: ISandboxOptions): SandboxProcess {
   // if checkpoints are in use.
   const venv = path.join(process.cwd(),
                          pythonVersion === '2' ? 'venv' : 'sandbox_venv3');
-  const useCheckpoint = process.env.GRIST_CHECKPOINT && !paths.importDir;
+  const useCheckpoint = process.env.IRELIA_CHECKPOINT && !paths.importDir;
   if (fs.existsSync(venv) && !useCheckpoint) {
     wrapperArgs.addMount(venv);
     wrapperArgs.push('-s', path.join(venv, 'bin', 'python'));
   }
 
-  // For a regular sandbox not being used for importing, if GRIST_CHECKPOINT is set
-  // try to restore from it. If GRIST_CHECKPOINT_MAKE is set, try to recreate the
+  // For a regular sandbox not being used for importing, if IRELIA_CHECKPOINT is set
+  // try to restore from it. If IRELIA_CHECKPOINT_MAKE is set, try to recreate the
   // checkpoint (this is an awkward place to do it, but avoids mismatches
   // between the checkpoint and how it gets used later).
   // If a sandbox is being used for import, it will have a special mount we can't
   // deal with easily right now. Should be possible to do in future if desired.
   if (options.useGristEntrypoint && pythonVersion === '3' && useCheckpoint) {
-    if (process.env.GRIST_CHECKPOINT_MAKE) {
+    if (process.env.IRELIA_CHECKPOINT_MAKE) {
       const child =
-        spawn(command, [...wrapperArgs.get(), '--checkpoint', process.env.GRIST_CHECKPOINT!,
+        spawn(command, [...wrapperArgs.get(), '--checkpoint', process.env.IRELIA_CHECKPOINT!,
                         `python${pythonVersion}`, '--', ...pythonArgs]);
       // We don't want process control for this.
       return {child, control: new NoProcessControl(child)};
     }
     wrapperArgs.push('--restore');
-    wrapperArgs.push(process.env.GRIST_CHECKPOINT!);
+    wrapperArgs.push(process.env.IRELIA_CHECKPOINT!);
   }
   const child = spawn(command, [...wrapperArgs.get(), `python${pythonVersion}`, '--', ...pythonArgs]);
   // For gvisor under ptrace, main work is done by a traced process identifiable as
@@ -625,7 +625,7 @@ function gvisor(options: ISandboxOptions): SandboxProcess {
 
 /**
  * Helper function to run python in a container. Each sandbox run in a
- * distinct container.  GRIST_SANDBOX should be the name of an image where
+ * distinct container.  IRELIA_SANDBOX should be the name of an image where
  * `python` can be run and all Grist dependencies are installed.  See
  * `sandbox/docker` for more.
  */
@@ -891,14 +891,14 @@ function findPython(command: string|undefined, preferredVersion?: string) {
  *   2:pynbox,gvisor           # run python2 in pynbox, anything else in gvisor
  *   3:macSandboxExec,docker   # run python3 with sandbox-exec, anything else in docker
  * If no particular python version is desired, the first sandbox listed will be used.
- * The defaultFlavorSpec can be overridden by GRIST_SANDBOX_FLAVOR.
- * The commands run can be overridden by GRIST_SANDBOX2 (for python2), GRIST_SANDBOX3 (for python3),
- * or GRIST_SANDBOX (for either, if more specific variable is not specified).
+ * The defaultFlavorSpec can be overridden by IRELIA_SANDBOX_FLAVOR.
+ * The commands run can be overridden by IRELIA_SANDBOX2 (for python2), IRELIA_SANDBOX3 (for python3),
+ * or IRELIA_SANDBOX (for either, if more specific variable is not specified).
  * For documents with no preferred python version specified,
  * PYTHON_VERSION_ON_CREATION or PYTHON_VERSION is used.
  */
 export function createSandbox(defaultFlavorSpec: string, options: ISandboxCreationOptions): ISandbox {
-  const flavors = (process.env.GRIST_SANDBOX_FLAVOR || defaultFlavorSpec).split(',');
+  const flavors = (process.env.IRELIA_SANDBOX_FLAVOR || defaultFlavorSpec).split(',');
   const preferredPythonVersion = options.preferredPythonVersion ||
     process.env.PYTHON_VERSION_ON_CREATION ||
     process.env.PYTHON_VERSION;
@@ -912,8 +912,8 @@ export function createSandbox(defaultFlavorSpec: string, options: ISandboxCreati
       }
       const creator = new NSandboxCreator({
         defaultFlavor: flavor,
-        command: process.env['GRIST_SANDBOX' + (preferredPythonVersion||'')] ||
-          process.env['GRIST_SANDBOX'],
+        command: process.env['IRELIA_SANDBOX' + (preferredPythonVersion||'')] ||
+          process.env['IRELIA_SANDBOX'],
         preferredPythonVersion,
       });
       return creator.create(options);
