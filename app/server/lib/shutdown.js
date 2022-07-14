@@ -69,7 +69,7 @@ function runCleanupHandlers() {
  * signal, which will no longer get caught.
  */
 function signalExit(signal) {
-  var prog = 'grist[' + process.pid + ']';
+  var prog = 'irelia[' + process.pid + ']';
   log.info("Server %s got signal %s; cleaning up (%d handlers)",
     prog, signal, cleanupHandlers.length);
   function dup() {
@@ -104,7 +104,7 @@ exports.cleanupOnSignals = cleanupOnSignals;
  * Run cleanup handlers and exit the process with the given exit code (0 if omitted).
  */
 function exit(optExitCode) {
-  var prog = 'grist[' + process.pid + ']';
+  var prog = 'irelia[' + process.pid + ']';
   var code = optExitCode || 0;
   log.info("Server %s cleaning up", prog);
   return runCleanupHandlers()
