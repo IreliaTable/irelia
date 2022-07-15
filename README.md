@@ -1,6 +1,8 @@
+<div align="right">
+    <img src="/static/ui-icons/Logo/guinsoolab-badge.png" width="60" alt="badge">
+</div>
 <div align="center">
-    <img src="/static/ui-icons/Logo/GristLogo.svg" width=120 alt="logo" />
-    <br />
+    <img src="/static/ui-icons/Logo/GristLogo.svg" width="120" alt="logo" />
     <br />
     <small>a modern relational spreadsheet</small>
 </div>
