@@ -140,6 +140,6 @@ ENV \
   IRELIA_SANDBOX_FLAVOR=unsandboxed \
   TYPEORM_DATABASE=/persist/home.sqlite3
 
-EXPOSE 8585
+EXPOSE 8686
 
 CMD ./sandbox/run.sh

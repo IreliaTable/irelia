@@ -14,7 +14,7 @@ trap 'cleanup' EXIT
 trap 'echo "Exiting on SIGINT"; exit 1' INT
 trap 'echo "Exiting on SIGTERM"; exit 1' TERM
 
-PORT=8585
+PORT=8686
 DOCKER_CONTAINER=grist-core-test
 DOCKER_PID=""
 
@@ -47,7 +47,7 @@ echo ""
 echo "[server found]"
 
 TEST_ADD_SAMPLES=1 TEST_ACCOUNT_PASSWORD=not-needed \
-  HOME_URL=http://localhost:8585 \
+  HOME_URL=http://localhost:8686 \
   GRIST_SESSION_COOKIE=grist_test_cookie \
   GRIST_TEST_LOGIN=1 \
   NODE_PATH=_build:_build/stubs \
