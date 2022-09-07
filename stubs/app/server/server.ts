@@ -1,7 +1,7 @@
 /**
  * Main entrypoint for grist-core server.
  *
- * By default, starts up on port 8585.
+ * By default, starts up on port 8686.
  */
 
 import {isAffirmative} from 'app/common/gutil';
@@ -34,7 +34,7 @@ import {main as mergedServerMain} from 'app/server/mergedServerMain';
 import * as fse from 'fs-extra';
 
 const G = {
-  port: parseInt(process.env.PORT!, 10) || 8585,
+  port: parseInt(process.env.PORT!, 10) || 8686,
 };
 
 // Set a default for an environment variable.
