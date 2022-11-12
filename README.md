@@ -25,21 +25,9 @@ database to organize your data and make you more productive.
 
 ![overview-1](/static/img/overview-1.png)
 
-### Making charts
-
-![overview-2](/static/img/overview-2.png)
-
 ### Add widget
 
 ![overview-3](/static/img/overview-3.png)
-
-### Group data
-
-![overview-4](/static/img/overview-4.png)
-
-### Dynamic table
-
-![overview-5](/static/img/overview-5.png)
 
 ## Features
 
