@@ -1,8 +1,8 @@
 <div align="right">
-    <img src="/static/ui-icons/Logo/guinsoolab-badge.png" width="60" alt="badge">
+    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/ui-icons/Logo/guinsoolab-badge.png" width="60" alt="badge">
 </div>
 <div align="center">
-    <img src="/static/ui-icons/Logo/GristLogo.svg" width="120" alt="logo" />
+    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/ui-icons/Logo/GristLogo.svg" width="120" alt="logo" />
     <br />
     <small>a modern relational spreadsheet</small>
 </div>
@@ -12,7 +12,7 @@
 [Welcome](https://ciusji.gitbook.io/irelia/) |
 [Quickstart](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize) |
 [Document Management](https://ciusji.gitbook.io/irelia/managing-documents/create-a-document) |
-[Pag and Table](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data) |
+[Page and Table](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data) |
 [Using Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas) |
 [FAQ](https://ciusji.gitbook.io/irelia/appendix/faq)
 
@@ -23,11 +23,11 @@ database to organize your data and make you more productive.
 
 ### Trigger formula
 
-![overview-1](/static/img/overview-1.png)
+![overview-1](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/overview-1.png)
 
 ### Add widget
 
-![overview-3](/static/img/overview-3.png)
+![overview-3](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/overview-3.png)
 
 ## Features
 
