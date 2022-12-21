@@ -21,13 +21,7 @@ database to organize your data and make you more productive.
 
 ## Overview
 
-### Trigger formula
-
-![overview-1](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/overview-1.png)
-
-### Add widget
-
-![overview-3](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/overview-3.png)
+![overview](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia-ecosystem-v2.jpg)
 
 ## Features
 
