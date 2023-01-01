@@ -1559,7 +1559,7 @@ export class FlexServer implements GristServer {
   private async _addPluginManager() {
     if (this._pluginManager) { return this._pluginManager; }
     // Only used as {userRoot}/plugins as a place for plugins in addition to {appRoot}/plugins
-    const userRoot = path.resolve(process.env.IRELIA_USER_ROOT || getAppPathTo(this.appRoot, '.grist'));
+    const userRoot = path.resolve(process.env.IRELIA_USER_ROOT || getAppPathTo(this.appRoot, '.irelia'));
     this.info.push(['userRoot', userRoot]);
 
     const pluginManager = new PluginManager(this.appRoot, userRoot);

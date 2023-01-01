@@ -13,13 +13,13 @@
   --grist-color-dark: #262633 !important;
   --grist-color-dark-bg: #262633 !important;
   --grist-color-slate: #929299 !important;
-  --grist-color-light-green: #364151 !important;
-  --grist-color-dark-green: #364151 !important;
+  --grist-color-light-green: #1c507f !important;
+  --grist-color-dark-green: #1c507f !important;
   --grist-color-darker-green: #364151 !important;
   --grist-color-lighter-green: #b1ffe2 !important;
   --grist-color-lighter-blue: #87b2f9 !important;
   --grist-color-light-blue: #3B82F6 !important;
-  --grist-color-cursor: #364151 !important;
+  --grist-color-cursor: #1c507f !important;
   --grist-color-selection: rgba(22,179,120,0.15) !important;
   --grist-color-selection-opaque: #DCF4EB !important;
   --grist-color-selection-darker-opaque: #d6eee5 !important;
@@ -31,8 +31,8 @@
   --grist-color-backdrop: rgba(38,38,51,0.9) !important;
   --grist-label-text-bg: #FFFFFF !important;
   --grist-label-active-bg: #F0F0F0 !important;
-  --grist-primary-fg: #364151 !important;
-  --grist-primary-fg-hover: #1c507f !important;
+  --grist-primary-fg: #1c507f !important;
+  --grist-primary-fg-hover: #364151 !important;
   --grist-primary-bg: #ffffff !important;
   --grist-control-bg: #ffffff !important;
   --grist-control-fg: #364151 !important;

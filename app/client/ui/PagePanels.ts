@@ -203,7 +203,7 @@ const cssPageContainer = styled(cssVBox, `
   right: 0;
   bottom: 0;
   min-width: 600px;
-  background-color: ${colors.lightGrey};
+  // background-color: ${colors.lightGrey};
 
   @media ${mediaSmall} {
     & {
@@ -355,6 +355,7 @@ const cssBottomFooter = styled ('div', `
 const cssResizeFlexVHandle = styled(resizeFlexVHandle, `
   --resize-handle-color: ${colors.mediumGrey};
   --resize-handle-highlight: ${colors.lightGreen};
+  padding-top: 47px;
 
   @media print {
     & {

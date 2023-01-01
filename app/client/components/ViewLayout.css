@@ -96,8 +96,8 @@
 
 @media not print {
 .active_section > .view_data_pane_container {
-  box-shadow: -2px 0 0 0px var(--grist-color-light-green);
-  border-left: 1px solid var(--grist-color-light-green);
+  box-shadow: -2px 0 0 0px var(--grist-color-lighter-green);
+  border-left: 1px solid var(--grist-color-lighter-green);
 }
 
 .active_section > .view_data_pane_container.viewsection_type_detail {

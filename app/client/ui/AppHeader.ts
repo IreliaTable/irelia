@@ -2,16 +2,21 @@ import {urlState} from 'app/client/models/gristUrlState';
 import {getTheme} from 'app/client/ui/CustomThemes';
 import {cssLeftPane} from 'app/client/ui/PagePanels';
 import {colors, testId, vars} from 'app/client/ui2018/cssVars';
+// @ts-ignore
 import {shouldHideUiElement} from 'app/common/gristUrls';
 import * as version from 'app/common/version';
-import {BindableValue, Disposable, dom, styled} from "grainjs";
+import {BindableValue, Disposable, styled} from "grainjs";
+// @ts-ignore
 import {menu, menuItem, menuItemLink, menuSubHeader} from 'app/client/ui2018/menus';
 import {isTemplatesOrg, Organization, SUPPORT_EMAIL} from 'app/common/UserAPI';
 import {AppModel} from 'app/client/models/AppModel';
 import {icon} from 'app/client/ui2018/icons';
 import {DocPageModel} from 'app/client/models/DocPageModel';
+// @ts-ignore
 import * as roles from 'app/common/roles';
+// @ts-ignore
 import {manageTeamUsersApp} from 'app/client/ui/OpenUserManager';
+// @ts-ignore
 import {maybeAddSiteSwitcherSection} from 'app/client/ui/SiteSwitcher';
 import {DomContents} from 'grainjs';
 
@@ -27,8 +32,8 @@ const productPills: {[name: string]: string|null} = {
 };
 
 export class AppHeader extends Disposable {
-  constructor(private _orgName: BindableValue<string>, private _appModel: AppModel,
-              private _docPageModel?: DocPageModel) {
+  // @ts-ignore
+  constructor(private _orgName: BindableValue<string>, private _appModel: AppModel, private _docPageModel?: DocPageModel) {
     super();
   }
 
@@ -37,6 +42,7 @@ export class AppHeader extends Disposable {
 
     const user = this._appModel.currentValidUser;
     const currentOrg = this._appModel.currentOrg;
+    // @ts-ignore
     const isBillingManager = Boolean(currentOrg && currentOrg.billingAccount &&
       (currentOrg.billingAccount.isManager || user?.email === SUPPORT_EMAIL));
 
@@ -48,36 +54,36 @@ export class AppHeader extends Disposable {
         urlState().setLinkUrl({}),
         testId('dm-logo')
       ),
-      cssOrg(
-        cssOrgName(dom.text(this._orgName), testId('dm-orgname')),
-        productPill(currentOrg),
-        this._orgName && cssDropdownIcon('Dropdown'),
-        menu(() => [
-          menuSubHeader(`${this._appModel.isTeamSite ? 'Team' : 'Personal'} Site`, testId('orgmenu-title')),
-          menuItemLink(urlState().setLinkUrl({}), 'Home Page', testId('orgmenu-home-page')),
-
-          // Show 'Organization Settings' when on a home page of a valid org.
-          (!this._docPageModel && currentOrg && !currentOrg.owner ?
-            menuItem(() => manageTeamUsersApp(this._appModel),
-              'Manage Team', testId('orgmenu-manage-team'),
-              dom.cls('disabled', !roles.canEditAccess(currentOrg.access))) :
-            // Don't show on doc pages, or for personal orgs.
-            null),
-
-          // Show link to billing pages.
-          currentOrg && !currentOrg.owner && !shouldHideUiElement("billing") ?
-            // For links, disabling with just a class is hard; easier to just not make it a link.
-            // TODO weasel menus should support disabling menuItemLink.
-            (isBillingManager ?
-              menuItemLink(urlState().setLinkUrl({billing: 'billing'}), 'Billing Account') :
-              menuItem(() => null, 'Billing Account', dom.cls('disabled', true), testId('orgmenu-billing'))
-            ) :
-            null,
-
-          maybeAddSiteSwitcherSection(this._appModel),
-        ], { placement: 'bottom-start' }),
-        testId('dm-org'),
-      ),
+      // cssOrg(
+      //   cssOrgName(dom.text(this._orgName), testId('dm-orgname')),
+      //   productPill(currentOrg),
+      //   this._orgName && cssDropdownIcon('Dropdown'),
+      //   menu(() => [
+      //     menuSubHeader(`${this._appModel.isTeamSite ? 'Team' : 'Personal'} Site`, testId('orgmenu-title')),
+      //     menuItemLink(urlState().setLinkUrl({}), 'Home Page', testId('orgmenu-home-page')),
+      //
+      //     // Show 'Organization Settings' when on a home page of a valid org.
+      //     (!this._docPageModel && currentOrg && !currentOrg.owner ?
+      //       menuItem(() => manageTeamUsersApp(this._appModel),
+      //         'Manage Team', testId('orgmenu-manage-team'),
+      //         dom.cls('disabled', !roles.canEditAccess(currentOrg.access))) :
+      //       // Don't show on doc pages, or for personal orgs.
+      //       null),
+      //
+      //     // Show link to billing pages.
+      //     currentOrg && !currentOrg.owner && !shouldHideUiElement("billing") ?
+      //       // For links, disabling with just a class is hard; easier to just not make it a link.
+      //       // TODO weasel menus should support disabling menuItemLink.
+      //       (isBillingManager ?
+      //         menuItemLink(urlState().setLinkUrl({billing: 'billing'}), 'Billing Account') :
+      //         menuItem(() => null, 'Billing Account', dom.cls('disabled', true), testId('orgmenu-billing'))
+      //       ) :
+      //       null,
+      //
+      //     maybeAddSiteSwitcherSection(this._appModel),
+      //   ], { placement: 'bottom-start' }),
+      //   testId('dm-org'),
+      // ),
     );
   }
 }
@@ -136,11 +142,13 @@ const cssAppLogo = styled('a', `
   }
 `);
 
+// @ts-ignore
 const cssDropdownIcon = styled(icon, `
   flex-shrink: 0;
   margin-right: 8px;
 `);
 
+// @ts-ignore
 const cssOrg = styled('div', `
   display: flex;
   flex-grow: 1;
@@ -155,6 +163,7 @@ const cssOrg = styled('div', `
   }
 `);
 
+// @ts-ignore
 const cssOrgName = styled('div', `
   padding-left: 16px;
   padding-right: 8px;

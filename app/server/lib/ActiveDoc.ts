@@ -141,7 +141,7 @@ export const Deps = {ACTIVEDOC_TIMEOUT};
 /**
  * Represents an active document with the given name. The document isn't actually open until
  * either .loadDoc() or .createEmptyDoc() is called.
- * @param {String} docName - The document's filename, without the '.grist' extension.
+ * @param {String} docName - The document's filename, without the '.irelia' extension.
  */
 export class ActiveDoc extends EventEmitter {
   /**
