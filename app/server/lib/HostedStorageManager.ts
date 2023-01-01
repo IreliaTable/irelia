@@ -200,14 +200,14 @@ export class HostedStorageManager implements IDocStorageManager {
   }
 
   public getPath(docName: string): string {
-    return this.getAssetPath(docName) + '.grist';
+    return this.getAssetPath(docName) + '.irelia';
   }
 
   // Where to store files related to a document locally.  Document goes in <assetPath>.grist,
   // and other files go in <assetPath>/ directory.
   public getAssetPath(docName: string): string {
     checkValidDocId(docName);
-    return path.join(this._docsRoot, path.basename(docName, '.grist'));
+    return path.join(this._docsRoot, path.basename(docName, '.irelia'));
   }
 
   // We don't deal with sample docs
@@ -219,7 +219,7 @@ export class HostedStorageManager implements IDocStorageManager {
    * ever be used, but stripping seems better than asserting.)
    */
   public async getCanonicalDocName(altDocName: string): Promise<string> {
-    return path.basename(altDocName, '.grist');
+    return path.basename(altDocName, '.irelia');
   }
 
   /**

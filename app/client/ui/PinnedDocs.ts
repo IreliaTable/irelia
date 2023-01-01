@@ -180,7 +180,7 @@ const cssDocInitials = styled('div', `
   left: 20px;
   bottom: 20px;
   font-size: 32px;
-  border: 1px solid ${colors.lightGreen};
+  border: 1px solid ${colors.lightGrey};
   color: ${colors.mediumGreyOpaque};
   border-radius: 3px;
   padding: 4px 0;
@@ -267,5 +267,5 @@ const cssPublicIcon = styled(icon, `
   position: absolute;
   top: 16px;
   left: 16px;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${colors.lightGrey};
 `);

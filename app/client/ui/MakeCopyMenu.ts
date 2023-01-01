@@ -152,7 +152,7 @@ class SaveCopyModal extends Disposable {
     const api = this._app.api;
     const org = this._destOrg.get();
     const docWorker = await api.getWorkerAPI('import');
-    const destName = this._destName.get() + '.grist';
+    const destName = this._destName.get() + '.irelia';
     try {
       const uploadId = await docWorker.copyDoc(this._doc.id, this._asTemplate.get(), destName);
       const {id} = await docWorker.importDocToWorkspace(uploadId, ws.id);

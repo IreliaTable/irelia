@@ -32,20 +32,20 @@ export const colors = {
   darkGrey: new CustomProp('color-dark-grey', '#D9D9D9'),
 
   light: new CustomProp('color-light', '#FFFFFF'),
-  dark: new CustomProp('color-dark', '#364151'),
-  darkBg: new CustomProp('color-dark-bg', '#b8bdc4'),
+  dark: new CustomProp('color-dark', '#1f41c6'),
+  darkBg: new CustomProp('color-dark-bg', '#929299'),
   slate: new CustomProp('color-slate', '#929299'),
 
-  lightGreen: new CustomProp('color-light-green', '#364151'),
-  darkGreen: new CustomProp('color-dark-green', '#364151'),
-  darkerGreen: new CustomProp('color-darker-green', '#364151'),
-  lighterGreen: new CustomProp('color-lighter-green', '#b1ffe2'),
+  lightGreen: new CustomProp('color-light-green', '#235dff'),
+  darkGreen: new CustomProp('color-dark-green', '#1f41c6'),
+  darkerGreen: new CustomProp('color-darker-green', '#0e36d0'),
+  lighterGreen: new CustomProp('color-lighter-green', '#235dff'),
 
   lighterBlue: new CustomProp('color-lighter-blue', '#87b2f9'),
   lightBlue: new CustomProp('color-light-blue', '#3B82F6'),
   orange: new CustomProp('color-orange', '#F9AE41'),
 
-  cursor: new CustomProp('color-cursor', '#364151'),   // cursor is lightGreen
+  cursor: new CustomProp('color-cursor', '#3be3b2'),   // cursor is lightGreen
   selection: new CustomProp('color-selection', 'rgba(22,179,120,0.15)'),
   selectionOpaque: new CustomProp('color-selection-opaque', '#DCF4EB'),
   selectionDarkerOpaque: new CustomProp('color-selection-darker-opaque', '#d6eee5'),
@@ -100,13 +100,13 @@ export const vars = {
   loosePadding:   new CustomProp('loose-padding',  '5px 15px'),
 
   /* Control colors and borders */
-  primaryBg:        new CustomProp('primary-fg', '#364151'),
-  primaryBgHover:   new CustomProp('primary-fg-hover', '#1c507f'),
+  primaryBg:        new CustomProp('primary-fg', '#235dff'),
+  primaryBgHover:   new CustomProp('primary-fg-hover', '#235dff'),
   primaryFg:        new CustomProp('primary-bg', '#ffffff'),
 
   controlBg:      new CustomProp('control-bg', '#ffffff'),
-  controlFg:      new CustomProp('control-fg', '#364151'),
-  controlFgHover: new CustomProp('primary-fg-hover', '#1c507f'),
+  controlFg:      new CustomProp('control-fg', '#235dff'),
+  controlFgHover: new CustomProp('primary-fg-hover', '#235dff'),
 
   controlBorder:        new CustomProp('control-border', '1px solid #1c507f'),
   controlBorderRadius:  new CustomProp('border-radius', '4px'),

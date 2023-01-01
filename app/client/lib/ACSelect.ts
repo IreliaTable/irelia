@@ -110,7 +110,7 @@ const cssSelectItem = styled('li', `
   cursor: pointer;
 
   &.selected {
-    background-color: var(--weaseljs-selected-background-color, #5AC09C);
+    background-color: var(--weaseljs-selected-background-color, ${colors.lightGreen});
     color:            var(--weaseljs-selected-color, white);
   }
 `);

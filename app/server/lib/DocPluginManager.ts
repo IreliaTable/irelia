@@ -101,7 +101,7 @@ export class DocPluginManager {
       }
     }
 
-    if (path.extname(fileName) === '.grist') {
+    if (path.extname(fileName) === '.irelia') {
       throw new Error(`To import a grist document use the "Import document" menu option on your home screen`);
     }
 

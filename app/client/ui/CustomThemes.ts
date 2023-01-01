@@ -43,7 +43,7 @@ export function getTheme(flavor: ProductFlavor): CustomTheme {
 const cssEfcrBody = styled('body', `
   --icon-GristLogo: url("icons/logo-efcr.png");
   --grist-logo-bg: #009975;
-  --grist-color-light-green: #364151;
+  --grist-color-light-green: #1c507f;
   --grist-color-dark-green: #364151;
   --grist-primary-fg: #364151;
   --grist-primary-fg-hover: #364151;

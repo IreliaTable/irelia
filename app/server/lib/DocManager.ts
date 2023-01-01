@@ -542,7 +542,7 @@ export class DocManager extends EventEmitter {
                              }): Promise<DocCreationInfo> {
     try {
       const fileCount = uploadInfo.files.length;
-      const hasGristDoc = Boolean(uploadInfo.files.find(f => extname(f.origName) === '.grist'));
+      const hasGristDoc = Boolean(uploadInfo.files.find(f => extname(f.origName) === '.irelia'));
       if (hasGristDoc && fileCount > 1) {
         throw new Error('Grist docs must be uploaded individually');
       }
@@ -570,7 +570,7 @@ export class DocManager extends EventEmitter {
           throw new Error('naming mode not recognized');
       }
       await options.register?.(id, basename);
-      if (ext === '.grist') {
+      if (ext === '.irelia') {
         // If the import is a grist file, copy it to the docs directory.
         // TODO: We should be skeptical of the upload file to close a possible
         // security vulnerability. See https://phab.getgrist.com/T457.

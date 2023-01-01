@@ -48,7 +48,7 @@ export async function main(baseName: string) {
     }
     console.log("");
     console.log("export const IRELIA_" + version + "_SQL = `");
-    console.log((await execFile('sqlite3', [baseName + '.grist', '.dump'])).stdout.trim());
+    console.log((await execFile('sqlite3', [baseName + '.irelia', '.dump'])).stdout.trim());
     console.log("`;");
     await activeDoc.shutdown();
     await docManager.shutdownAll();
