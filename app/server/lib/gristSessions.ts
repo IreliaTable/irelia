@@ -105,7 +105,7 @@ export function getAllowedOrgForSessionID(sessionID: string): {org: string, host
 export function initGristSessions(instanceRoot: string, server: GristServer) {
   // TODO: We may need to evaluate the usage of space in the SQLite store grist-sessions.db
   // since entries are created on the first get request.
-  const sessionsDB: string = path.join(instanceRoot, 'grist-sessions.db');
+  const sessionsDB: string = path.join(instanceRoot, 'irelia-sessions.db');
 
   // The extra step with the creator function is used in server.js to create a new session store
   // after unpausing the server.

@@ -2,7 +2,7 @@
 ## The Irelia source can be extended. This is a stub that can be overridden
 ## from command line, as:
 ##   docker buildx build -t ... --build-context=ext=<path> .
-## The code in <path> will then be built along with the rest of Grist.
+## The code in <path> will then be built along with the rest of Irelia.
 ################################################################################
 FROM scratch as ext
 
@@ -14,7 +14,7 @@ FROM node:14-buster as builder
 
 # Install all node dependencies.
 WORKDIR /irelia
-COPY package.json yarn.lock /grist/
+COPY package.json yarn.lock /irelia/
 RUN yarn install --frozen-lockfile --verbose
 
 # Install any extra node dependencies (at root level, to avoid having to wrestle
@@ -26,12 +26,12 @@ RUN \
  { if [ -e package.json ] ; then yarn install --frozen-lockfile --modules-folder=/node_modules --verbose ; fi }
 
 # Build node code.
-COPY tsconfig.json /grist
-COPY tsconfig-ext.json /grist
-COPY test/tsconfig.json /grist/test/tsconfig.json
+COPY tsconfig.json /irelia
+COPY tsconfig-ext.json /irelia
+COPY test/tsconfig.json /irelia/test/tsconfig.json
 COPY app /irelia/app
-COPY stubs /grist/stubs
-COPY buildtools /grist/buildtools
+COPY stubs /irelia/stubs
+COPY buildtools /irelia/buildtools
 RUN yarn run build:prod
 
 ################################################################################
@@ -80,9 +80,9 @@ RUN mkdir -p /persist/docs
 
 # Copy node files.
 COPY --from=builder /node_modules /node_modules
-COPY --from=builder /irelia/node_modules /grist/node_modules
-COPY --from=builder /irelia/_build /grist/_build
-COPY --from=builder /irelia/static /grist/static-built
+COPY --from=builder /irelia/node_modules /irelia/node_modules
+COPY --from=builder /irelia/_build /irelia/_build
+COPY --from=builder /irelia/static /irelia/static-built
 
 # Copy python files.
 COPY --from=collector /usr/bin/python2.7 /usr/bin/python2.7
@@ -117,7 +117,7 @@ WORKDIR /irelia
 
 # Set some default environment variables to give a setup that works out of the box when
 # started as:
-#   docker run -p 8484:8484 -it <image>
+#   docker run -p 8686:8686 -it <image>
 # Variables will need to be overridden for other setups.
 #
 # IRELIA_SANDBOX_FLAVOR is set to unsandboxed by default, because it
