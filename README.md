@@ -9,17 +9,21 @@
 
 # Irelia
 
-[Welcome](https://ciusji.gitbook.io/irelia/) |
-[Quickstart](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize) |
-[Document Management](https://ciusji.gitbook.io/irelia/managing-documents/create-a-document) |
-[Page and Table](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data) |
-[Using Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas) |
-[FAQ](https://ciusji.gitbook.io/irelia/appendix/faq)
-
-Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a 
+> Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a 
 database to organize your data and make you more productive.
 
 ![overview](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia-ecosystem-v2.jpg)
+
+## Quickstart
+
+There are docker images set up for individual use, or (with some configuration) for self-hosting.
+
+```bash
+docker pull IreliaTable/irelia
+docker run -p 8484:8686 -it IreliaTable/irelia
+```
+
+Then visit `http://localhost:8686` in your browser. You'll be able to create, edit, import, and export documents.
 
 ## Features
 
@@ -64,8 +68,40 @@ Here are some specific feature highlights of Irelia:
       [gVisor](https://github.com/google/gvisor) sandboxing at the individual
       document level.
     - On OSX, you can use native sandboxing.
-    
-## Building from source
+
+## Documentation
+
+- [Tutorials](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize)
+- Managing Documents
+  - [Creating a Document](https://ciusji.gitbook.io/irelia/managing-documents/create-a-document)
+  - [Sharing a Document](https://ciusji.gitbook.io/irelia/managing-documents/sharing-a-document)
+  - [Copying a Document](https://ciusji.gitbook.io/irelia/managing-documents/copying-a-document)
+  - [Importing Data](https://ciusji.gitbook.io/irelia/managing-documents/importing-data)
+  - [Exports & Backups](https://ciusji.gitbook.io/irelia/managing-documents/exports-and-backups)
+  - [Document History](https://ciusji.gitbook.io/irelia/managing-documents/document-history)
+- Pages & Tables
+  - [Entering data](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data)
+  - [Pages & Widgets](https://ciusji.gitbook.io/irelia/pages-and-tables/pages-and-widgets)
+  - [Search & Sort & Filter](https://ciusji.gitbook.io/irelia/pages-and-tables/search-sort-and-filter)
+- Using Formulas
+  - [Intro to Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas)
+  - [Python Versions](https://ciusji.gitbook.io/irelia/using-formulas/python-versions)
+  - [Function Reference](https://ciusji.gitbook.io/irelia/using-formulas/function-reference)
+- Templates 🔥 
+  - [Personal](https://ciusji.gitbook.io/irelia/templates/personal)
+  - [Business](https://ciusji.gitbook.io/irelia/templates/business)
+  - [Industry](https://ciusji.gitbook.io/irelia/templates/industry)
+  - [Funding](https://ciusji.gitbook.io/irelia/templates/funding)
+  - [Finance](https://ciusji.gitbook.io/irelia/templates/finance)
+  - [Sales](https://ciusji.gitbook.io/irelia/templates/sales)
+  - [Customers](https://ciusji.gitbook.io/irelia/templates/customers)
+- Appendix
+  - [Ecosystem](https://ciusji.gitbook.io/irelia/ecosystem/ecosystem)
+  - [Solutions](https://ciusji.gitbook.io/irelia/solutions/solutions)
+  - [FAQs](https://ciusji.gitbook.io/irelia/appendix/faq)
+  - [Help](https://ciusji.gitbook.io/irelia/appendix/help)
+  
+## Building From Source
 
 To build Irelia from source, follow these steps:
 
@@ -84,8 +120,7 @@ You can configure sandboxing using a `IRELIA_SANDBOX_FLAVOR` environment variabl
 * On Linux with [gVisor's runsc](https://github.com/google/gvisor)
   installed, `export IRELIA_SANDBOX_FLAVOR=gvisor` is an option.
 
-
-## Environment variables
+## Environment Variables
 
 Irelia can be configured in many ways. Here are the main environment variables it is sensitive to:
 
@@ -139,38 +174,6 @@ IRELIA_SANDBOX_FLAVOR | can be pynbox, unsandboxed, docker, or macSandboxExec. I
 IRELIA_SANDBOX | a program or image name to run as the sandbox. See NSandbox.ts for nerdy details.
 PYTHON_VERSION | can be 2 or 3. If set, documents without an engine setting are assumed to use the specified version of python. Not all sandboxes support all versions.
 PYTHON_VERSION_ON_CREATION | can be 2 or 3. If set, newly created documents have an engine setting set to python2 or python3. Not all sandboxes support all versions.
-
-Google Drive integrations:
-
-Variable | Purpose
--------- | -------
-GOOGLE_CLIENT_ID    | set to the Google Client Id to be used with Google API client
-GOOGLE_CLIENT_SECRET| set to the Google Client Secret to be used with Google API client
-GOOGLE_API_KEY      | set to the Google API Key to be used with Google API client (accessing public files)
-GOOGLE_DRIVE_SCOPE  | set to the scope requested for Google Drive integration (defaults to drive.file)
-
-Database variables:
-
-Variable | Purpose
--------- | -------
-TYPEORM_DATABASE | database filename for sqlite or database name for other db types
-TYPEORM_HOST     | host for db
-TYPEORM_LOGGING  | set to 'true' to see all sql queries
-TYPEORM_PASSWORD | password to use
-TYPEORM_PORT     | port number for db if not the default for that db type
-TYPEORM_TYPE     | set to 'sqlite' or 'postgres'
-TYPEORM_USERNAME | username to connect as
-
-Testing:
-
-Variable | Purpose
--------- | -------
-IRELIA_TESTING_SOCKET | a socket used for out-of-channel communication during tests only.
-IRELIA_TEST_HTTPS_OFFSET | if set, adds https ports at the specified offset.  This is useful in testing.
-IRELIA_TEST_SSL_CERT | if set, contains filename of SSL certificate.
-IRELIA_TEST_SSL_KEY  | if set, contains filename of SSL private key.
-IRELIA_TEST_LOGIN    | allow fake unauthenticated test logins (suitable for dev environment only).
-IRELIA_TEST_ROUTER | if set, then the home server will serve a mock version of router api at /test/router
 
 ## License
 
