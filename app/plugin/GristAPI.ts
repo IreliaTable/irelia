@@ -97,6 +97,11 @@ export interface GristDocAPI {
   applyUserActions(actions: any[][], options?: any): Promise<any>;
   // TODO: return type should be Promise<ApplyUAResult>, but this requires importing
   // modules from `app/common` which is not currently supported by the build.
+
+  /**
+   * Get a token for out-of-band access to the document.
+   */
+  getAccessToken(options: AccessTokenOptions): Promise<AccessTokenResult>;
 }
 
 /**
@@ -126,4 +131,42 @@ export interface GristView {
    * Set the list of selected rows to be used against any linked widget. Requires `allowSelectBy()`.
    */
   setSelectedRows(rowIds: number[]): Promise<void>;
+}
+
+/**
+ * Options when creating access tokens.
+ */
+export interface AccessTokenOptions {
+  /** Restrict use of token to reading only */
+  readOnly?: boolean;
+}
+
+/**
+ * Access token information, including the token string itself, a base URL for
+ * API calls for which the access token can be used, and the time-to-live the
+ * token was created with.
+ */
+export interface AccessTokenResult {
+  /**
+   * The token string, which can currently be provided in an api call as a
+   * query parameter called "auth"
+   */
+  token: string;
+
+  /**
+   * The base url of the API for which the token can be used. Currently tokens
+   * are associated with a single document, so the base url will be something
+   * like `https://..../api/docs/DOCID`
+   *
+   * Access tokens currently only grant access to endpoints dealing with the
+   * internal content of a document (such as tables and cells) and not its
+   * metadata (such as the document name or who it is shared with).
+   */
+  baseUrl: string;
+
+  /**
+   * Number of milliseconds the access token will remain valid for
+   * after creation. This will be several minutes.
+   */
+  ttlMsecs: number;
 }

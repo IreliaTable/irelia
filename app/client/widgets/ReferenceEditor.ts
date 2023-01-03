@@ -1,11 +1,11 @@
-import { ACResults, buildHighlightedDom, HighlightFunc } from 'app/client/lib/ACIndex';
+import { ACResults, buildHighlightedDom, normalizeText, HighlightFunc } from 'app/client/lib/ACIndex';
 import { Autocomplete } from 'app/client/lib/autocomplete';
 import { ICellItem } from 'app/client/models/ColumnACIndexes';
 import { reportError } from 'app/client/models/errors';
-import { colors, testId, vars } from 'app/client/ui2018/cssVars';
+import { colors, testId, theme, vars } from 'app/client/ui2018/cssVars';
 import { icon } from 'app/client/ui2018/icons';
 import { menuCssClass } from 'app/client/ui2018/menus';
-import { Options } from 'app/client/widgets/NewBaseEditor';
+import { FieldOptions } from 'app/client/widgets/NewBaseEditor';
 import { NTextEditor } from 'app/client/widgets/NTextEditor';
 import { nocaseEqual, ReferenceUtils } from 'app/client/lib/ReferenceUtils';
 import { undef } from 'app/common/gutil';
@@ -21,7 +21,7 @@ export class ReferenceEditor extends NTextEditor {
   private _autocomplete?: Autocomplete<ICellItem>;
   private _utils: ReferenceUtils;
 
-  constructor(options: Options) {
+  constructor(options: FieldOptions) {
     super(options);
 
     const docData = options.gristDoc.docData;
@@ -115,7 +115,7 @@ export class ReferenceEditor extends NTextEditor {
     this._showAddNew = false;
     if (!this._enableAddNew || !text) { return result; }
 
-    const cleanText = text.trim().toLowerCase();
+    const cleanText = normalizeText(text);
     if (result.items.find((item) => item.cleanText === cleanText)) {
       return result;
     }
@@ -171,25 +171,26 @@ const cssRefItem = styled('li', `
   outline: none;
   padding: var(--weaseljs-menu-item-padding, 8px 24px);
   cursor: pointer;
+  color: ${theme.menuItemFg};
 
   &.selected {
-    background-color: var(--weaseljs-selected-background-color, ${colors.lightGreen});
-    color:            var(--weaseljs-selected-color, white);
+    background-color: ${theme.menuItemSelectedBg};
+    color:            ${theme.menuItemSelectedFg};
   }
   &-with-new {
     scroll-margin-bottom: ${addNewHeight};
   }
   &-new {
-    color: ${colors.slate};
+    color: ${theme.lightText};
     position: sticky;
     bottom: 0px;
     height: ${addNewHeight};
-    background-color: white;
-    border-top: 1px solid ${colors.mediumGrey};
+    background-color: ${theme.menuBg};
+    border-top: 1px solid ${theme.menuBorder};
     scroll-margin-bottom: initial;
   }
   &-new.selected {
-    color: ${colors.lightGrey};
+    color: ${theme.menuItemSelectedFg};
   }
 `);
 
@@ -221,8 +222,8 @@ const cssRefEditIcon = styled(icon, `
 `);
 
 const cssMatchText = styled('span', `
-  color: ${colors.lightGreen};
+  color: ${theme.autocompleteMatchText};
   .selected > & {
-    color: ${colors.lighterGreen};
+    color: ${theme.autocompleteSelectedMatchText};
   }
 `);

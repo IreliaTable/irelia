@@ -2,7 +2,7 @@ import {LocalPlugin} from 'app/common/plugin';
 import {BaseComponent, createRpcLogger} from 'app/common/PluginInstance';
 import {GristServer} from 'app/server/lib/GristServer';
 import {ISandbox} from 'app/server/lib/ISandbox';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {IMsgCustom, IMsgRpcCall} from 'grain-rpc';
 
 // TODO safePython component should be able to call other components function
@@ -16,7 +16,7 @@ import {IMsgCustom, IMsgRpcCall} from 'grain-rpc';
  */
 export class SafePythonComponent extends BaseComponent {
 
-  private _sandbox: ISandbox;
+  private _sandbox?: ISandbox;
   private _logMeta: log.ILogMeta;
 
   // safe python component does not need pluginInstance.rpc because it is not possible to forward
@@ -41,6 +41,7 @@ export class SafePythonComponent extends BaseComponent {
       importMount: this._tmpDir,
       logTimes: true,
       logMeta: this._logMeta,
+      preferredPythonVersion: '3',
     });
   }
 

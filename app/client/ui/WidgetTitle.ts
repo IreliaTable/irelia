@@ -1,7 +1,8 @@
+import {makeT} from 'app/client/lib/localization';
 import {FocusLayer} from 'app/client/lib/FocusLayer';
 import {ViewSectionRec} from 'app/client/models/entities/ViewSectionRec';
 import {basicButton, cssButton, primaryButton} from 'app/client/ui2018/buttons';
-import {colors, vars} from 'app/client/ui2018/cssVars';
+import {theme, vars} from 'app/client/ui2018/cssVars';
 import {cssTextInput} from 'app/client/ui2018/editableLabel';
 import {menuCssClass} from 'app/client/ui2018/menus';
 import {ModalControl} from 'app/client/ui2018/modals';
@@ -9,6 +10,7 @@ import {Computed, dom, DomElementArg, IInputOptions, input, makeTestId, Observab
 import {IOpenController, setPopupToCreateDom} from 'popweasel';
 
 const testId = makeTestId('test-widget-title-');
+const t = makeT('WidgetTitle');
 
 interface WidgetTitleOptions {
   tableNameHidden?: boolean,
@@ -43,7 +45,8 @@ export function buildRenameWidget(
           attach: 'body',
           boundaries: 'viewport',
         });
-      }
+      },
+      dom.on('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); }),
     ),
     ...args
   );
@@ -64,7 +67,7 @@ function buildWidgetRenamePopup(ctrl: IOpenController, vs: ViewSectionRec, optio
   // Placeholder for widget title:
   // - when widget title is empty shows a default widget title (what would be shown when title is empty)
   // - when widget title is set, shows just a text to override it.
-  const inputWidgetPlaceholder = !vs.title.peek() ? 'Override widget title' : vs.defaultWidgetTitle.peek();
+  const inputWidgetPlaceholder = !vs.title.peek() ? t('OverrideTitle') : vs.defaultWidgetTitle.peek();
 
   const disableSave = Computed.create(ctrl, (use) => {
     const newTableName = use(inputTableName)?.trim() ?? '';
@@ -134,29 +137,29 @@ function buildWidgetRenamePopup(ctrl: IOpenController, vs: ViewSectionRec, optio
     testId('popup'),
     dom.cls(menuCssClass),
     dom.maybe(!options.tableNameHidden, () => [
-      cssLabel('DATA TABLE NAME'),
+      cssLabel(t('DataTableName')),
       // Update tableName on key stroke - this will show the default widget name as we type.
       // above this modal.
       tableInput = cssInput(
         inputTableName,
         updateOnKey,
-        {disabled: isSummary, placeholder: 'Provide a table name'},
+        {disabled: isSummary, placeholder: t('NewTableName')},
         testId('table-name-input')
       ),
     ]),
     dom.maybe(!options.widgetNameHidden, () => [
-      cssLabel('WIDGET TITLE'),
+      cssLabel(t('WidgetTitle')),
       widgetInput = cssInput(inputWidgetTitle, updateOnKey, {placeholder: inputWidgetPlaceholder},
         testId('section-name-input')
       ),
     ]),
     cssButtons(
-      primaryButton('Save',
+      primaryButton(t('Save'),
         dom.on('click', doSave),
         dom.boolAttr('disabled', use => use(disableSave) || use(modalCtl.workInProgress)),
         testId('save'),
       ),
-      basicButton('Cancel',
+      basicButton(t('Cancel'),
         testId('cancel'),
         dom.on('click', () => modalCtl.close())
       ),
@@ -188,7 +191,7 @@ const cssTitle = styled('div', `
   text-overflow: ellipsis;
   align-self: start;
   &:hover {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
   }
   &-empty {
     min-width: 48px;
@@ -201,12 +204,13 @@ const cssRenamePopup = styled('div', `
   flex-direction: column;
   min-width: 280px;
   padding: 16px;
-  background-color: white;
+  background-color: ${theme.popupBg};
   border-radius: 2px;
   outline: none;
 `);
 
 const cssLabel = styled('label', `
+  color: ${theme.text};
   font-size: ${vars.xsmallFontSize};
   font-weight: ${vars.bigControlTextWeight};
   margin: 0 0 8px 0;
@@ -234,10 +238,15 @@ const cssInput = styled((
   opts: IInputOptions,
   ...args) => input(obs, opts, cssTextInput.cls(''), ...args), `
   text-overflow: ellipsis;
+  color: ${theme.inputFg};
+  background-color: transparent;
   &:disabled {
-    color: ${colors.slate};
-    background-color: ${colors.lightGrey};
+    color: ${theme.inputDisabledFg};
+    background-color: ${theme.inputDisabledBg};
     pointer-events: none;
+  }
+  &::placeholder {
+    color: ${theme.inputPlaceholderFg};
   }
   .${cssInputWithIcon.className} > &:disabled {
     padding-right: 28px;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This defines a IRELIA_CHECKPOINT environment variable, where we will store
+# This defines a GRIST_CHECKPOINT environment variable, where we will store
 # a sandbox checkpoint. The path is in principle arbitrary. In practice,
 # it is helpful if it lies outside of the Grist repo (to avoid permission
 # problems with docker users), but is distinct for each possible location
@@ -11,7 +11,7 @@
 # "mainstream" unpatched gvisor for Grist. If gvisor is unpatched
 # (does not have the --unprivileged flag from
 # https://github.com/google/gvisor/issues/4371#issuecomment-700917549)
-# then we do not define IRELIA_CHECKPOINT and checkpoints will not be
+# then we do not define GRIST_CHECKPOINT and checkpoints will not be
 # used. If the host is linux, performance seems just fine; in other
 # configurations we've seen about a second delay in initial load of
 # python due to a relatively sluggish file system.
@@ -44,5 +44,5 @@ check_gvisor --unprivileged
 if [[ -z "$GVISOR_FLAGS" ]]; then
   check_gvisor --rootless
 else
-  export IRELIA_CHECKPOINT=/tmp/engine_$(echo $PWD | sed "s/[^a-zA-Z0-9]/_/g")
+  export GRIST_CHECKPOINT=/tmp/engine_$(echo $PWD | sed "s/[^a-zA-Z0-9]/_/g")
 fi

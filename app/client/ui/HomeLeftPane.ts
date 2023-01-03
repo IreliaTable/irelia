@@ -1,3 +1,4 @@
+import {makeT} from 'app/client/lib/localization';
 import {loadUserManager} from 'app/client/lib/imports';
 import {ImportSourceElement} from 'app/client/lib/ImportSourceElement';
 import {reportError} from 'app/client/models/AppModel';
@@ -6,11 +7,12 @@ import {HomeModel} from 'app/client/models/HomeModel';
 import {getWorkspaceInfo, workspaceName} from 'app/client/models/WorkspaceInfo';
 import {addNewButton, cssAddNewButton} from 'app/client/ui/AddNewButton';
 import {docImport, importFromPlugin} from 'app/client/ui/HomeImports';
-import {cssLinkText, cssPageEntry, cssPageIcon, cssPageLink} from 'app/client/ui/LeftPanelCommon';
+import {cssLinkText, cssPageEntry, cssPageIcon, cssPageLink, cssSpacer} from 'app/client/ui/LeftPanelCommon';
+import {createVideoTourToolsButton} from 'app/client/ui/OpenVideoTour';
 import {transientInput} from 'app/client/ui/transientInput';
-import {colors, testId} from 'app/client/ui2018/cssVars';
+import {testId, theme} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
-import {menu, menuIcon, menuItem, upgradableMenuItem} from 'app/client/ui2018/menus';
+import {menu, menuIcon, menuItem, upgradableMenuItem, upgradeText} from 'app/client/ui2018/menus';
 import {confirmModal} from 'app/client/ui2018/modals';
 import {shouldHideUiElement} from 'app/common/gristUrls';
 import * as roles from 'app/common/roles';
@@ -18,6 +20,8 @@ import {Workspace} from 'app/common/UserAPI';
 import {computed, dom, domComputed, DomElementArg, observable, Observable, styled} from 'grainjs';
 import {createHelpTools, cssLeftPanel, cssScrollPane,
         cssSectionHeader, cssTools} from 'app/client/ui/LeftPanelCommon';
+
+const t = makeT('HomeLeftPane');
 
 export function createHomeLeftPane(leftPanelOpen: Observable<boolean>, home: HomeModel) {
   const creating = observable<boolean>(false);
@@ -38,19 +42,21 @@ export function createHomeLeftPane(leftPanelOpen: Observable<boolean>, home: Hom
       cssPageEntry(
         cssPageEntry.cls('-selected', (use) => use(home.currentPage) === "all"),
         cssPageLink(cssPageIcon('Home'),
-          cssLinkText('All Documents'),
+          cssLinkText(t('AllDocuments')),
           urlState().setLinkUrl({ws: undefined, homePage: undefined}),
           testId('dm-all-docs'),
         ),
       ),
       dom.maybe(use => !use(home.singleWorkspace), () =>
-        cssSectionHeader('Workspaces',
+        cssSectionHeader(
+          t('Workspaces'),
           // Give it a testId, because it's a good element to simulate "click-away" in tests.
           testId('dm-ws-label')
         ),
       ),
       dom.forEach(home.workspaces, (ws) => {
         if (ws.isSupportWorkspace) { return null; }
+        const info = getWorkspaceInfo(home.app, ws);
         const isTrivial = computed((use) => Boolean(getWorkspaceInfo(home.app, ws).isDefault &&
                                                     use(home.singleWorkspace)));
         // TODO: Introduce a "SwitchSelector" pattern to avoid the need for N computeds (and N
@@ -64,7 +70,10 @@ export function createHomeLeftPane(leftPanelOpen: Observable<boolean>, home: Hom
           cssPageLink(cssPageIcon('Folder'), cssLinkText(workspaceName(home.app, ws)),
             dom.hide(isRenaming),
             urlState().setLinkUrl({ws: ws.id}),
-            cssMenuTrigger(icon('Dots'),
+            // Don't show menu if workspace is personal and shared by another user; we could
+            // be a bit more nuanced here, but as of today the menu isn't particularly useful
+            // as all the menu options are disabled.
+            !info.self && info.owner ? null : cssMenuTrigger(icon('Dots'),
               menu(() => workspaceMenu(home, ws, renaming),
                 {placement: 'bottom-start', parentSelectorToMark: '.' + cssPageEntry.className}),
 
@@ -99,18 +108,20 @@ export function createHomeLeftPane(leftPanelOpen: Observable<boolean>, home: Hom
         cssPageEntry(
           dom.hide(shouldHideUiElement("templates")),
           cssPageEntry.cls('-selected', (use) => use(home.currentPage) === "templates"),
-          cssPageLink(cssPageIcon('FieldTable'), cssLinkText("Examples & Templates"),
+          cssPageLink(cssPageIcon('FieldTable'), cssLinkText(t("ExamplesAndTemplates")),
             urlState().setLinkUrl({homePage: "templates"}),
             testId('dm-templates-page'),
           ),
         ),
         cssPageEntry(
           cssPageEntry.cls('-selected', (use) => use(home.currentPage) === "trash"),
-          cssPageLink(cssPageIcon('Remove'), cssLinkText("Trash"),
+          cssPageLink(cssPageIcon('Remove'), cssLinkText(t("Trash")),
             urlState().setLinkUrl({homePage: "trash"}),
             testId('dm-trash'),
           ),
         ),
+        cssSpacer(),
+        createVideoTourToolsButton(),
         createHelpTools(home.app),
       )
     )
@@ -165,11 +176,11 @@ function addMenu(home: HomeModel, creating: Observable<boolean>): DomElementArg[
   const needUpgrade = home.app.currentFeatures.maxWorkspacesPerOrg === 1;
 
   return [
-    menuItem(() => createDocAndOpen(home), menuIcon('Page'), "Create Empty Document",
+    menuItem(() => createDocAndOpen(home), menuIcon('Page'), t("CreateEmptyDocument"),
       dom.cls('disabled', !home.newDocWorkspace.get()),
       testId("dm-new-doc")
     ),
-    menuItem(() => importDocAndOpen(home), menuIcon('Import'), "Import Document",
+    menuItem(() => importDocAndOpen(home), menuIcon('Import'), t("ImportDocument"),
       dom.cls('disabled', !home.newDocWorkspace.get()),
       testId("dm-import")
     ),
@@ -184,19 +195,19 @@ function addMenu(home: HomeModel, creating: Observable<boolean>): DomElementArg[
     ])),
     // For workspaces: if ACL says we can create them, but product says we can't,
     // then offer an upgrade link.
-    upgradableMenuItem(needUpgrade, () => creating.set(true), menuIcon('Folder'), "Create Workspace",
+    upgradableMenuItem(needUpgrade, () => creating.set(true), menuIcon('Folder'), t("CreateWorkspace"),
              dom.cls('disabled', (use) => !roles.canEdit(orgAccess) || !use(home.available)),
              testId("dm-new-workspace")
     ),
-    // upgradeText(needUpgrade),
+    upgradeText(needUpgrade, () => home.app.showUpgradeModal()),
   ];
 }
 
 function workspaceMenu(home: HomeModel, ws: Workspace, renaming: Observable<Workspace|null>) {
   function deleteWorkspace() {
-    confirmModal(`Delete ${ws.name} and all included documents?`, 'Delete',
+    confirmModal(t('WorkspaceDeleteTitle', {workspace: ws.name}), t('Delete'),
       () => home.deleteWorkspace(ws.id, false),
-      'Workspace will be moved to Trash.');
+      t('WorkspaceDeleteText'));
   }
 
   async function manageWorkspaceUsers() {
@@ -214,16 +225,19 @@ function workspaceMenu(home: HomeModel, ws: Workspace, renaming: Observable<Work
   const needUpgrade = home.app.currentFeatures.maxWorkspacesPerOrg === 1;
 
   return [
-    upgradableMenuItem(needUpgrade, () => renaming.set(ws), "Rename",
+    upgradableMenuItem(needUpgrade, () => renaming.set(ws), t("Rename"),
       dom.cls('disabled', !roles.canEdit(ws.access)),
       testId('dm-rename-workspace')),
-    upgradableMenuItem(needUpgrade, deleteWorkspace, "Delete",
+    upgradableMenuItem(needUpgrade, deleteWorkspace, t("Delete"),
       dom.cls('disabled', user => !roles.canEdit(ws.access)),
       testId('dm-delete-workspace')),
-    upgradableMenuItem(needUpgrade, manageWorkspaceUsers,
-      roles.canEditAccess(ws.access) ? "Manage Users" : "Access Details",
+    // TODO: Personal plans can't currently share workspaces, but that restriction
+    // should formally be documented and defined in `Features`, with this check updated
+    // to look there instead.
+    home.app.isPersonal ? null : upgradableMenuItem(needUpgrade, manageWorkspaceUsers,
+      roles.canEditAccess(ws.access) ? t("ManageUsers") : t("AccessDetails"),
       testId('dm-workspace-access')),
-    // upgradeText(needUpgrade),
+    upgradeText(needUpgrade, () => home.app.showUpgradeModal()),
   ];
 }
 
@@ -237,7 +251,7 @@ export const cssEditorInput = styled(transientInput, `
   height: 24px;
   flex: 1 1 0px;
   min-width: 0px;
-  color: initial;
+  background-color: ${theme.inputBg};
   margin-right: 16px;
   font-size: inherit;
 `);
@@ -255,9 +269,9 @@ const cssMenuTrigger = styled('div', `
     display: block;
   }
   &:hover, &.weasel-popup-open {
-    background-color: ${colors.darkGrey};
+    background-color: ${theme.pageOptionsHoverBg};
   }
   .${cssPageEntry.className}-selected &:hover, .${cssPageEntry.className}-selected &.weasel-popup-open {
-    background-color: ${colors.slate};
+    background-color: ${theme.pageOptionsSelectedHoverBg};
   }
 `);

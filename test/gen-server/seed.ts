@@ -106,6 +106,17 @@ export const exampleOrgs = [
     ]
   },
   {
+    name: 'Charonland',
+    workspaces: [
+      {
+        name: 'Home',
+        docs: []
+      }
+    ],
+    // Some tests check behavior on new free personal plans.
+    product: 'personalFree',
+  },
+  {
     name: 'Chimpyland',
     workspaces: [
       {
@@ -121,6 +132,17 @@ export const exampleOrgs = [
   {
     name: 'Kiwiland',
     workspaces: []
+  },
+  {
+    name: 'Hamland',
+    workspaces: [
+      {
+        name: 'Home',
+        docs: []
+      },
+    ],
+    // Some tests check behavior on legacy free personal plans.
+    product: 'starter',
   },
   {
     name: 'EmptyWsOrg',
@@ -223,6 +245,7 @@ const exampleUsers: {[user: string]: {[org: string]: string}} = {
     Fish: 'editors'
   },
   Charon: {
+    Charonland: 'owners',
     NASA: 'guests',
     Horizon: 'guests',
     Pluto: 'viewers',
@@ -231,7 +254,9 @@ const exampleUsers: {[user: string]: {[org: string]: string}} = {
     Abyss: 'owners',
   },
   // User Ham has two-factor authentication enabled on staging/prod.
-  Ham: {},
+  Ham: {
+    Hamland: 'owners',
+  },
   // User support@ owns a workspace "Examples & Templates" in its personal org. It can be shared
   // with everyone@ to let all users see it (this is not done here to avoid impacting all tests).
   Support: { Supportland: 'owners' },
@@ -403,7 +428,7 @@ class Seed {
       const ba = new BillingAccount();
       ba.individual = false;
       const productName = org.product || 'Free';
-      ba.product = (await Product.findOne({name: productName}))!;
+      ba.product = (await Product.findOne({where: {name: productName}}))!;
       o.billingAccount = ba;
       if (org.domain) { o.domain = org.domain; }
       if (org.host) { o.host = org.host; }
@@ -436,7 +461,7 @@ class Seed {
   }
 
   public async run() {
-    if (await this.userRepository.findOne()) {
+    if (await this.userRepository.findOne({where: {}})) {
       // we already have a user - skip seeding database
       return;
     }
@@ -447,7 +472,7 @@ class Seed {
 
   // Creates benchmark data with 10 orgs, 50 workspaces per org and 20 docs per workspace.
   public async runBenchmark() {
-    if (await this.userRepository.findOne()) {
+    if (await this.userRepository.findOne({where: {}})) {
       // we already have a user - skip seeding database
       return;
     }
@@ -476,7 +501,7 @@ class Seed {
       login.displayEmail = login.email = name.toLowerCase() + "@getgrist.com";
       login.user = user;
       await login.save();
-      const personal = await Organization.findOne({name: name + "land"});
+      const personal = await Organization.findOne({where: {name: name + "land"}});
       if (personal) {
         personal.owner = user;
         await personal.save();
@@ -496,8 +521,8 @@ export async function removeConnection() {
       throw new Error("unexpected number of connections");
     }
     await getConnectionManager().connections[0].close();
-    // There is no official way to delete connections that I've found.
-    (getConnectionManager().connections as any) = [];
+    // There is still no official way to delete connections that I've found.
+    (getConnectionManager() as any).connectionMap = new Map();
   }
 }
 
@@ -568,6 +593,9 @@ export async function createServer(port: number, initDb = createInitialDb): Prom
   flexServer.addJsonSupport();
   await flexServer.start();
   await flexServer.initHomeDBManager();
+  flexServer.addDocWorkerMap();
+  await flexServer.loadConfig();
+  flexServer.addHosts();
   flexServer.addAccessMiddleware();
   flexServer.addApiMiddleware();
   flexServer.addHomeApi();

@@ -1,3 +1,4 @@
+import {getThemeBackgroundSnippet} from 'app/common/Themes';
 import {Document} from 'app/gen-server/entity/Document';
 import {HomeDBManager} from 'app/gen-server/lib/HomeDBManager';
 import {ExternalStorage} from 'app/server/lib/ExternalStorage';
@@ -7,7 +8,6 @@ import {INotifier} from 'app/server/lib/INotifier';
 import {ISandbox, ISandboxCreationOptions} from 'app/server/lib/ISandbox';
 import {IShell} from 'app/server/lib/IShell';
 import {createSandbox} from 'app/server/lib/NSandbox';
-import * as express from 'express';
 
 export interface ICreate {
 
@@ -30,15 +30,18 @@ export interface ICreate {
   // Return a string containing 1 or more HTML tags to insert into the head element of every
   // static page.
   getExtraHeadHtml?(): string;
+  getStorageOptions?(name: string): ICreateStorageOptions|undefined;
 }
 
 export interface ICreateActiveDocOptions {
   safeMode?: boolean;
   docUrl?: string;
+  docApiUrl?: string;
   doc?: Document;
 }
 
 export interface ICreateStorageOptions {
+  name: string;
   check(): boolean;
   create(purpose: 'doc'|'meta', extraPrefix: string): ExternalStorage|undefined;
 }
@@ -47,60 +50,77 @@ export interface ICreateNotifierOptions {
   create(dbManager: HomeDBManager, gristConfig: GristServer): INotifier|undefined;
 }
 
+export interface ICreateBillingOptions {
+  create(dbManager: HomeDBManager, gristConfig: GristServer): IBilling|undefined;
+}
+
 export function makeSimpleCreator(opts: {
   sessionSecret?: string,
   storage?: ICreateStorageOptions[],
-  activationMiddleware?: (db: HomeDBManager, app: express.Express) => Promise<void>,
+  billing?: ICreateBillingOptions,
   notifier?: ICreateNotifierOptions,
+  sandboxFlavor?: string,
+  shell?: IShell,
+  getExtraHeadHtml?: () => string,
 }): ICreate {
+  const {sessionSecret, storage, notifier, billing} = opts;
   return {
-    Billing(db) {
-      return {
+    Billing(dbManager, gristConfig) {
+      return billing?.create(dbManager, gristConfig) ?? {
         addEndpoints() { /* do nothing */ },
         addEventHandlers() { /* do nothing */ },
         addWebhooks() { /* do nothing */ },
-        async addMiddleware(app) {
-          // add activation middleware, if needed.
-          return opts?.activationMiddleware?.(db, app);
-        }
+        async addMiddleware() { /* do nothing */ },
+        addPages() { /* do nothing */ },
       };
     },
     Notifier(dbManager, gristConfig) {
-      const {notifier} = opts;
       return notifier?.create(dbManager, gristConfig) ?? {
         get testPending() { return false; },
         deleteUser()      { throw new Error('deleteUser unavailable'); },
       };
     },
     ExternalStorage(purpose, extraPrefix) {
-      for (const storage of opts.storage || []) {
-        if (storage.check()) {
-          return storage.create(purpose, extraPrefix);
+      for (const s of storage || []) {
+        if (s.check()) {
+          return s.create(purpose, extraPrefix);
         }
       }
       return undefined;
     },
     NSandbox(options) {
-      return createSandbox('unsandboxed', options);
+      return createSandbox(opts.sandboxFlavor || 'unsandboxed', options);
     },
     sessionSecret() {
-      const secret = process.env.IRELIA_SESSION_SECRET || opts.sessionSecret;
+      const secret = process.env.GRIST_SESSION_SECRET || sessionSecret;
       if (!secret) {
-        throw new Error('need IRELIA_SESSION_SECRET');
+        throw new Error('need GRIST_SESSION_SECRET');
       }
       return secret;
     },
     async configure() {
-      for (const storage of opts.storage || []) {
-        if (storage.check()) { break; }
+      for (const s of storage || []) {
+        if (s.check()) { break; }
       }
     },
+    ...(opts.shell && {
+      Shell() {
+        return opts.shell as IShell;
+      },
+    }),
     getExtraHeadHtml() {
-      let customHeadHtmlSnippet = '';
-      if (process.env.APP_STATIC_INCLUDE_CUSTOM_CSS === 'true') {
-        customHeadHtmlSnippet += '<link rel="stylesheet" href="custom.css">';
+      if (opts.getExtraHeadHtml) {
+        return opts.getExtraHeadHtml();
       }
-      return customHeadHtmlSnippet;
+      const elements: string[] = [];
+      if (process.env.APP_STATIC_INCLUDE_CUSTOM_CSS === 'true') {
+        elements.push('<link rel="stylesheet" href="custom.css">');
+      }
+      elements.push(getThemeBackgroundSnippet());
+      return elements.join('\n');
     },
+    getStorageOptions(name: string) {
+      return storage?.find(s => s.name === name);
+    }
   };
 }

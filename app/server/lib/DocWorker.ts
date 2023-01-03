@@ -2,18 +2,20 @@
  * DocWorker collects the methods and endpoints that relate to a single Grist document.
  * In hosted environment, this comprises the functionality of the DocWorker instance type.
  */
+import {isAffirmative} from 'app/common/gutil';
 import {HomeDBManager} from 'app/gen-server/lib/HomeDBManager';
 import {ActionHistoryImpl} from 'app/server/lib/ActionHistoryImpl';
 import {assertAccess, getOrSetDocAuth, RequestWithLogin} from 'app/server/lib/Authorizer';
 import {Client} from 'app/server/lib/Client';
-import * as Comm from 'app/server/lib/Comm';
+import {Comm} from 'app/server/lib/Comm';
 import {DocSession, docSessionFromRequest} from 'app/server/lib/DocSession';
 import {filterDocumentInPlace} from 'app/server/lib/filterUtils';
+import {GristServer} from 'app/server/lib/GristServer';
 import {IDocStorageManager} from 'app/server/lib/IDocStorageManager';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {getDocId, integerParam, optStringParam, stringParam} from 'app/server/lib/requestUtils';
 import {OpenMode, quoteIdent, SQLiteDB} from 'app/server/lib/SQLiteDB';
-import * as contentDisposition from 'content-disposition';
+import contentDisposition from 'content-disposition';
 import * as express from 'express';
 import * as fse from 'fs-extra';
 import * as mimeTypes from 'mime-types';
@@ -21,12 +23,15 @@ import * as path from 'path';
 
 export interface AttachOptions {
   comm: Comm;                             // Comm object for methods called via websocket
+  gristServer: GristServer;
 }
 
 export class DocWorker {
   private _comm: Comm;
-  constructor(private _dbManager: HomeDBManager, {comm}: AttachOptions) {
-    this._comm = comm;
+  private _gristServer: GristServer;
+  constructor(private _dbManager: HomeDBManager, options: AttachOptions) {
+    this._comm = options.comm;
+    this._gristServer = options.gristServer;
   }
 
   public async getAttachment(req: express.Request, res: express.Response): Promise<void> {
@@ -34,7 +39,14 @@ export class DocWorker {
       const docSession = this._getDocSession(stringParam(req.query.clientId, 'clientId'),
                                              integerParam(req.query.docFD, 'docFD'));
       const activeDoc = docSession.activeDoc;
-      const ext = path.extname(stringParam(req.query.ident, 'ident'));
+      const colId = stringParam(req.query.colId, 'colId');
+      const tableId = stringParam(req.query.tableId, 'tableId');
+      const rowId = integerParam(req.query.rowId, 'rowId');
+      const cell = {colId, tableId, rowId};
+      const maybeNew = isAffirmative(req.query.maybeNew);
+      const attId = integerParam(req.query.attId, 'attId');
+      const attRecord = activeDoc.getAttachmentMetadata(attId);
+      const ext = path.extname(attRecord.fileIdent);
       const type = mimeTypes.lookup(ext);
 
       let inline = Boolean(req.query.inline);
@@ -44,7 +56,7 @@ export class DocWorker {
       // Construct a content-disposition header of the form 'inline|attachment; filename="NAME"'
       const contentDispType = inline ? "inline" : "attachment";
       const contentDispHeader = contentDisposition(stringParam(req.query.name, 'name'), {type: contentDispType});
-      const data = await activeDoc.getAttachmentData(docSession, stringParam(req.query.ident, 'ident'));
+      const data = await activeDoc.getAttachmentData(docSession, attRecord, {cell, maybeNew});
       res.status(200)
         .type(ext)
         .set('Content-Disposition', contentDispHeader)
@@ -115,6 +127,7 @@ export class DocWorker {
       getAclResources:          activeDocMethod.bind(null, 'viewers', 'getAclResources'),
       waitForInitialization:    activeDocMethod.bind(null, 'viewers', 'waitForInitialization'),
       getUsersForViewAs:        activeDocMethod.bind(null, 'viewers', 'getUsersForViewAs'),
+      getAccessToken:           activeDocMethod.bind(null, 'viewers', 'getAccessToken'),
     });
   }
 
@@ -154,7 +167,7 @@ export class DocWorker {
       }
       if (!urlId) { return res.status(403).send({error: 'missing document id'}); }
 
-      const docAuth = await getOrSetDocAuth(mreq, this._dbManager, urlId);
+      const docAuth = await getOrSetDocAuth(mreq, this._dbManager, this._gristServer, urlId);
       assertAccess('viewers', docAuth);
       next();
     } catch (err) {

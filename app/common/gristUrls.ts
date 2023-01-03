@@ -34,6 +34,9 @@ export type WelcomePage = typeof WelcomePage.type;
 export const AccountPage = StringUnion('account');
 export type AccountPage = typeof AccountPage.type;
 
+export const ActivationPage = StringUnion('activation');
+export type ActivationPage = typeof ActivationPage.type;
+
 export const LoginPage = StringUnion('signup', 'login', 'verified', 'forgot-password');
 export type LoginPage = typeof LoginPage.type;
 
@@ -57,14 +60,24 @@ export const MIN_URLID_PREFIX_LENGTH = 12;
  */
 
 export const commonUrls = {
-  help: "https://ciusji.gitbook.io/irelia/",
-  plans: "https://guinsoolab.github.io/glab",
-  learnMore: "https://ciusji.gitbook.io/irelia/",
-  createTeamSite: "https://ciusji.gitbook.io/irelia/",
-  sproutsProgram: "https://github.com/ElixirNote/irelia",
+  help: getHelpCenterUrl(),
+  helpAccessRules: "https://support.getgrist.com/access-rules",
+  helpColRefs: "https://support.getgrist.com/col-refs",
+  helpConditionalFormatting: "https://support.getgrist.com/conditional-formatting",
+  helpFilterButtons: "https://support.getgrist.com/search-sort-filter/#filter-buttons",
+  helpLinkingWidgets: "https://support.getgrist.com/linking-widgets",
+  helpRawData: "https://support.getgrist.com/raw-data",
+  helpUnderstandingReferenceColumns: "https://support.getgrist.com/col-refs/#understanding-reference-columns",
+  helpTriggerFormulas: "https://support.getgrist.com/formulas/#trigger-formulas",
+  helpTryingOutChanges: "https://support.getgrist.com/copying-docs/#trying-out-changes",
+  plans: "https://www.getgrist.com/pricing",
+  createTeamSite: "https://www.getgrist.com/create-team-site",
+  sproutsProgram: "https://www.getgrist.com/sprouts-program",
+  contact: "https://www.getgrist.com/contact",
 
   efcrConnect: 'https://efc-r.com/connect',
   efcrHelp: 'https://www.nioxus.info/eFCR-Help',
+  videoTour: 'https://www.youtube.com/embed/qnr2Pfnxdlc?autoplay=1',
 };
 
 /**
@@ -82,13 +95,16 @@ export interface IGristUrlState {
   docPage?: IDocPage;
   account?: AccountPage;
   billing?: BillingPage;
+  activation?: ActivationPage;
   login?: LoginPage;
   welcome?: WelcomePage;
   welcomeTour?: boolean;
   docTour?: boolean;
   manageUsers?: boolean;
+  createTeam?: boolean;
   params?: {
     billingPlan?: string;
+    planType?: string;
     billingTask?: BillingTask;
     embed?: boolean;
     state?: string;
@@ -178,7 +194,12 @@ export function getOrgUrlInfo(newOrg: string, currentHost: string, options: OrgU
  *    localhost:8080/o/<org>
  */
 export function encodeUrl(gristConfig: Partial<GristLoadConfig>,
-                          state: IGristUrlState, baseLocation: Location | URL): string {
+                          state: IGristUrlState, baseLocation: Location | URL,
+                          options: {
+                            // make an api url - warning: just barely works, and
+                            // only for documents
+                            api?: boolean
+                          } = {}): string {
   const url = new URL(baseLocation.href);
   const parts = ['/'];
 
@@ -193,9 +214,14 @@ export function encodeUrl(gristConfig: Partial<GristLoadConfig>,
     }
   }
 
+  if (options.api) {
+    parts.push(`api/`);
+  }
   if (state.ws) { parts.push(`ws/${state.ws}/`); }
   if (state.doc) {
-    if (state.slug) {
+    if (options.api) {
+      parts.push(`docs/${encodeURIComponent(state.doc)}`);
+    } else if (state.slug) {
       parts.push(`${encodeURIComponent(state.doc)}/${encodeURIComponent(state.slug)}`);
     } else {
       parts.push(`doc/${encodeURIComponent(state.doc)}`);
@@ -218,6 +244,8 @@ export function encodeUrl(gristConfig: Partial<GristLoadConfig>,
     parts.push(state.billing === 'billing' ? 'billing' : `billing/${state.billing}`);
   }
 
+  if (state.activation) { parts.push(state.activation); }
+
   if (state.login) { parts.push(state.login); }
 
   if (state.welcome) {
@@ -231,7 +259,7 @@ export function encodeUrl(gristConfig: Partial<GristLoadConfig>,
   const hashParts: string[] = [];
   if (state.hash && state.hash.rowId) {
     const hash = state.hash;
-    hashParts.push(`a1`);
+    hashParts.push(state.hash?.popup ? 'a2' : `a1`);
     for (const key of ['sectionId', 'rowId', 'colRef'] as Array<keyof HashLink>) {
       if (hash[key]) { hashParts.push(`${key[0]}${hash[key]}`); }
     }
@@ -248,6 +276,8 @@ export function encodeUrl(gristConfig: Partial<GristLoadConfig>,
     url.hash = 'repeat-doc-tour';
   } else if (state.manageUsers) {
     url.hash = 'manage-users';
+  } else if (state.createTeam) {
+    url.hash = 'create-team';
   } else {
     url.hash = '';
   }
@@ -302,7 +332,11 @@ export function decodeUrl(gristConfig: Partial<GristLoadConfig>, location: Locat
   if (map.has('m')) { state.mode = OpenDocMode.parse(map.get('m')); }
   if (map.has('account')) { state.account = AccountPage.parse(map.get('account')) || 'account'; }
   if (map.has('billing')) { state.billing = BillingSubPage.parse(map.get('billing')) || 'billing'; }
+  if (map.has('activation')) {
+    state.activation = ActivationPage.parse(map.get('activation')) || 'activation';
+  }
   if (map.has('welcome')) { state.welcome = WelcomePage.parse(map.get('welcome')); }
+  if (sp.has('planType')) { state.params!.planType = sp.get('planType')!; }
   if (sp.has('billingPlan')) { state.params!.billingPlan = sp.get('billingPlan')!; }
   if (sp.has('billingTask')) {
     state.params!.billingTask = BillingTask.parse(sp.get('billingTask'));
@@ -347,9 +381,9 @@ export function decodeUrl(gristConfig: Partial<GristLoadConfig>, location: Locat
     for (const part of hashParts) {
       hashMap.set(part.slice(0, 1), part.slice(1));
     }
-    if (hashMap.has('#') && hashMap.get('#') === 'a1') {
+    if (hashMap.has('#') && ['a1', 'a2'].includes(hashMap.get('#') || '')) {
       const link: HashLink = {};
-      for (const key of ['sectionId', 'rowId', 'colRef'] as Array<keyof HashLink>) {
+      for (const key of ['sectionId', 'rowId', 'colRef'] as Array<Exclude<keyof HashLink, 'popup'>>) {
         const ch = key.substr(0, 1);
         if (!hashMap.has(ch)) { continue; }
         const value = hashMap.get(ch);
@@ -359,11 +393,15 @@ export function decodeUrl(gristConfig: Partial<GristLoadConfig>, location: Locat
           link[key] = parseInt(value!, 10);
         }
       }
+      if (hashMap.get('#') === 'a2') {
+        link.popup =  true;
+      }
       state.hash = link;
     }
     state.welcomeTour = hashMap.get('#') === 'repeat-welcome-tour';
     state.docTour = hashMap.get('#') === 'repeat-doc-tour';
     state.manageUsers = hashMap.get('#') === 'manage-users';
+    state.createTeam = hashMap.get('#') === 'create-team';
   }
   return state;
 }
@@ -460,6 +498,9 @@ export interface GristLoadConfig {
   // In single-org mode, this is the single well-known org. Suppress any org selection UI.
   singleOrg?: string;
 
+  // Url for support for the browser client to use.
+  helpCenterUrl?: string;
+
   // When set, this directs the client to encode org information in path, not in domain.
   pathOnly?: boolean;
 
@@ -522,13 +563,28 @@ export interface GristLoadConfig {
   // Google Tag Manager id. Currently only used to load tag manager for reporting new sign-ups.
   tagManagerId?: string;
 
-  activation?: ActivationState;
+  activation?: Activation;
 
   // Parts of the UI to hide
   hideUiElements?: IHideableUiElement[];
 
   // String to append to the end of the HTML document.title
   pageTitleSuffix?: string;
+
+  // If custom CSS should be included in the head of each page.
+  enableCustomCss?: boolean;
+
+  // Supported languages for the UI. By default only english (en) is supported.
+  supportedLngs?: readonly string[];
+
+  // Loaded namespaces for translations.
+  namespaces?: readonly string[];
+
+  // TODO: remove when comments will be released.
+  featureComments?: boolean;
+
+  // Email address of the support user.
+  supportEmail?: string;
 }
 
 export const HideableUiElements = StringUnion("helpCenter", "billing", "templates", "multiSite", "multiAccounts");
@@ -539,7 +595,7 @@ export function shouldHideUiElement(elem: IHideableUiElement): boolean {
 }
 
 export function getPageTitleSuffix(config?: GristLoadConfig) {
-  return config?.pageTitleSuffix ?? " - Irelia";
+  return config?.pageTitleSuffix ?? " - Grist";
 }
 
 /**
@@ -547,14 +603,20 @@ export function getPageTitleSuffix(config?: GristLoadConfig) {
  * summarizes the current state. Not applicable to grist-core.
  */
 export interface ActivationState {
-  trial?: {               // Present when installation has not yet been activated.
-    days: number;         // Max number of days allowed prior to activation.
-    daysLeft: number;     // Number of days left until Grist will get cranky.
+  trial?: {                  // Present when installation has not yet been activated.
+    days: number;            // Max number of days allowed prior to activation.
+    expirationDate: string;  // ISO8601 date that Grist will get cranky.
+    daysLeft: number;        // Number of days left until Grist will get cranky.
   }
-  needKey?: boolean;      // Set when Grist is cranky and demanding activation.
-  key?: {                 // Set when Grist is activated.
-    daysLeft?: number;    // Number of days until Grist will need reactivation.
+  needKey?: boolean;         // Set when Grist is cranky and demanding activation.
+  key?: {                    // Set when Grist is activated.
+    expirationDate?: string; // ISO8601 date that Grist will need reactivation.
+    daysLeft?: number;       // Number of days until Grist will need reactivation.
   }
+}
+
+export interface Activation extends ActivationState {
+  isManager: boolean;
 }
 
 // Acceptable org subdomains are alphanumeric (hyphen also allowed) and of
@@ -578,19 +640,28 @@ export function isClient() {
 
 /**
  * Returns a known org "subdomain" if Grist is configured in single-org mode
- * (IRELIA_SINGLE_ORG=<org> on the server) or if the page includes an org in gristConfig.
+ * (GRIST_SINGLE_ORG=<org> on the server) or if the page includes an org in gristConfig.
  */
 export function getKnownOrg(): string|null {
   if (isClient()) {
     const gristConfig: GristLoadConfig = (window as any).gristConfig;
     return (gristConfig && gristConfig.singleOrg) || null;
   } else {
-    return process.env.IRELIA_SINGLE_ORG || null;
+    return process.env.GRIST_SINGLE_ORG || null;
+  }
+}
+
+export function getHelpCenterUrl(): string|null {
+  if(isClient()) {
+    const gristConfig: GristLoadConfig = (window as any).gristConfig;
+    return gristConfig && gristConfig.helpCenterUrl || null;
+  } else {
+    return process.env.GRIST_HELP_CENTER || null;
   }
 }
 
 /**
- * Like getKnownOrg, but respects singleOrg/IRELIA_SINGLE_ORG strictly.
+ * Like getKnownOrg, but respects singleOrg/GRIST_SINGLE_ORG strictly.
  * The main difference in behavior would be for orgs with custom domains
  * served from a shared pool of servers, for which gristConfig.org would
  * be set, but not gristConfig.singleOrg.
@@ -600,14 +671,14 @@ export function getSingleOrg(): string|null {
     const gristConfig: GristLoadConfig = (window as any).gristConfig;
     return (gristConfig && gristConfig.singleOrg) || null;
   } else {
-    return process.env.IRELIA_SINGLE_ORG || null;
+    return process.env.GRIST_SINGLE_ORG || null;
   }
 }
 
 /**
  * Returns true if org must be encoded in path, not in domain.  Determined from
  * gristConfig on the client.  On the server, returns true if the host is
- * supplied and is 'localhost', or if IRELIA_ORG_IN_PATH is set to 'true'.
+ * supplied and is 'localhost', or if GRIST_ORG_IN_PATH is set to 'true'.
  */
 export function isOrgInPathOnly(host?: string): boolean {
   if (isClient()) {
@@ -615,7 +686,7 @@ export function isOrgInPathOnly(host?: string): boolean {
     return (gristConfig && gristConfig.pathOnly) || false;
   } else {
     if (host && host.match(localhostRegex)) { return true; }
-    return (process.env.IRELIA_ORG_IN_PATH === 'true');
+    return (process.env.GRIST_ORG_IN_PATH === 'true');
   }
 }
 
@@ -741,6 +812,7 @@ export interface HashLink {
   sectionId?: number;
   rowId?: UIRowId;
   colRef?: number;
+  popup?: boolean;
 }
 
 // Check whether a urlId is a prefix of the docId, and adequately long to be
@@ -756,9 +828,7 @@ function shouldIncludeSlug(doc: {id: string, urlId: string|null}): boolean {
 // deleting it, seems unfair to languages using anything other than unaccented
 // Latin characters.
 function nameToSlug(name: string): string {
-  return name.trim().replace(/ /g, '-')
-    .replace(/[^-a-zA-Z0-9]/g, '')
-    .replace(/---*/g, '-');
+  return name.trim().replace(/ /g, '-').replace(/[^-a-zA-Z0-9]/g, '').replace(/---*/g, '-');
 }
 
 // Returns a slug for the given docId/urlId/name, or undefined if a slug should

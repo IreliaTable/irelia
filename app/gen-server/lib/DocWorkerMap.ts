@@ -1,13 +1,13 @@
 import {MapWithTTL} from 'app/common/AsyncCreate';
 import * as version from 'app/common/version';
 import {DocStatus, DocWorkerInfo, IDocWorkerMap} from 'app/server/lib/DocWorkerMap';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {checkPermitKey, formatPermitKey, IPermitStore, Permit} from 'app/server/lib/Permit';
 import {promisifyAll} from 'bluebird';
 import mapValues = require('lodash/mapValues');
 import {createClient, Multi, RedisClient} from 'redis';
-import * as Redlock from 'redlock';
-import * as uuidv4 from 'uuid/v4';
+import Redlock from 'redlock';
+import uuidv4 from 'uuid/v4';
 
 promisifyAll(RedisClient.prototype);
 promisifyAll(Multi.prototype);
@@ -137,8 +137,16 @@ class DummyDocWorkerMap implements IDocWorkerMap {
     return null;
   }
 
-  public getRedisClient(): RedisClient {
-    throw new Error("No redis client here");
+  public async updateDocGroup(docId: string, docGroup: string): Promise<void> {
+    // nothing to do
+  }
+
+  public async removeDocGroup(docId: string): Promise<void> {
+    // nothing to do
+  }
+
+  public getRedisClient() {
+    return null;
   }
 }
 
@@ -515,6 +523,14 @@ export class DocWorkerMap implements IDocWorkerMap {
 
   public async getDocGroup(docId: string): Promise<string|null> {
     return this._client.getAsync(`doc-${docId}-group`);
+  }
+
+  public async updateDocGroup(docId: string, docGroup: string): Promise<void> {
+    await this._client.setAsync(`doc-${docId}-group`, docGroup);
+  }
+
+  public async removeDocGroup(docId: string): Promise<void> {
+    await this._client.delAsync(`doc-${docId}-group`);
   }
 
   public getRedisClient(): RedisClient {

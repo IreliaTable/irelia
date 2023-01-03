@@ -1,14 +1,15 @@
-import * as bluebird from 'bluebird';
+import bluebird from 'bluebird';
 import { ChildProcess } from 'child_process';
 import * as net from 'net';
 import * as path from 'path';
 import { ConnectionOptions } from 'typeorm';
-import * as uuidv4 from 'uuid/v4';
+import uuidv4 from 'uuid/v4';
+import {AbortSignal} from 'node-abort-controller';
 
 import {EngineCode} from 'app/common/DocumentSettings';
-import * as log from 'app/server/lib/log';
-import { OpenMode, SQLiteDB } from 'app/server/lib/SQLiteDB';
-import { getDocSessionAccessOrNull, getDocSessionUser, OptDocSession } from './DocSession';
+import log from 'app/server/lib/log';
+import {OpenMode, SQLiteDB} from 'app/server/lib/SQLiteDB';
+import {getDocSessionAccessOrNull, getDocSessionUser, OptDocSession} from './DocSession';
 
 /**
  * Promisify a node-style callback function. E.g.
@@ -31,7 +32,7 @@ export function fromCallback<T>(nodeFunc: NodeCallbackFunc<T>): Promise<T> {
  * @param {Number} optCount: Number of ports to check, defaults to 200.
  * @returns Promise<Number>: Promise for an available port.
  */
-export function getAvailablePort(firstPort: number = 8000, optCount: number = 200) {
+export function getAvailablePort(firstPort: number = 8000, optCount: number = 200): Promise<number> {
   const lastPort = firstPort + optCount - 1;
   function checkNext(port: number): Promise<number> {
     if (port > lastPort) {
@@ -61,6 +62,13 @@ export function connect(arg: any, ...moreArgs: any[]): Promise<net.Socket> {
     const s = net.connect(arg, ...moreArgs, () => resolve(s));
     s.on('error', reject);
   });
+}
+
+/**
+ * Promisified version of net.Server.listen().
+ */
+export function listenPromise<T extends net.Server>(server: T): Promise<void> {
+  return new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
 }
 
 /**
@@ -155,9 +163,34 @@ export function getLogMetaFromDocSession(docSession: OptDocSession) {
  * Only offer choices of engine on experimental deployments (staging/dev).
  */
 export function getSupportedEngineChoices(): EngineCode[]|undefined {
-  if (process.env.IRELIA_EXPERIMENTAL_PLUGINS === '1' ||
+  if (process.env.GRIST_EXPERIMENTAL_PLUGINS === '1' ||
       process.env.PYTHON_VERSION_ON_CREATION) {
     return ['python2', 'python3'];
   }
   return undefined;
+}
+
+/**
+ * Returns a promise that resolves in the given number of milliseconds or rejects
+ * when the given signal is raised.
+ */
+ export function delayAbort(msec: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    }, msec);
+    if (signal?.addEventListener) {
+      signal.addEventListener('abort', (ev) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(ev);
+        }
+      });
+    }
+  });
 }

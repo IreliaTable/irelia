@@ -4,7 +4,7 @@ import { GristObjCode } from "app/plugin/GristData";
 
 // tslint:disable:object-literal-key-quotes
 
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 35;
 
 export const schema = {
 
@@ -115,6 +115,7 @@ export const schema = {
     linkSrcColRef       : "Ref:_grist_Tables_column",
     linkTargetColRef    : "Ref:_grist_Tables_column",
     embedId             : "Text",
+    rules               : "RefList:_grist_Tables_column",
   },
 
   "_grist_Views_section_field": {
@@ -169,6 +170,7 @@ export const schema = {
     permissionsText     : "Text",
     rulePos             : "PositionNumber",
     userAttributes      : "Text",
+    memo                : "Text",
   },
 
   "_grist_ACLResources": {
@@ -193,6 +195,18 @@ export const schema = {
     viewSectionRef      : "Ref:_grist_Views_section",
     colRef              : "Ref:_grist_Tables_column",
     filter              : "Text",
+    pinned              : "Bool",
+  },
+
+  "_grist_Cells": {
+    tableRef            : "Ref:_grist_Tables",
+    colRef              : "Ref:_grist_Tables_column",
+    rowId               : "Int",
+    root                : "Bool",
+    parentId            : "Ref:_grist_Cells",
+    type                : "Int",
+    content             : "Text",
+    userRef             : "Text",
   },
 
 };
@@ -306,6 +320,7 @@ export interface SchemaTypes {
     linkSrcColRef: number;
     linkTargetColRef: number;
     embedId: string;
+    rules: [GristObjCode.List, ...number[]]|null;
   };
 
   "_grist_Views_section_field": {
@@ -360,6 +375,7 @@ export interface SchemaTypes {
     permissionsText: string;
     rulePos: number;
     userAttributes: string;
+    memo: string;
   };
 
   "_grist_ACLResources": {
@@ -384,6 +400,18 @@ export interface SchemaTypes {
     viewSectionRef: number;
     colRef: number;
     filter: string;
+    pinned: boolean;
+  };
+
+  "_grist_Cells": {
+    tableRef: number;
+    colRef: number;
+    rowId: number;
+    root: boolean;
+    parentId: number;
+    type: number;
+    content: string;
+    userRef: string;
   };
 
 }

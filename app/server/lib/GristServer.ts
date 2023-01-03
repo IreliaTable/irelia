@@ -4,8 +4,10 @@ import { Document } from 'app/gen-server/entity/Document';
 import { Organization } from 'app/gen-server/entity/Organization';
 import { Workspace } from 'app/gen-server/entity/Workspace';
 import { HomeDBManager } from 'app/gen-server/lib/HomeDBManager';
+import { IAccessTokens } from 'app/server/lib/AccessTokens';
 import { RequestWithLogin } from 'app/server/lib/Authorizer';
-import * as Comm from 'app/server/lib/Comm';
+import { Comm } from 'app/server/lib/Comm';
+import { create } from 'app/server/lib/create';
 import { Hosts } from 'app/server/lib/extractOrg';
 import { ICreate } from 'app/server/lib/ICreate';
 import { IDocStorageManager } from 'app/server/lib/IDocStorageManager';
@@ -15,6 +17,7 @@ import { ISendAppPageOptions } from 'app/server/lib/sendAppPage';
 import { fromCallback } from 'app/server/lib/serverUtils';
 import { Sessions } from 'app/server/lib/Sessions';
 import * as express from 'express';
+import { IncomingMessage } from 'http';
 
 /**
  * Basic information about a Grist server.  Accessible in many
@@ -29,7 +32,8 @@ export interface GristServer {
   getOwnUrl(): string;
   getOrgUrl(orgKey: string|number): Promise<string>;
   getMergedOrgUrl(req: RequestWithLogin, pathname?: string): string;
-  getResourceUrl(resource: Organization|Workspace|Document): Promise<string>;
+  getResourceUrl(resource: Organization|Workspace|Document,
+                 purpose?: 'api'|'html'): Promise<string>;
   getGristConfig(): GristLoadConfig;
   getPermitStore(): IPermitStore;
   getExternalPermitStore(): IPermitStore;
@@ -42,6 +46,7 @@ export interface GristServer {
   getDocTemplate(): Promise<DocTemplate>;
   getTag(): string;
   sendAppPage(req: express.Request, resp: express.Response, options: ISendAppPageOptions): Promise<void>;
+  getAccessTokens(): IAccessTokens;
 }
 
 export interface GristLoginSystem {
@@ -59,6 +64,10 @@ export interface GristLoginMiddleware {
   getLogoutMiddleware?(): express.RequestHandler[];
   // Returns arbitrary string for log.
   addEndpoints(app: express.Express): Promise<string>;
+  // Optionally, extract profile from request. Result can be a profile,
+  // or null if anonymous (and other methods of determining profile such
+  // as a cookie should not be used), or undefined to use other methods.
+  getProfile?(req: express.Request|IncomingMessage): Promise<UserProfile|null|undefined>;
 }
 
 /**
@@ -82,4 +91,35 @@ export interface RequestWithGrist extends express.Request {
 export interface DocTemplate {
   page: string,
   tag: string,
+}
+
+/**
+ * A very minimal GristServer object that throws an error if its bluff is
+ * called.
+ */
+export function createDummyGristServer(): GristServer {
+  return {
+    create,
+    settings: {},
+    getHost() { return 'localhost:4242'; },
+    getHomeUrl() { return 'http://localhost:4242'; },
+    getHomeUrlByDocId() { return Promise.resolve('http://localhost:4242'); },
+    getMergedOrgUrl() { return 'http://localhost:4242'; },
+    getOwnUrl() { return 'http://localhost:4242'; },
+    getPermitStore() { throw new Error('no permit store'); },
+    getExternalPermitStore() { throw new Error('no external permit store'); },
+    getGristConfig() { return { homeUrl: '', timestampMs: 0 }; },
+    getOrgUrl() { return Promise.resolve(''); },
+    getResourceUrl() { return Promise.resolve(''); },
+    getSessions() { throw new Error('no sessions'); },
+    getComm() { throw new Error('no comms'); },
+    getHosts() { throw new Error('no hosts'); },
+    getHomeDBManager() { throw new Error('no db'); },
+    getStorageManager() { throw new Error('no storage manager'); },
+    getNotifier() { throw new Error('no notifier'); },
+    getDocTemplate() { throw new Error('no doc template'); },
+    getTag() { return 'tag'; },
+    sendAppPage() { return Promise.resolve(); },
+    getAccessTokens() { throw new Error('no access tokens'); },
+  };
 }

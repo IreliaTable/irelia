@@ -6,6 +6,7 @@ import useractions
 import testutil
 import test_engine
 from test_engine import Table, Column, View, Section, Field
+from schema import RecalcWhen
 
 log = logger.Logger(__name__, logger.INFO)
 
@@ -104,7 +105,6 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertPartialOutActions(out_actions, { "stored": [
       ['ModifyColumn', 'Schools', 'city', {'type': 'Ref:Address'}],
       ['UpdateRecord', 'Schools', 4, {'city': 0}],
-      ['UpdateRecord', '_grist_Views_section_field', 1, {'widgetOptions': ''}],
       ['UpdateRecord', '_grist_Tables_column', 23, {
         'type': 'Ref:Address', 'widgetOptions': 'world'
       }],
@@ -157,7 +157,7 @@ class TestUserActions(test_engine.EngineTestCase):
 
     # Create another section for the same view, this time summarized.
     self.apply_user_action(["CreateViewSection", 1, 1, "record", [21], None])
-    summary_table = Table(2, "GristSummary_7_Address", 0, summarySourceTable=1, columns=[
+    summary_table = Table(2, "Address_summary_city", 0, summarySourceTable=1, columns=[
         Column(22, "city", "Text", isFormula=False, formula="", summarySourceCol=21),
         Column(23, "group", "RefList:Address", isFormula=True,
                formula="table.getSummarySourceGroup(rec)", summarySourceCol=0),
@@ -172,9 +172,9 @@ class TestUserActions(test_engine.EngineTestCase):
       Section(2, parentKey="record", tableRef=1, fields=[
         Field(2, colRef=21),
       ]),
-      Section(3, parentKey="record", tableRef=2, fields=[
-        Field(3, colRef=22),
-        Field(4, colRef=24),
+      Section(4, parentKey="record", tableRef=2, fields=[
+        Field(5, colRef=22),
+        Field(6, colRef=24),
       ]),
     ])
     self.assertTables([self.starting_table, summary_table])
@@ -249,14 +249,14 @@ class TestUserActions(test_engine.EngineTestCase):
       Column(33, "C", "Any", isFormula=True, formula="", summarySourceCol=0),
     ])
     # A summary of it.
-    summary_table = Table(5, "GristSummary_6_Table3", 0, summarySourceTable=4, columns=[
+    summary_table = Table(5, "Table3_summary", 0, summarySourceTable=4, columns=[
       Column(34, "group", "RefList:Table3", isFormula=True,
              formula="table.getSummarySourceGroup(rec)", summarySourceCol=0),
       Column(35, "count", "Int", isFormula=True, formula="len($group)", summarySourceCol=0),
     ])
     self.assertTables([self.starting_table, new_table, new_table2, new_table3, summary_table])
-    new_view.sections.append(Section(6, parentKey="record", tableRef=5, fields=[
-      Field(16, colRef=35)
+    new_view.sections.append(Section(7, parentKey="record", tableRef=5, fields=[
+      Field(17, colRef=35)
     ]))
     self.assertViews([new_view])
 
@@ -288,7 +288,7 @@ class TestUserActions(test_engine.EngineTestCase):
         Column(3, "state", "Text", False, "", 0),
         Column(4, "size",  "Numeric", False, "", 0),
       ]),
-      Table(2, "GristSummary_7_Schools", 0, 1, columns=[
+      Table(2, "Schools_summary_state", 0, 1, columns=[
         Column(5, "state", "Text", False, "", 3),
         Column(6, "group", "RefList:Schools", True, "table.getSummarySourceGroup(rec)", 0),
         Column(7, "count", "Int",     True, "len($group)", 0),
@@ -315,21 +315,21 @@ class TestUserActions(test_engine.EngineTestCase):
           Field(8, colRef=3),
           Field(9, colRef=4),
         ]),
-        Section(4, parentKey="record", tableRef=2, fields=[
-          Field(10, colRef=5),
-          Field(11, colRef=7),
-          Field(12, colRef=8),
+        Section(5, parentKey="record", tableRef=2, fields=[
+          Field(13, colRef=5),
+          Field(14, colRef=7),
+          Field(15, colRef=8),
         ]),
-        Section(7, parentKey='record', tableRef=3, fields=[
-          Field(18, colRef=10),
-          Field(19, colRef=11),
-          Field(20, colRef=12),
+        Section(8, parentKey='record', tableRef=3, fields=[
+          Field(21, colRef=10),
+          Field(22, colRef=11),
+          Field(23, colRef=12),
         ]),
       ]),
       View(3, sections=[
-        Section(5, parentKey="chart", tableRef=1, fields=[
-          Field(13, colRef=2),
-          Field(14, colRef=3),
+        Section(6, parentKey="chart", tableRef=1, fields=[
+          Field(16, colRef=2),
+          Field(17, colRef=3),
         ]),
       ])
     ])
@@ -399,7 +399,7 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       [ 'id', 'tableId',  'primaryViewId'  ],
       [ 1,    'Schools',                1],
-      [ 2,    'GristSummary_7_Schools', 0],
+      [ 2,    'Schools_summary_state', 0],
       [ 3,    'Table1',                 0],
     ])
     self.assertTableData('_grist_Views', cols="subset", data=[
@@ -417,7 +417,7 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       [ 'id', 'tableId',  'primaryViewId'  ],
       [ 1,    'Schools',                1],
-      [ 2,    'GristSummary_7_Schools', 0],
+      [ 2,    'Schools_summary_state', 0],
       [ 3,    'Table1',                      0],
     ])
     self.assertTableData('_grist_Views', cols="subset", data=[
@@ -435,7 +435,7 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       ['id', 'tableId'],
       [1, 'Bars', 1],
-      [2, 'GristSummary_4_Bars', 0],
+      [2, 'Bars_summary_state', 0],
       [3, 'Table1', 0],
     ])
     self.assertTableData('_grist_Views', cols="subset", data=[
@@ -453,7 +453,7 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       ['id', 'tableId'],
       [1, 'A', 1],
-      [2, 'GristSummary_1_A', 0],
+      [2, 'A_summary_state', 0],
       [3, 'Table1', 0],
     ])
     self.assertTableData('_grist_Views', cols="subset", data=[
@@ -469,8 +469,8 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       ['id', 'tableId', 'primaryViewId', 'rawViewSectionRef'],
       [1, 'Z', 1, 2],
-      [2, 'GristSummary_1_Z', 0, 0],
-      [3, 'Table1', 0, 6],
+      [2, 'Z_summary_state', 0, 4],
+      [3, 'Table1', 0, 7],
     ])
     self.assertTableData('_grist_Views', cols="subset", data=[
       ['id', 'name'],
@@ -486,9 +486,9 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       ['id', 'tableId', 'primaryViewId', 'rawViewSectionRef'],
       [1, 'Z', 1, 2],
-      [2, 'GristSummary_1_Z', 0, 0],
-      [3, 'Table1', 0, 6],
-      [4, 'Stations', 4, 9],
+      [2, 'Z_summary_state', 0, 4],
+      [3, 'Table1', 0, 7],
+      [4, 'Stations', 4, 10],
     ])
     self.assertTableData('_grist_Views', cols="subset", data=[
       ['id', 'name'],
@@ -514,7 +514,7 @@ class TestUserActions(test_engine.EngineTestCase):
     self.assertTableData('_grist_Tables', cols="subset", data=[
       ['id', 'tableId'],
       [1, 'Schools'],
-      [2, 'GristSummary_7_Schools'],
+      [2, 'Schools_summary_state'],
       [3, 'Table1'],
       [4, 'Stations'],
     ])
@@ -546,27 +546,27 @@ class TestUserActions(test_engine.EngineTestCase):
           Field(8, colRef=3),
           Field(9, colRef=4),
         ]),
-        Section(4, parentKey="record", tableRef=2, fields=[
-          Field(10, colRef=5),
-          Field(11, colRef=7),
-          Field(12, colRef=8),
+        Section(5, parentKey="record", tableRef=2, fields=[
+          Field(13, colRef=5),
+          Field(14, colRef=7),
+          Field(15, colRef=8),
         ]),
-        Section(7, parentKey='record', tableRef=3, fields=[
-          Field(18, colRef=10),
-          Field(19, colRef=11),
-          Field(20, colRef=12),
+        Section(8, parentKey='record', tableRef=3, fields=[
+          Field(21, colRef=10),
+          Field(22, colRef=11),
+          Field(23, colRef=12),
         ]),
       ]),
       View(3, sections=[
-        Section(5, parentKey="chart", tableRef=1, fields=[
-          Field(13, colRef=2),
-          Field(14, colRef=3),
+        Section(6, parentKey="chart", tableRef=1, fields=[
+          Field(16, colRef=2),
+          Field(17, colRef=3),
         ]),
       ])
     ])
 
     # Remove a couple of sections. Ensure their fields get removed.
-    self.apply_user_action(['BulkRemoveRecord', '_grist_Views_section', [4, 7]])
+    self.apply_user_action(['BulkRemoveRecord', '_grist_Views_section', [5, 8]])
 
     self.assertViews([
       View(1, sections=[
@@ -584,9 +584,9 @@ class TestUserActions(test_engine.EngineTestCase):
         ])
       ]),
       View(3, sections=[
-        Section(5, parentKey="chart", tableRef=1, fields=[
-          Field(13, colRef=2),
-          Field(14, colRef=3),
+        Section(6, parentKey="chart", tableRef=1, fields=[
+          Field(16, colRef=2),
+          Field(17, colRef=3),
         ]),
       ])
     ])
@@ -607,19 +607,19 @@ class TestUserActions(test_engine.EngineTestCase):
       orig_method()
     self.engine.assert_schema_consistent = types.MethodType(override, self.engine)
 
-    # Do a non-sschema action to ensure it doesn't get called.
+    # Do a non-schema action to ensure it doesn't get called.
     self.apply_user_action(['UpdateRecord', '_grist_Views', 2, {'name': 'A'}])
     self.assertEqual(count_calls[0], 0)
 
     # Do a schema action to ensure it gets called: this causes a table rename.
     # 7 is id of raw view section for the Tabl1 table
-    self.apply_user_action(['UpdateRecord', '_grist_Views_section', 6, {'title': 'C'}])
+    self.apply_user_action(['UpdateRecord', '_grist_Views_section', 7, {'title': 'C'}])
     self.assertEqual(count_calls[0], 1)
 
     self.assertTableData('_grist_Tables', cols="subset", data=[
       [ 'id', 'tableId',  'primaryViewId'  ],
       [ 1,    'Schools',                1],
-      [ 2,    'GristSummary_7_Schools', 0],
+      [ 2,    'Schools_summary_state', 0],
       [ 3,    'C',                      0],
     ])
 
@@ -954,14 +954,16 @@ class TestUserActions(test_engine.EngineTestCase):
     self.apply_user_action(['BulkAddRecord', '_grist_Filters', [None], {
       "viewSectionRef": [1],
       "colRef": [1],
-      "filter": [json.dumps({"included": ["b", "c"]})]
+      "filter": [json.dumps({"included": ["b", "c"]})],
+      "pinned": [True],
     }])
 
     # Add the same filter for second column (to make sure it is not renamed)
     self.apply_user_action(['BulkAddRecord', '_grist_Filters', [None], {
       "viewSectionRef": [1],
       "colRef": [2],
-      "filter": [json.dumps({"included": ["b", "c"]})]
+      "filter": [json.dumps({"included": ["b", "c"]})],
+      "pinned": [False],
     }])
 
     # Rename choices
@@ -971,9 +973,9 @@ class TestUserActions(test_engine.EngineTestCase):
 
     # Test filters
     self.assertTableData('_grist_Filters', data=[
-      ["id", "colRef", "filter", "setAutoRemove", "viewSectionRef"],
-      [1, 1, json.dumps({"included": ["z", "b"]}), None, 1],
-      [2, 2, json.dumps({"included": ["b", "c"]}), None, 1]
+      ["id", "colRef", "filter", "setAutoRemove", "viewSectionRef", "pinned"],
+      [1, 1, json.dumps({"included": ["z", "b"]}), None, 1, True],
+      [2, 2, json.dumps({"included": ["b", "c"]}), None, 1, False]
     ])
 
   def test_add_or_update(self):
@@ -1034,8 +1036,7 @@ class TestUserActions(test_engine.EngineTestCase):
       {"color": "green"},
       {"on_many": "all"},
       [
-        ["UpdateRecord", "Table1", 1, {"color": "green"}],
-        ["UpdateRecord", "Table1", 2, {"color": "green"}],
+        ["BulkUpdateRecord", "Table1", [1, 2], {"color": ["green", "green"]}],
       ],
     )
 
@@ -1045,8 +1046,7 @@ class TestUserActions(test_engine.EngineTestCase):
       {"color": "greener"},
       {"on_many": "all", "allow_empty_require": True},
       [
-        ["UpdateRecord", "Table1", 1, {"color": "greener"}],
-        ["UpdateRecord", "Table1", 2, {"color": "greener"}],
+        ["BulkUpdateRecord", "Table1", [1, 2], {"color": ["greener", "greener"]}],
       ],
     )
 
@@ -1160,6 +1160,128 @@ class TestUserActions(test_engine.EngineTestCase):
       [["UpdateRecord", "Table1", 102, {"date": 1900800}]],
     )
 
+    # Empty both does nothing
+    check(
+      {},
+      {},
+      {"allow_empty_require": True},
+      [],
+    )
+
+  def test_bulk_add_or_update(self):
+    sample = testutil.parse_test_sample({
+      "SCHEMA": [
+        [1, "Table1", [
+          [1, "first_name", "Text", False, "",     "first_name", ""],
+          [2, "last_name",  "Text", False, "",     "last_name",  ""],
+          [4, "color",      "Text", False, "",     "color",      ""],
+        ]],
+      ],
+      "DATA": {
+        "Table1": [
+          ["id", "first_name", "last_name"],
+          [1, "John", "Doe"],
+          [2, "John", "Smith"],
+        ],
+      }
+    })
+    self.load_sample(sample)
+
+    def check(require, values, options, stored):
+      self.assertPartialOutActions(
+        self.apply_user_action(["BulkAddOrUpdateRecord", "Table1", require, values, options]),
+        {"stored": stored},
+      )
+
+    check(
+      {
+        "first_name": [
+        "John",
+        "John",
+        "John",
+        "Bob",
+      ],
+      "last_name": [
+        "Doe",
+        "Smith",
+        "Johnson",
+        "Johnson",
+      ],
+      },
+      {
+        "color": [
+          "red",
+          "blue",
+          "green",
+          "yellow",
+        ],
+      },
+      {},
+      [
+        ["BulkAddRecord", "Table1", [3, 4], {
+          "color": ["green", "yellow"],
+          "first_name": ["John", "Bob"],
+          "last_name": ["Johnson", "Johnson"],
+        }],
+        ["BulkUpdateRecord", "Table1", [1, 2], {"color": ["red", "blue"]}],
+      ],
+    )
+
+    with self.assertRaises(ValueError) as cm:
+      check(
+        {"color": ["yellow"]},
+        {"color": ["red", "blue", "green"]},
+        {},
+        [],
+      )
+    self.assertEqual(
+      str(cm.exception),
+      'Value lists must all have the same length, '
+      'got {"col_values color": 3, "require color": 1}',
+    )
+
+    with self.assertRaises(ValueError) as cm:
+      check(
+        {
+          "first_name": [
+            "John",
+            "John",
+          ],
+          "last_name": [
+            "Doe",
+          ],
+        },
+        {},
+        {},
+        [],
+      )
+    self.assertEqual(
+      str(cm.exception),
+      'Value lists must all have the same length, '
+      'got {"require first_name": 2, "require last_name": 1}',
+    )
+
+    with self.assertRaises(ValueError) as cm:
+      check(
+        {
+          "first_name": [
+            "John",
+            "John",
+          ],
+          "last_name": [
+            "Doe",
+            "Doe",
+          ],
+        },
+        {},
+        {},
+        [],
+      )
+    self.assertEqual(
+      str(cm.exception),
+      "require values must be unique",
+    )
+
   def test_reference_lookup(self):
     sample = testutil.parse_test_sample({
       "SCHEMA": [
@@ -1267,7 +1389,7 @@ class TestUserActions(test_engine.EngineTestCase):
     for i in range(20):
       self.add_record("Address", None)
       self.assertEqual(i + 1, table._num_rows())
-      self.assertEqual(i + 1, self.engine.count_rows())
+      self.assertEqual({1: i + 1, "total": i + 1}, self.engine.count_rows())
 
   def test_raw_view_section_restrictions(self):
     # load_sample handles loading basic metadata, but doesn't create any view sections
@@ -1378,3 +1500,137 @@ class TestUserActions(test_engine.EngineTestCase):
     finally:
       # Revert the monkeypatch
       datetime.datetime = original
+
+  def test_duplicate_table(self):
+    self.load_sample(self.sample)
+
+    # Create a new table, Table1, and populate it with some data.
+    self.apply_user_action(['AddEmptyTable', None])
+    self.apply_user_action(['AddColumn', 'Table1', None, {
+      'formula': '$B * 100 + len(Table1.all)',
+    }])
+    self.add_column('Table1', 'E',
+      type='DateTime:UTC', isFormula=False, formula="NOW()", recalcWhen=RecalcWhen.MANUAL_UPDATES)
+    self.apply_user_action(['AddColumn', 'Table1', None, {
+      'type': 'Ref:Address',
+      'visibleCol': 21,
+    }])
+    self.apply_user_action(['AddColumn', 'Table1', None, {
+      'type': 'Ref:Table1',
+      'visibleCol': 23,
+    }])
+    self.apply_user_action(['AddColumn', 'Table1', None, {
+      'type': 'RefList:Table1',
+      'visibleCol': 23,
+    }])
+    self.apply_user_action(['BulkAddRecord', 'Table1', [1, 2, 3, 4], {
+      'A': ['Foo', 'Bar', 'Baz', ''],
+      'B': [123, 456, 789, 0],
+      'C': ['', '', '', ''],
+      'F': [11, 12, 0, 0],
+      'G': [1, 2, 0, 0],
+      'H': [['L', 1, 2], ['L', 1], None, None],
+    }])
+
+    # Add a row conditional style.
+    self.apply_user_action(['AddEmptyRule', 'Table1', 0, 0])
+    rules = self.engine.docmodel.tables.lookupOne(tableId='Table1').rawViewSectionRef.rules
+    rule = list(rules)[0]
+    self.apply_user_action(['UpdateRecord', '_grist_Tables_column', rule.id, {
+      'formula': 'rec.id % 2 == 0',
+    }])
+
+    # Add a column conditional style.
+    self.apply_user_action(['AddEmptyRule', 'Table1', 0, 23])
+    rules = self.engine.docmodel.columns.table.get_record(23).rules
+    rule = list(rules)[0]
+    self.apply_user_action(['UpdateRecord', '_grist_Tables_column', rule.id, {
+      'formula': '$A == "Foo"',
+    }])
+
+    # Duplicate Table1 as Foo without including any of its data.
+    self.apply_user_action(['DuplicateTable', 'Table1', 'Foo', False])
+
+    # Check that the correct table and options were duplicated.
+    existing_table = Table(2, 'Table1', primaryViewId=1, summarySourceTable=0, columns=[
+      Column(22, 'manualSort', 'ManualSortPos', isFormula=False, formula='', summarySourceCol=0),
+      Column(23, 'A', 'Text', isFormula=False, formula='', summarySourceCol=0),
+      Column(24, 'B', 'Numeric', isFormula=False, formula='', summarySourceCol=0),
+      Column(25, 'C', 'Any', isFormula=True, formula='', summarySourceCol=0),
+      Column(26, 'D', 'Any', isFormula=True, formula='$B * 100 + len(Table1.all)',
+        summarySourceCol=0),
+      Column(27, 'E', 'DateTime:UTC', isFormula=False, formula='NOW()',
+        summarySourceCol=0),
+      Column(28, 'F', 'Ref:Address', isFormula=False, formula='', summarySourceCol=0),
+      Column(29, 'G', 'Ref:Table1', isFormula=False, formula='', summarySourceCol=0),
+      Column(30, 'H', 'RefList:Table1', isFormula=False, formula='', summarySourceCol=0),
+      Column(31, 'gristHelper_RowConditionalRule', 'Any', isFormula=True,
+        formula='rec.id % 2 == 0', summarySourceCol=0),
+      Column(32, 'gristHelper_ConditionalRule', 'Any', isFormula=True, formula='$A == \"Foo\"',
+        summarySourceCol=0),
+    ])
+    duplicated_table = Table(3, 'Foo', primaryViewId=0, summarySourceTable=0, columns=[
+      Column(33, 'manualSort', 'ManualSortPos', isFormula=False, formula='', summarySourceCol=0),
+      Column(34, 'A', 'Text', isFormula=False, formula='', summarySourceCol=0),
+      Column(35, 'B', 'Numeric', isFormula=False, formula='', summarySourceCol=0),
+      Column(36, 'C', 'Any', isFormula=True, formula='', summarySourceCol=0),
+      Column(37, 'D', 'Any', isFormula=True, formula='$B * 100 + len(Foo.all)',
+        summarySourceCol=0),
+      Column(38, 'E', 'DateTime:UTC', isFormula=False, formula='NOW()',
+        summarySourceCol=0),
+      Column(39, 'F', 'Ref:Address', isFormula=False, formula='', summarySourceCol=0),
+      Column(40, 'G', 'Ref:Foo', isFormula=False, formula='', summarySourceCol=0),
+      Column(41, 'H', 'RefList:Foo', isFormula=False, formula='', summarySourceCol=0),
+      Column(42, 'gristHelper_ConditionalRule', 'Any', isFormula=True, formula='$A == \"Foo\"',
+        summarySourceCol=0),
+      Column(43, 'gristHelper_RowConditionalRule', 'Any', isFormula=True,
+        formula='rec.id % 2 == 0', summarySourceCol=0),
+    ])
+    self.assertTables([self.starting_table, existing_table, duplicated_table])
+    self.assertTableData('Foo', data=[
+      ["id", "A", "B", "C", "D", "E", "F", "G", "H", "gristHelper_ConditionalRule",
+        "gristHelper_RowConditionalRule", "manualSort"],
+    ])
+
+    # Duplicate Table1 as FooData and include all of its data.
+    self.apply_user_action(['DuplicateTable', 'Table1', 'FooData', True])
+
+    # Check that the correct table, options, and data were duplicated.
+    duplicated_table_with_data = Table(4, 'FooData', primaryViewId=0, summarySourceTable=0,
+      columns=[
+        Column(44, 'manualSort', 'ManualSortPos', isFormula=False, formula='', summarySourceCol=0),
+        Column(45, 'A', 'Text', isFormula=False, formula='', summarySourceCol=0),
+        Column(46, 'B', 'Numeric', isFormula=False, formula='', summarySourceCol=0),
+        Column(47, 'C', 'Any', isFormula=True, formula='', summarySourceCol=0),
+        Column(48, 'D', 'Any', isFormula=True, formula='$B * 100 + len(FooData.all)',
+          summarySourceCol=0),
+        Column(49, 'E', 'DateTime:UTC', isFormula=False, formula='NOW()',
+          summarySourceCol=0),
+        Column(50, 'F', 'Ref:Address', isFormula=False, formula='', summarySourceCol=0),
+        Column(51, 'G', 'Ref:FooData', isFormula=False, formula='', summarySourceCol=0),
+        Column(52, 'H', 'RefList:FooData', isFormula=False, formula='', summarySourceCol=0),
+        Column(53, 'gristHelper_ConditionalRule', 'Any', isFormula=True, formula='$A == \"Foo\"',
+          summarySourceCol=0),
+        Column(54, 'gristHelper_RowConditionalRule', 'Any', isFormula=True,
+          formula='rec.id % 2 == 0', summarySourceCol=0),
+      ]
+    )
+    self.assertTables([
+      self.starting_table, existing_table, duplicated_table, duplicated_table_with_data])
+    self.assertTableData('Foo', data=[
+      ["id", "A", "B", "C", "D", "E", "F", "G", "H", "gristHelper_ConditionalRule",
+        "gristHelper_RowConditionalRule", "manualSort"],
+    ], rows="subset")
+    self.assertTableData('FooData', data=[
+      ["id", "A", "B", "C", "D", "F", "G", "H", "gristHelper_ConditionalRule",
+        "gristHelper_RowConditionalRule", "manualSort"],
+      [1, 'Foo', 123, None, 12304.0, 11, 1, [1, 2], True, False, 1.0],
+      [2, 'Bar', 456, None, 45604.0, 12, 2, [1], False, True, 2.0],
+      [3, 'Baz', 789, None, 78904.0, 0, 0, None, False, False, 3.0],
+      [4, '', 0, None, 4.0, 0, 0, None, False, True, 4.0],
+    ], cols="subset")
+
+    # Check that values for the duplicated trigger formula were not re-calculated.
+    existing_times = self.engine.fetch_table('Table1').columns['E']
+    duplicated_times = self.engine.fetch_table('FooData').columns['E']
+    self.assertEqual(existing_times, duplicated_times)

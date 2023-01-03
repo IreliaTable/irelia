@@ -20,7 +20,8 @@
 
 import { ColumnsToMap, CustomSectionAPI, InteractionOptions, InteractionOptionsRequest,
          WidgetColumnMap } from './CustomSectionAPI';
-import { GristAPI, GristDocAPI, GristView, RPC_GRISTAPI_INTERFACE } from './GristAPI';
+import { AccessTokenOptions, AccessTokenResult, GristAPI, GristDocAPI,
+         GristView, RPC_GRISTAPI_INTERFACE } from './GristAPI';
 import { RowRecord } from './GristData';
 import { ImportSource, ImportSourceAPI, InternalImportSourceAPI } from './InternalImportSourceAPI';
 import { decodeObject, mapValues } from './objtypes';
@@ -156,6 +157,28 @@ export function getTable(tableId?: string): TableOperations {
       return docApi.applyUserActions(actions, opts);
     },
   }, {});
+}
+
+/**
+ * Get an access token, for making API calls outside of the custom widget
+ * API. There is no caching of tokens. The returned token can
+ * be used to authorize regular REST API calls that access the content of the
+ * document. For example, in a custom widget for a table with a `Photos` column
+ * containing attachments, the following code will update the `src` of an
+ * image with id `the_image` to show the attachment:
+ * ```js
+ * grist.onRecord(async (record) => {
+ *   const tokenInfo = await grist.docApi.getAccessToken({readOnly: true});
+ *   const img = document.getElementById('the_image');
+ *   const id = record.Photos[0];  // get an id of an attachment - there could be several
+ *                                 // in a cell, for this example we just take the first.
+ *   const src = `${tokenInfo.baseUrl}/attachments/${id}/download?auth=${tokenInfo.token}`;
+ *   img.setAttribute('src', src);
+ * });
+ * ```
+ */
+export async function getAccessToken(options?: AccessTokenOptions): Promise<AccessTokenResult> {
+  return docApi.getAccessToken(options || {});
 }
 
 /**
@@ -402,7 +425,7 @@ export interface ReadyPayload extends Omit<InteractionOptionsRequest, "hasCustom
   /**
    * Handler that will be called by Grist to open additional configuration panel inside the Custom Widget.
    */
-  onEditOptions: () => unknown;
+  onEditOptions?: () => unknown;
 }
 /**
  * Declare that a component is prepared to receive messages from the outside world.
@@ -485,7 +508,7 @@ function createRpcLogger(): IRpcLogger {
   } else if (typeof process === 'undefined') {
     prefix = `PLUGIN VIEW ${getPluginPath(self.location)}:`;
   } else if (typeof process.send !== 'undefined') {
-    prefix = `PLUGIN NODE ${process.env.IRELIA_PLUGIN_PATH || "<unset-plugin-id>"}:`;
+    prefix = `PLUGIN NODE ${process.env.GRIST_PLUGIN_PATH || "<unset-plugin-id>"}:`;
   } else {
     return {};
   }

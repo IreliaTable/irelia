@@ -1,27 +1,33 @@
 import { allCommands } from 'app/client/components/commands';
+import { makeT } from 'app/client/lib/localization';
 import { menuDivider, menuItemCmd } from 'app/client/ui2018/menus';
 import { IMultiColumnContextMenu } from 'app/client/ui/GridViewMenus';
 import { IRowContextMenu } from 'app/client/ui/RowContextMenu';
+import { COMMENTS } from 'app/client/models/features';
 import { dom } from 'grainjs';
+
+const t = makeT('CellContextMenu');
 
 export function CellContextMenu(rowOptions: IRowContextMenu, colOptions: IMultiColumnContextMenu) {
 
   const { disableInsert, disableDelete, isViewSorted } = rowOptions;
   const { disableModify, isReadonly } = colOptions;
 
+  // disableModify is true if the column is a summary column or is being transformed.
+  // isReadonly is true for readonly mode.
   const disableForReadonlyColumn = dom.cls('disabled', Boolean(disableModify) || isReadonly);
   const disableForReadonlyView = dom.cls('disabled', isReadonly);
 
   const numCols: number = colOptions.numColumns;
   const nameClearColumns = colOptions.isFiltered ?
-    (numCols > 1 ? `Clear ${numCols} entire columns` : 'Clear entire column') :
-    (numCols > 1 ? `Clear ${numCols} columns` : 'Clear column');
-  const nameDeleteColumns = numCols > 1 ? `Delete ${numCols} columns` : 'Delete column';
+    t("ResetEntireColumns", {count: numCols}) :
+    t("ResetColumns", {count: numCols});
+  const nameDeleteColumns = t("DeleteColumns", {count: numCols});
 
   const numRows: number = rowOptions.numRows;
-  const nameDeleteRows = numRows > 1 ? `Delete ${numRows} rows` : 'Delete row';
+  const nameDeleteRows = t("DeleteRows", {count: numRows});
 
-  const nameClearCells = (numRows > 1 || numCols > 1) ? 'Clear values' : 'Clear cell';
+  const nameClearCells = (numRows > 1 || numCols > 1) ? t('ClearValues') : t('ClearCell');
 
   const result: Array<Element|null> = [];
 
@@ -32,14 +38,17 @@ export function CellContextMenu(rowOptions: IRowContextMenu, colOptions: IMultiC
     colOptions.isFormula ?
       null :
       menuItemCmd(allCommands.clearValues, nameClearCells, disableForReadonlyColumn),
-    menuItemCmd(allCommands.clearColumns, nameClearColumns, disableForReadonlyColumn),
+      menuItemCmd(allCommands.clearColumns, nameClearColumns, disableForReadonlyColumn),
 
     ...(
       (numCols > 1 || numRows > 1) ? [] : [
         menuDivider(),
-        menuItemCmd(allCommands.copyLink, 'Copy anchor link'),
+        menuItemCmd(allCommands.copyLink, t('CopyAnchorLink')),
         menuDivider(),
-        menuItemCmd(allCommands.filterByThisCellValue, `Filter by this value`),
+        menuItemCmd(allCommands.filterByThisCellValue, t("FilterByValue")),
+        menuItemCmd(allCommands.openDiscussion, 'Comment', dom.cls('disabled', (
+         isReadonly || numRows === 0 || numCols === 0
+        )), dom.hide(use => !use(COMMENTS()))) //TODO: i18next
       ]
     ),
 
@@ -51,27 +60,26 @@ export function CellContextMenu(rowOptions: IRowContextMenu, colOptions: IMultiC
         // When the view is sorted, any newly added records get shifts instantly at the top or
         // bottom. It could be very confusing for users who might expect the record to stay above or
         // below the active row. Thus in this case we show a single `insert row` command.
-        [menuItemCmd(allCommands.insertRecordAfter, 'Insert row',
+        [menuItemCmd(allCommands.insertRecordAfter, t("InsertRow"),
                     dom.cls('disabled', disableInsert))] :
 
-        [menuItemCmd(allCommands.insertRecordBefore, 'Insert row above',
+        [menuItemCmd(allCommands.insertRecordBefore, t("InsertRowAbove"),
                      dom.cls('disabled', disableInsert)),
-         menuItemCmd(allCommands.insertRecordAfter, 'Insert row below',
+         menuItemCmd(allCommands.insertRecordAfter, t("InsertRowBelow"),
                      dom.cls('disabled', disableInsert))]
     ),
-    menuItemCmd(allCommands.duplicateRows, `Duplicate ${numRows === 1 ? 'row' : 'rows'}`,
+    menuItemCmd(allCommands.duplicateRows, t("DuplicateRows", {count: numRows}),
         dom.cls('disabled', disableInsert || numRows === 0)),
-    menuItemCmd(allCommands.insertFieldBefore, 'Insert column to the left',
+    menuItemCmd(allCommands.insertFieldBefore, t("InsertColumnLeft"),
                 disableForReadonlyView),
-    menuItemCmd(allCommands.insertFieldAfter, 'Insert column to the right',
+    menuItemCmd(allCommands.insertFieldAfter, t("InsertColumnRight"),
                 disableForReadonlyView),
 
 
     menuDivider(),
 
     // deletes
-    menuItemCmd(allCommands.deleteRecords, nameDeleteRows,
-                dom.cls('disabled', disableDelete)),
+    menuItemCmd(allCommands.deleteRecords, nameDeleteRows, dom.cls('disabled', disableDelete)),
 
     menuItemCmd(allCommands.deleteFields, nameDeleteColumns, disableForReadonlyColumn),
 

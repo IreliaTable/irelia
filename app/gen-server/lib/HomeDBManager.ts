@@ -21,7 +21,6 @@ import {
   Organization as OrgInfo,
   PermissionData,
   PermissionDelta,
-  SUPPORT_EMAIL,
   UserAccessData,
   UserOptions,
   WorkspaceProperties
@@ -35,7 +34,7 @@ import {Group} from "app/gen-server/entity/Group";
 import {Login} from "app/gen-server/entity/Login";
 import {AccessOption, AccessOptionWithRole, Organization} from "app/gen-server/entity/Organization";
 import {Pref} from "app/gen-server/entity/Pref";
-import {getDefaultProductNames, Product, starterFeatures} from "app/gen-server/entity/Product";
+import {getDefaultProductNames, personalFreeFeatures, Product} from "app/gen-server/entity/Product";
 import {Secret} from "app/gen-server/entity/Secret";
 import {User} from "app/gen-server/entity/User";
 import {Workspace} from "app/gen-server/entity/Workspace";
@@ -50,9 +49,10 @@ import {
   now,
   readJson
 } from 'app/gen-server/sqlUtils';
+import {appSettings} from 'app/server/lib/AppSettings';
 import {getOrCreateConnection} from 'app/server/lib/dbUtils';
 import {makeId} from 'app/server/lib/idUtils';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {Permit} from 'app/server/lib/Permit';
 import {getScope} from 'app/server/lib/requestUtils';
 import {WebHookSecret} from "app/server/lib/Triggers";
@@ -66,7 +66,7 @@ import {
   SelectQueryBuilder,
   WhereExpression
 } from "typeorm";
-import * as uuidv4 from "uuid/v4";
+import uuidv4 from "uuid/v4";
 import flatten = require('lodash/flatten');
 import pick = require('lodash/pick');
 
@@ -90,11 +90,24 @@ export type NotifierEvent = typeof NotifierEvents.type;
 // Nominal email address of a user who can view anything (for thumbnails).
 export const PREVIEWER_EMAIL = 'thumbnail@getgrist.com';
 
+// A special user allowed to add/remove the EVERYONE_EMAIL to/from a resource.
+export const SUPPORT_EMAIL = appSettings.section('access').flag('supportEmail').requireString({
+  envVar: 'GRIST_SUPPORT_EMAIL',
+  defaultValue: 'support@getgrist.com',
+});
+
 // A list of emails we don't expect to see logins for.
 const NON_LOGIN_EMAILS = [PREVIEWER_EMAIL, EVERYONE_EMAIL, ANONYMOUS_USER_EMAIL];
 
 // Name of a special workspace with examples in it.
 export const EXAMPLE_WORKSPACE_NAME = 'Examples & Templates';
+
+// Flag controlling whether sites that are publicly accessible should be listed
+// to the anonymous user. Defaults to not listing such sites.
+const listPublicSites = appSettings.section('access').flag('listPublicSites').readBool({
+  envVar: 'GRIST_LIST_PUBLIC_SITES',
+  defaultValue: false,
+});
 
 // A TTL in milliseconds for caching the result of looking up access level for a doc,
 // which is a burden under heavy traffic.
@@ -255,10 +268,6 @@ export class HomeDBManager extends EventEmitter {
   // In restricted mode, documents should be read-only.
   private _restrictedMode: boolean = false;
 
-  public emit(event: NotifierEvent, ...args: any[]): boolean {
-    return super.emit(event, ...args);
-  }
-
   /**
    * Five aclRules, each with one group (with the names 'owners', 'editors', 'viewers',
    * 'guests', and 'members') are created by default on every new entity (Organization,
@@ -297,6 +306,10 @@ export class HomeDBManager extends EventEmitter {
     nestParent: false,
     orgOnly: true
   }];
+
+  public emit(event: NotifierEvent, ...args: any[]): boolean {
+    return super.emit(event, ...args);
+  }
 
   // All groups.
   public get defaultGroups(): GroupDescriptor[] {
@@ -376,7 +389,6 @@ export class HomeDBManager extends EventEmitter {
       // TODO: it should now be possible to remove all this; the only remaining
       // issue is what workspace to associate with documents created by
       // anonymous users.
-      log.debug("support user id: %s", this.getSupportUserId());
       const supportWorkspaces = await this._workspaces()
         .leftJoinAndSelect('workspaces.org', 'orgs')
         .where('orgs.owner_id = :userId', { userId: this.getSupportUserId() })
@@ -407,17 +419,26 @@ export class HomeDBManager extends EventEmitter {
    * force, and returns the id of this first match it finds.
    */
   public async testGetId(name: string): Promise<number|string> {
-    const org = await Organization.findOne({name});
+    const org = await Organization.findOne({where: {name}});
     if (org) { return org.id; }
-    const ws = await Workspace.findOne({name});
+    const ws = await Workspace.findOne({where: {name}});
     if (ws) { return ws.id; }
-    const doc = await Document.findOne({name});
+    const doc = await Document.findOne({where: {name}});
     if (doc) { return doc.id; }
-    const user = await User.findOne({name});
+    const user = await User.findOne({where: {name}});
     if (user) { return user.id; }
-    const product = await Product.findOne({name});
+    const product = await Product.findOne({where: {name}});
     if (product) { return product.id; }
     throw new Error(`Cannot testGetId(${name})`);
+  }
+
+  /**
+   * For tests only. Get user's unique reference by name.
+   */
+  public async testGetRef(name: string): Promise<string> {
+    const user = await User.findOne({where: {name}});
+    if (user) { return user.ref; }
+    throw new Error(`Cannot testGetRef(${name})`);
   }
 
   /**
@@ -435,17 +456,17 @@ export class HomeDBManager extends EventEmitter {
     });
   }
 
-  public getUserByKey(apiKey: string): Promise<User|undefined> {
+  public async getUserByKey(apiKey: string): Promise<User|undefined> {
     // Include logins relation for Authorization convenience.
-    return User.findOne({apiKey}, {relations: ["logins"]});
+    return await User.findOne({where: {apiKey}, relations: ["logins"]}) || undefined;
   }
 
-  public getUser(userId: number): Promise<User|undefined> {
-    return User.findOne(userId, {relations: ["logins"]});
+  public async getUser(userId: number): Promise<User|undefined> {
+    return await User.findOne({where: {id: userId}, relations: ["logins"]}) || undefined;
   }
 
   public async getFullUser(userId: number): Promise<FullUser> {
-    const user = await User.findOne(userId, {relations: ["logins"]});
+    const user = await User.findOne({where: {id: userId}, relations: ["logins"]});
     if (!user) { throw new ApiError("unable to find user", 400); }
     return this.makeFullUser(user);
   }
@@ -462,9 +483,13 @@ export class HomeDBManager extends EventEmitter {
       email: user.logins[0].displayEmail,
       name: user.name,
       picture: user.picture,
+      ref: user.ref,
     };
     if (this.getAnonymousUserId() === user.id) {
       result.anonymous = true;
+    }
+    if (this.getSupportUserId() === user.id) {
+      result.isSupport = true;
     }
     return result;
   }
@@ -477,7 +502,10 @@ export class HomeDBManager extends EventEmitter {
   public async ensureExternalUser(profile: UserProfile) {
     await this._connection.transaction(async manager => {
       // First find user by the connectId from the profile
-      const existing = await manager.findOne(User, { connectId: profile.connectId}, {relations: ["logins"]});
+      const existing = await manager.findOne(User, {
+        where: {connectId: profile.connectId || undefined},
+        relations: ["logins"],
+      });
 
       // If a user does not exist, create it with data from the external profile.
       if (!existing) {
@@ -525,7 +553,7 @@ export class HomeDBManager extends EventEmitter {
 
   public async updateUser(userId: number, props: UserProfileChange): Promise<void> {
     let isWelcomed: boolean = false;
-    let user: User|undefined;
+    let user: User|null = null;
     await this._connection.transaction(async manager => {
       user = await manager.findOne(User, {relations: ['logins'],
                                           where: {id: userId}});
@@ -553,14 +581,14 @@ export class HomeDBManager extends EventEmitter {
   }
 
   public async updateUserName(userId: number, name: string) {
-    const user = await User.findOne(userId);
+    const user = await User.findOne({where: {id: userId}});
     if (!user) { throw new ApiError("unable to find user", 400); }
     user.name = name;
     await user.save();
   }
 
   public async updateUserOptions(userId: number, props: Partial<UserOptions>) {
-    const user = await User.findOne(userId);
+    const user = await User.findOne({where: {id: userId}});
     if (!user) { throw new ApiError("unable to find user", 400); }
 
     const newOptions = {...(user.options ?? {}), ...props};
@@ -709,12 +737,12 @@ export class HomeDBManager extends EventEmitter {
     manager?: EntityManager
   ): Promise<User|undefined> {
     const normalizedEmail = normalizeEmail(email);
-    return (manager || this._connection).createQueryBuilder()
+    return await (manager || this._connection).createQueryBuilder()
       .select('user')
       .from(User, 'user')
       .leftJoinAndSelect('user.logins', 'logins')
       .where('email = :email', {email: normalizedEmail})
-      .getOne();
+      .getOne() || undefined;
   }
 
   /**
@@ -812,7 +840,7 @@ export class HomeDBManager extends EventEmitter {
         id: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-         domain: this.mergedOrgDomain(),
+        domain: this.mergedOrgDomain(),
         name: 'Anonymous',
         owner: this.makeFullUser(this.getAnonymousUser()),
         access: 'viewers',
@@ -821,9 +849,10 @@ export class HomeDBManager extends EventEmitter {
           individual: true,
           product: {
             name: 'anonymous',
-            features: starterFeatures,
+            features: personalFreeFeatures,
           },
           isManager: false,
+          inGoodStanding: true,
         },
         host: null
       };
@@ -932,7 +961,7 @@ export class HomeDBManager extends EventEmitter {
       .leftJoinAndSelect('orgs.billingAccount', 'billing_accounts')
       .leftJoinAndSelect('billing_accounts.product', 'products')
       .where('external_id = :externalId', {externalId});
-    return query.getOne();
+    return await query.getOne() || undefined;
   }
 
   /**
@@ -1088,7 +1117,7 @@ export class HomeDBManager extends EventEmitter {
     queryBuilder = this._withAccess(queryBuilder, users, 'orgs');
     // Add a direct, efficient filter to remove irrelevant personal orgs from consideration.
     queryBuilder = this._filterByOrgGroups(queryBuilder, users, domain, options);
-    if (this._isAnonymousUser(users)) {
+    if (this._isAnonymousUser(users) && !listPublicSites) {
       // The anonymous user is a special case.  It may have access to potentially
       // many orgs, but listing them all would be kind of a misfeature.  but reporting
       // nothing would complicate the client.  We compromise, and report at most
@@ -1226,7 +1255,7 @@ export class HomeDBManager extends EventEmitter {
   // TODO: make a more efficient implementation if needed.
   public async flushSingleDocAuthCache(scope: DocScope, docId: string) {
     // Get all aliases of this document.
-    const aliases = await this._connection.manager.find(Alias, { docId });
+    const aliases = await this._connection.manager.find(Alias, {where: {docId}});
     // Construct a set of possible prefixes for cache keys.
     const names = new Set(aliases.map(a => stringifyUrlIdOrg(a.urlId, scope.org)));
     names.add(stringifyUrlIdOrg(docId, scope.org));
@@ -1264,6 +1293,7 @@ export class HomeDBManager extends EventEmitter {
    * @param useNewPlan: by default, the individual billing account associated with the
    *   user's personal org will be used for all other orgs they create.  Set useNewPlan
    *   to force a distinct non-individual billing account to be used for this org.
+   *   NOTE: Currently it is always a true - billing account is one to one with org.
    * @param planType: if set, controls the type of plan used for the org. Only
    *   meaningful for team sites currently.
    *
@@ -1271,7 +1301,7 @@ export class HomeDBManager extends EventEmitter {
   public async addOrg(user: User, props: Partial<OrganizationProperties>,
                       options: { setUserAsOwner: boolean,
                                  useNewPlan: boolean,
-                                 planType?: 'free',
+                                 planType?: string,
                                  externalId?: string,
                                  externalOptions?: ExternalBillingOptions },
                       transaction?: EntityManager): Promise<QueryResult<number>> {
@@ -1298,20 +1328,22 @@ export class HomeDBManager extends EventEmitter {
       // Create or find a billing account to associate with this org.
       const billingAccountEntities = [];
       let billingAccount;
-      if (options.useNewPlan) {
+      if (options.useNewPlan) { // use separate billing account (currently yes)
         const productNames = getDefaultProductNames();
         let productName = options.setUserAsOwner ? productNames.personal :
-          options.planType === 'free' ? productNames.teamFree : productNames.teamInitial;
+          options.planType === productNames.teamFree ? productNames.teamFree : productNames.teamInitial;
         // A bit fragile: this is called during creation of support@ user, before
         // getSupportUserId() is available, but with setUserAsOwner of true.
-        if (!options.setUserAsOwner && user.id === this.getSupportUserId() && options.planType !== 'free') {
+        if (!options.setUserAsOwner
+            && user.id === this.getSupportUserId()
+            && options.planType !== productNames.teamFree) {
           // For teams created by support@getgrist.com, set the product to something
           // good so payment not needed.  This is useful for testing.
           productName = productNames.team;
         }
         billingAccount = new BillingAccount();
         billingAccount.individual = options.setUserAsOwner;
-        const dbProduct = await manager.findOne(Product, {name: productName});
+        const dbProduct = await manager.findOne(Product, {where: {name: productName}});
         if (!dbProduct) {
           throw new Error('Cannot find product for new organization');
         }
@@ -1329,6 +1361,7 @@ export class HomeDBManager extends EventEmitter {
           billingAccount.externalOptions = options.externalOptions;
         }
       } else {
+        log.warn("Creating org with shared billing account");
         // Use the billing account from the user's personal org to start with.
         billingAccount = await manager.createQueryBuilder()
           .select('billing_accounts')
@@ -1529,8 +1562,10 @@ export class HomeDBManager extends EventEmitter {
         ...wsAcls, ...wsGroups, ...docs, ...docAcls, ...docGroups]);
 
       // Delete billing account if this was the last org using it.
-      const billingAccount = await manager.findOne(BillingAccount, org.billingAccountId,
-                                                   {relations: ['orgs']});
+      const billingAccount = await manager.findOne(BillingAccount, {
+        where: {id: org.billingAccountId},
+        relations: ['orgs'],
+      });
       if (billingAccount && billingAccount.orgs.length === 0) {
         await manager.remove([billingAccount]);
       }
@@ -1710,7 +1745,7 @@ export class HomeDBManager extends EventEmitter {
       if (!doc.urlId) {
         for (let i = MIN_URLID_PREFIX_LENGTH; i <= doc.id.length; i++) {
           const candidate = doc.id.substr(0, i);
-          if (!await manager.findOne(Alias, { urlId: candidate })) {
+          if (!await manager.findOne(Alias, {where: {urlId: candidate}})) {
             doc.urlId = candidate;
             break;
           }
@@ -1772,18 +1807,23 @@ export class HomeDBManager extends EventEmitter {
     return secret?.value;
   }
 
-  public async removeWebhook(id: string, docId: string, unsubscribeKey: string): Promise<void> {
-    if (!(id && unsubscribeKey)) {
-      throw new ApiError('Bad request: id and unsubscribeKey both required', 400);
+  public async removeWebhook(id: string, docId: string, unsubscribeKey: string, checkKey: boolean): Promise<void> {
+    if (!id) {
+      throw new ApiError('Bad request: id required', 400);
+    }
+    if (!unsubscribeKey && checkKey) {
+      throw new ApiError('Bad request: unsubscribeKey required', 400);
     }
     return await this._connection.transaction(async manager => {
-      const secret = await this.getSecret(id, docId, manager);
-      if (!secret) {
-        throw new ApiError('Webhook with given id not found', 404);
-      }
-      const webhook = JSON.parse(secret) as WebHookSecret;
-      if (webhook.unsubscribeKey !== unsubscribeKey) {
-        throw new ApiError('Wrong unsubscribeKey', 401);
+      if (checkKey) {
+        const secret = await this.getSecret(id, docId, manager);
+        if (!secret) {
+          throw new ApiError('Webhook with given id not found', 404);
+        }
+        const webhook = JSON.parse(secret) as WebHookSecret;
+        if (webhook.unsubscribeKey !== unsubscribeKey) {
+          throw new ApiError('Wrong unsubscribeKey', 401);
+        }
       }
       await manager.createQueryBuilder()
         .delete()
@@ -1793,17 +1833,19 @@ export class HomeDBManager extends EventEmitter {
     });
   }
 
-  // Checks that the user has UPDATE permissions to the given doc. If not, throws an
+  // Checks that the user has SCHEMA_EDIT permissions to the given doc. If not, throws an
   // error. Otherwise updates the given doc with the given name. Returns an empty
   // query result with status 200 on success.
   // NOTE: This does not update the updateAt date indicating the last modified time of the doc.
   // We may want to make it do so.
   public async updateDocument(scope: DocScope,
                               props: Partial<DocumentProperties>): Promise<QueryResult<number>> {
+
+    const markPermissions = Permissions.SCHEMA_EDIT;
     return await this._connection.transaction(async manager => {
       const docQuery = this._doc(scope, {
         manager,
-        markPermissions: Permissions.UPDATE
+        markPermissions
       });
 
       const queryResult = await verifyIsPermitted(docQuery);
@@ -1850,7 +1892,7 @@ export class HomeDBManager extends EventEmitter {
     return await this._connection.transaction(async manager => {
       const docQuery = this._doc(scope, {
         manager,
-        markPermissions: Permissions.REMOVE,
+        markPermissions: Permissions.REMOVE | Permissions.SCHEMA_EDIT,
         allowSpecialPermit: true
       })
       // Join the docs's ACLs and groups so we can remove them.
@@ -2173,10 +2215,14 @@ export class HomeDBManager extends EventEmitter {
     }
     const org: Organization = queryResult.data;
     const userRoleMap = getMemberUserRoles(org, this.defaultGroupNames);
-    const users = getResourceUsers(org).filter(u => userRoleMap[u.id]).map(u => ({
-      ...this.makeFullUser(u),
-      access: userRoleMap[u.id]
-    }));
+    const users = getResourceUsers(org).filter(u => userRoleMap[u.id]).map(u => {
+      const access = userRoleMap[u.id];
+      return {
+        ...this.makeFullUser(u),
+        access,
+        isMember: access !== 'guests',
+      };
+    });
     const personal = this._filterAccessData(scope, users, null);
     return {
       status: 200,
@@ -2215,12 +2261,15 @@ export class HomeDBManager extends EventEmitter {
     const wsMap = getMemberUserRoles(workspace, this.defaultCommonGroupNames);
     // The orgMap gives the org access inherited by each user.
     const orgMap = getMemberUserRoles(workspace.org, this.defaultBasicGroupNames);
+    const orgMapWithMembership = getMemberUserRoles(workspace.org, this.defaultGroupNames);
     // Iterate through the org since all users will be in the org.
     const users: UserAccessData[] = getResourceUsers([workspace, workspace.org]).map(u => {
+      const orgAccess = orgMapWithMembership[u.id] || null;
       return {
         ...this.makeFullUser(u),
         access: wsMap[u.id] || null,
-        parentAccess: roles.getEffectiveRole(orgMap[u.id] || null)
+        parentAccess: roles.getEffectiveRole(orgMap[u.id] || null),
+        isMember: orgAccess && orgAccess !== 'guests',
       };
     });
     const maxInheritedRole = this._getMaxInheritedRole(workspace);
@@ -2284,7 +2333,8 @@ export class HomeDBManager extends EventEmitter {
         parentAccess: roles.getEffectiveRole(
           roles.getStrongestRole(wsMap[u.id] || null, inheritFromOrg)
         ),
-        isMember: orgAccess !== 'guests' && orgAccess !== null,
+        isMember: orgAccess && orgAccess !== 'guests',
+        isSupport: u.id === this.getSupportUserId() ? true : undefined,
       };
     });
     let maxInheritedRole = this._getMaxInheritedRole(doc);
@@ -2514,7 +2564,7 @@ export class HomeDBManager extends EventEmitter {
       .leftJoinAndSelect('org.workspaces', 'workspace')
       .leftJoinAndSelect('workspace.docs', 'doc')
       .where('doc.id = :docId', {docId})
-      .getOne();
+      .getOne() || undefined;
   }
 
   /**
@@ -2528,6 +2578,7 @@ export class HomeDBManager extends EventEmitter {
     const login = new Login();
     login.displayEmail = login.email = ANONYMOUS_USER_EMAIL;
     user.logins = [login];
+    user.ref = '';
     return user;
   }
 
@@ -3352,7 +3403,7 @@ export class HomeDBManager extends EventEmitter {
         effectiveUserId = this.getPreviewerUserId();
         threshold = Permissions.VIEW;
       }
-      // Compute whether we have access to the doc
+      // Compute whether we have access to the ws
       query = query.addSelect(
         this._markIsPermitted('workspaces', effectiveUserId, 'open', threshold),
         'is_permitted'
@@ -3580,8 +3631,8 @@ export class HomeDBManager extends EventEmitter {
   // Access fields are added to all entities giving the group name corresponding
   // with the access level of the user.
   // Returns the resource fetched by the queryBuilder.
-  private async _verifyAclPermissions(
-    queryBuilder: SelectQueryBuilder<Resource>,
+  private async _verifyAclPermissions<T extends Resource>(
+    queryBuilder: SelectQueryBuilder<T>,
     options: {
       rawQueryBuilder?: SelectQueryBuilder<any>,
       emptyAllowed?: boolean,
@@ -3908,6 +3959,9 @@ export class HomeDBManager extends EventEmitter {
           cond = cond.orWhere(`gu3.user_id = ${users}`);
           // Support the special "everyone" user.
           const everyoneId = this._specialUserIds[EVERYONE_EMAIL];
+          if (everyoneId === undefined) {
+            throw new Error("Special user id for EVERYONE_EMAIL not found");
+          }
           cond = cond.orWhere(`gu0.user_id = ${everyoneId}`);
           cond = cond.orWhere(`gu1.user_id = ${everyoneId}`);
           cond = cond.orWhere(`gu2.user_id = ${everyoneId}`);
@@ -3916,6 +3970,9 @@ export class HomeDBManager extends EventEmitter {
             // Support also the special anonymous user.  Currently, by convention, sharing a
             // resource with anonymous should make it listable.
             const anonId = this._specialUserIds[ANONYMOUS_USER_EMAIL];
+            if (anonId === undefined) {
+              throw new Error("Special user id for ANONYMOUS_USER_EMAIL not found");
+            }
             cond = cond.orWhere(`gu0.user_id = ${anonId}`);
             cond = cond.orWhere(`gu1.user_id = ${anonId}`);
             cond = cond.orWhere(`gu2.user_id = ${anonId}`);
@@ -4248,7 +4305,7 @@ export class HomeDBManager extends EventEmitter {
     return this._connection.transaction(async manager => {
       let docQuery = this._doc({...scope, showAll: true}, {
         manager,
-        markPermissions: Permissions.REMOVE,
+        markPermissions: Permissions.SCHEMA_EDIT | Permissions.REMOVE,
         allowSpecialPermit: true
       });
       if (!removedAt) {

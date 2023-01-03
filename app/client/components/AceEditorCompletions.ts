@@ -1,14 +1,8 @@
+import {ISuggestionWithValue} from 'app/common/ActiveDocAPI';
 import * as ace from 'brace';
 
-// Suggestion may be a string, or a tuple [funcname, argSpec, isGrist], where:
-//  - funcname (e.g. "DATEADD") will be auto-completed with "(", AND linked to Grist
-//    documentation.
-//  - argSpec (e.g. "(start_date, days=0, ...)") is to be shown as autocomplete caption.
-//  - isGrist determines whether to tag this suggestion as "grist" or "python".
-export type ISuggestion = string | [string, string, boolean];
-
 export interface ICompletionOptions {
-  getSuggestions(prefix: string): Promise<ISuggestion[]>;
+  getSuggestions(prefix: string): Promise<ISuggestionWithValue[]>;
 }
 
 const completionOptions = new WeakMap<ace.Editor, ICompletionOptions>();
@@ -26,6 +20,46 @@ export function setupAceEditorCompletions(editor: ace.Editor, options: ICompleti
   const completer = new Autocomplete();
   completer.autoSelect = false;
   (editor as any).completer = completer;
+
+  // Used in the patches below. Returns true if the client should fetch fresh completions from the server,
+  // as it may have new suggestions that aren't currently shown.
+  completer._gristShouldRefreshCompletions = function(this: any, start: any) {
+    // These two lines are based on updateCompletions() in the ace autocomplete source code.
+    const end = this.editor.getCursorPosition();
+    const prefix: string = this.editor.session.getTextRange({start, end}).toLowerCase();
+
+    return (
+      prefix.endsWith(".") ||  // to get fresh attributes of references
+      prefix.endsWith(".lookupone(") ||  // to get initial argument suggestions
+      prefix.endsWith(".lookuprecords(")
+    );
+  }.bind(completer);
+
+  // Patch updateCompletions and insertMatch so that fresh completions are fetched when appropriate.
+  const originalUpdate = completer.updateCompletions.bind(completer);
+  completer.updateCompletions = function(this: any, keepPopupPosition: boolean) {
+    // This next line is copied from updateCompletions() in the ace autocomplete source code.
+    if (keepPopupPosition && this.base && this.completions) {
+      // When we need fresh completions, prevent this same block from running
+      // in the original updateCompletions() function. Otherwise it will just keep any remaining completions that match,
+      // or not show any completions at all.
+      if (this._gristShouldRefreshCompletions(this.base)) {
+        this.completions = null;
+      }
+    }
+    return originalUpdate(keepPopupPosition);
+  }.bind(completer);
+
+  // Similar patch to the above.
+  const originalInsertMatch = completer.insertMatch.bind(completer);
+  completer.insertMatch = function(this: any) {
+    const base = this.base;  // this.base may become null after the next line, save it now.
+    const result = originalInsertMatch.apply(...arguments);
+    if (this._gristShouldRefreshCompletions(base)) {
+      this.showPopup(this.editor);
+    }
+    return result;
+  }.bind(completer);
 
   aceCompleterAddHelpLinks(completer);
 
@@ -55,8 +89,9 @@ function initCustomCompleter() {
   aceLanguageTools.addCompleter({
     // Default regexp stops at periods, which doesn't let autocomplete
     // work on members.  So we expand it to include periods.
-    // We also include $, which grist uses for column names.
-    identifierRegexps: [/[a-zA-Z_0-9.$\u00A2-\uFFFF]/],
+    // We also include $, which grist uses for column names,
+    // and '(' for the start of a function call, which may provide completions for arguments.
+    identifierRegexps: [/[a-zA-Z_0-9.$\u00A2-\uFFFF(]/],
 
     // For autocompletion we ship text to the sandbox and run standard completion there.
     async getCompletions(editor: ace.Editor, session: ace.IEditSession, pos: number, prefix: string, callback: any) {
@@ -65,17 +100,71 @@ function initCustomCompleter() {
       const suggestions = await options.getSuggestions(prefix);
       // ACE autocompletions are very poorly documented. This is somewhat helpful:
       // https://prog.world/implementing-code-completion-in-ace-editor/
-      callback(null, suggestions.map(suggestion => {
+      const completions: AceSuggestion[] = suggestions.map(suggestionWithValue => {
+        const [suggestion, example] = suggestionWithValue;
         if (Array.isArray(suggestion)) {
-          const [funcname, argSpec, isGrist] = suggestion;
-          const meta = isGrist ? 'grist' : 'python';
-          return {value: funcname + '(', caption: funcname + argSpec, score: 1, meta, funcname};
+          const [funcname, argSpec] = suggestion;
+          return {
+            value: funcname + '(',
+            caption: funcname + argSpec,
+            score: 1,
+            example,
+            funcname,
+          };
         } else {
-          return {value: suggestion, score: 1, meta: "python"};
+          return {
+            value: suggestion,
+            caption: suggestion,
+            score: 1,
+            example,
+            funcname: '',
+          };
         }
-      }));
+      });
+
+      // For suggestions with example values, calculate the 'shared padding', i.e.
+      // the minimum width in characters that all suggestions should fill
+      // (before adding 'base padding') so that the examples are aligned.
+      const captionLengths = completions.filter(c => c.example).map(c => c.caption.length);
+      const sharedPadding = Math.min(
+        Math.min(...captionLengths) + MAX_RELATIVE_SHARED_PADDING,
+        Math.max(...captionLengths),
+        MAX_ABSOLUTE_SHARED_PADDING,
+      );
+
+      // Add the padding spaces and example values to the captions.
+      for (const c of completions) {
+        if (!c.example) { continue; }
+        const numSpaces = Math.max(0, sharedPadding - c.caption.length) + BASE_PADDING;
+        c.caption = c.caption + ' '.repeat(numSpaces) + c.example;
+      }
+
+      callback(null, completions);
     },
   });
+}
+
+// Regardless of other suggestions, always add this many spaces between the caption and the example.
+const BASE_PADDING = 8;
+// In addition to the base padding, there's shared padding, which is the minimum number of spaces
+// that all suggestions should fill so that the examples are aligned.
+// However, one extremely long suggestion shouldn't result in huge padding for all suggestions.
+// To mitigate this, there are two limits on the shared padding.
+// The first limit is relative to the shortest caption in the suggestions.
+// So if all the suggestions are similarly long, there will still be some shared padding.
+const MAX_RELATIVE_SHARED_PADDING = 15;
+// The second limit is absolute, so that even if all suggestions are long, we don't run out of popup space.
+const MAX_ABSOLUTE_SHARED_PADDING = 40;
+
+// Suggestion objects that are passed to ace.
+interface AceSuggestion {
+  value: string;    // the actual value inserted by the autocomplete
+  caption: string;  // the value displayed in the popup
+  score: number;
+
+  // Custom attributes used only by us
+  example: string | null;  // example value of the suggestion to show on the right
+  funcname: string;        // name of a function to link to in documentation
 }
 
 /**
@@ -124,8 +213,8 @@ interface TokenInfo extends ace.TokenInfo {
   type: string;
 }
 
-function retokenizeAceCompleterRow(rowData: any, tokens: TokenInfo[]): TokenInfo[] {
-  if (!rowData.funcname) {
+function retokenizeAceCompleterRow(rowData: AceSuggestion, tokens: TokenInfo[]): TokenInfo[] {
+  if (!(rowData.funcname || rowData.example)) {
     // Not a special completion, pass through the result of ACE's original tokenizing.
     return tokens;
   }
@@ -151,23 +240,50 @@ function retokenizeAceCompleterRow(rowData: any, tokens: TokenInfo[]): TokenInfo
     rowData.funcname.slice(linkStart, linkEnd).toLowerCase();
   newTokens.push({value: href, type: 'grist_link_hidden'});
 
+  // Find where the example value (if any) starts, so that it can be shown in grey.
+  let exampleStart: number | undefined;
+  if (rowData.example) {
+    if (!rowData.caption.endsWith(rowData.example)) {
+      // Just being cautious, this shouldn't happen.
+      console.warn(`Example "${rowData.example}" does not match caption "${rowData.caption}"`);
+    } else {
+      exampleStart = rowData.caption.length - rowData.example.length;
+    }
+  }
+
   // Go through tokens, splitting them if needed, and modifying those that form the link part.
   let position = 0;
   for (const t of tokens) {
-    // lStart/lEnd are indices of the link within the token, possibly negative.
-    const lStart = linkStart - position, lEnd = linkEnd - position;
-    if (lStart > 0) {
-      const beforeLink = t.value.slice(0, lStart);
-      newTokens.push({value: beforeLink, type: t.type});
-    }
-    if (lEnd > 0) {
-      const inLink = t.value.slice(Math.max(0, lStart), lEnd);
-      const newType = t.type + (t.type ? '.' : '') + 'grist_link';
-      newTokens.push({value: inLink, type: newType});
-    }
-    if (lEnd < t.value.length) {
-      const afterLink = t.value.slice(lEnd);
-      newTokens.push({value: afterLink, type: t.type});
+    if (exampleStart && position + t.value.length > exampleStart) {
+      // Ensure that all text after `exampleStart` has the type 'grist_example'.
+      // Don't combine that type with the existing type, because ace highlights weirdly sometimes
+      // and it's best to just override that.
+      const end = exampleStart - position;
+      if (end > 0) {
+        newTokens.push({value: t.value.slice(0, end), type: t.type});
+        newTokens.push({value: t.value.slice(end), type: 'grist_example'});
+      } else {
+        newTokens.push({value: t.value, type: 'grist_example'});
+      }
+    } else {
+      // Handle links to documentation.
+      // lStart/lEnd are indices of the link within the token, possibly negative.
+      const lStart = linkStart - position, lEnd = linkEnd - position;
+      if (lStart > 0) {
+        const beforeLink = t.value.slice(0, lStart);
+        newTokens.push({value: beforeLink, type: t.type});
+      }
+      if (lEnd > 0) {
+        const inLink = t.value.slice(Math.max(0, lStart), lEnd);
+        const newType = t.type + (t.type ? '.' : '') + 'grist_link';
+        newTokens.push({value: inLink, type: newType});
+        if (lEnd < t.value.length) {
+          const afterLink = t.value.slice(lEnd);
+          newTokens.push({value: afterLink, type: t.type});
+        }
+      } else {
+        newTokens.push(t);
+      }
     }
     position += t.value.length;
   }

@@ -1,6 +1,6 @@
 import {getAppRoot} from 'app/server/lib/places';
-import {fromCallback} from 'bluebird';
-import * as express from 'express';
+import {fromCallback, listenPromise} from 'app/server/lib/serverUtils';
+import express from 'express';
 import * as http from 'http';
 import {AddressInfo, Socket} from 'net';
 import * as path from 'path';
@@ -8,7 +8,7 @@ import {fixturesRoot} from 'test/server/testUtils';
 
 export interface Serving {
   url: string;
-  shutdown: () => void;
+  shutdown: () => Promise<void>;
 }
 
 
@@ -45,7 +45,7 @@ export function serveCustomViews(): Promise<Serving> {
 export async function serveSomething(setup: (app: express.Express) => void, port= 0): Promise<Serving> {
   const app = express();
   const server = http.createServer(app);
-  await fromCallback((cb: any) => server.listen(port, cb));
+  await listenPromise(server.listen(port));
 
   const connections = new Set<Socket>();
   server.on('connection', (conn) => {
@@ -53,9 +53,9 @@ export async function serveSomething(setup: (app: express.Express) => void, port
     conn.on('close', () => connections.delete(conn));
   });
 
-  function shutdown() {
-    server.close();
+  async function shutdown() {
     for (const conn of connections) { conn.destroy(); }
+    await fromCallback(cb => server.close(cb));
   }
 
   port = (server.address() as AddressInfo).port;

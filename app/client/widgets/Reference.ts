@@ -1,6 +1,6 @@
 import {DataRowModel} from 'app/client/models/DataRowModel';
 import {ViewFieldRec} from 'app/client/models/entities/ViewFieldRec';
-import {cssLabel, cssRow} from 'app/client/ui/RightPanel';
+import {cssLabel, cssRow} from 'app/client/ui/RightPanelStyles';
 import {colors, testId} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {IOptionFull, select} from 'app/client/ui2018/menus';
@@ -46,10 +46,14 @@ export class Reference extends NTextBox {
   }
 
   public buildTransformConfigDom() {
+    const disabled = Computed.create(null, use => use(this.field.config.multiselect));
     return [
       cssLabel('SHOW COLUMN'),
       cssRow(
-        select(this._visibleColRef, this._validCols),
+        dom.autoDispose(disabled),
+        select(this._visibleColRef, this._validCols, {
+          disabled
+        }),
         testId('fbuilder-ref-col-select')
       )
     ];

@@ -106,9 +106,9 @@ export interface BarePlugin {
   };
 
   /**
-   * Experimental plugins run only if the environment variable IRELIA_EXPERIMENTAL_PLUGINS is
+   * Experimental plugins run only if the environment variable GRIST_EXPERIMENTAL_PLUGINS is
    * set. Otherwise they are ignored. This is useful for plugins that needs a bit of experimentation
-   * before being pushed to production (ie: production does not have IRELIA_EXPERIMENTAL_PLUGINS set
+   * before being pushed to production (ie: production does not have GRIST_EXPERIMENTAL_PLUGINS set
    * but staging does). Keep in mind that developers need to set this environment if they want to
    * run them locally.
    */

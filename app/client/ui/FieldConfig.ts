@@ -1,11 +1,14 @@
+import {makeT} from 'app/client/lib/localization';
 import {CursorPos} from 'app/client/components/Cursor';
 import {GristDoc} from 'app/client/components/GristDoc';
-import {ColumnRec} from 'app/client/models/entities/ColumnRec';
+import {BEHAVIOR, ColumnRec} from 'app/client/models/entities/ColumnRec';
 import {buildHighlightedCode, cssCodeBlock} from 'app/client/ui/CodeHighlight';
-import {cssBlockedCursor, cssEmptySeparator, cssLabel, cssRow} from 'app/client/ui/RightPanel';
+import {GristTooltips} from 'app/client/ui/GristTooltips';
+import {cssBlockedCursor, cssLabel, cssRow} from 'app/client/ui/RightPanelStyles';
+import {withInfoTooltip} from 'app/client/ui/tooltips';
 import {buildFormulaTriggers} from 'app/client/ui/TriggerFormulas';
 import {textButton} from 'app/client/ui2018/buttons';
-import {colors, testId} from 'app/client/ui2018/cssVars';
+import {testId, theme} from 'app/client/ui2018/cssVars';
 import {textInput} from 'app/client/ui2018/editableLabel';
 import {cssIconButton, icon} from 'app/client/ui2018/icons';
 import {IconName} from 'app/client/ui2018/IconList';
@@ -16,7 +19,14 @@ import {bundleChanges, Computed, dom, DomContents, DomElementArg, fromKo, MultiH
         Observable, styled} from 'grainjs';
 import * as ko from 'knockout';
 
-export function buildNameConfig(owner: MultiHolder, origColumn: ColumnRec, cursor: ko.Computed<CursorPos>) {
+const t = makeT('FieldConfig');
+
+export function buildNameConfig(
+  owner: MultiHolder,
+  origColumn: ColumnRec,
+  cursor: ko.Computed<CursorPos>,
+  disabled: ko.Computed<boolean> // Whether the name is editable (it's not editable for multiple selected columns).
+) {
   const untieColId = origColumn.untieColIdFromLabel;
 
   const editedLabel = Observable.create(owner, '');
@@ -37,20 +47,27 @@ export function buildNameConfig(owner: MultiHolder, origColumn: ColumnRec, curso
    })
   );
 
+  const toggleUntieColId = () => {
+    if (!origColumn.disableModify.peek() && !disabled.peek()) {
+      untieColId.saveOnly(!untieColId.peek()).catch(reportError);
+    }
+  };
+
   return [
-    cssLabel('COLUMN LABEL AND ID'),
+    cssLabel(t('ColumnLabel')),
     cssRow(
       dom.cls(cssBlockedCursor.className, origColumn.disableModify),
       cssColLabelBlock(
-        editor = textInput(fromKo(origColumn.label),
+        editor = cssInput(fromKo(origColumn.label),
           async val => { await origColumn.label.saveOnly(val); editedLabel.set(''); },
           dom.on('input', (ev, elem) => { if (!untieColId.peek()) { editedLabel.set(elem.value); } }),
-          dom.boolAttr('disabled', origColumn.disableModify),
+          dom.boolAttr('readonly', use => use(origColumn.disableModify) || use(disabled)),
           testId('field-label'),
         ),
-        textInput(editableColId,
+        cssInput(editableColId,
           saveColId,
-          dom.boolAttr('disabled', use => use(origColumn.disableModify) || !use(origColumn.untieColIdFromLabel)),
+          dom.boolAttr('readonly',
+            use => use(disabled) || use(origColumn.disableModify) || !use(origColumn.untieColIdFromLabel)),
           cssCodeBlock.cls(''),
           {style: 'margin-top: 8px'},
           testId('field-col-id'),
@@ -60,14 +77,14 @@ export function buildNameConfig(owner: MultiHolder, origColumn: ColumnRec, curso
         cssColTieConnectors(),
         cssToggleButton(icon('FieldReference'),
           cssToggleButton.cls('-selected', (use) => !use(untieColId)),
-          dom.on('click', () => !origColumn.disableModify.peek() && untieColId.saveOnly(!untieColId.peek())),
-          cssToggleButton.cls("-disabled", origColumn.disableModify),
+          dom.on('click', toggleUntieColId),
+          cssToggleButton.cls("-disabled", use => use(origColumn.disableModify) || use(disabled)),
           testId('field-derive-id')
         ),
       )
     ),
     dom.maybe(isSummaryTable,
-      () => cssRow('Column options are limited in summary tables.'))
+      () => cssRow(t('ColumnOptionsLimited')))
   ];
 }
 
@@ -78,11 +95,12 @@ type BuildEditor = (
   onSave?: SaveHandler,
   onCancel?: () => void) => void;
 
-type BEHAVIOR = "empty"|"formula"|"data";
-
 export function buildFormulaConfig(
   owner: MultiHolder, origColumn: ColumnRec, gristDoc: GristDoc, buildEditor: BuildEditor
 ) {
+
+  // If we can't modify anything about the column.
+  const disableModify = Computed.create(owner, use => use(origColumn.disableModify));
 
   // Intermediate state - user wants to specify formula, but haven't done yet
   const maybeFormula = Observable.create(owner, false);
@@ -93,7 +111,7 @@ export function buildFormulaConfig(
   // If this column belongs to a summary table.
   const isSummaryTable = Computed.create(owner, use => Boolean(use(use(origColumn.table).summarySourceTable)));
 
-  // Column behaviour. There are 3 types of behaviors:
+  // Column behavior. There are 3 types of behaviors:
   // - empty: isFormula and formula == ''
   // - formula: isFormula and formula != ''
   // - data: not isFormula nd formula == ''
@@ -123,57 +141,116 @@ export function buildFormulaConfig(
   owner.autoDispose(origColumn.formula.subscribe(clearState));
   owner.autoDispose(origColumn.isFormula.subscribe(clearState));
 
+  // User might have selected multiple columns, in that case all elements will be disabled, except the menu.
+  // If user has selected only empty or formula columns, we offer to reset all or to convert to data.
+  // If user has selected any data column, we offer only to reset all.
+  const viewSection = Computed.create(owner, use => {
+    return use(gristDoc.currentView)?.viewSection;
+  });
+  const isMultiSelect = Computed.create(owner, use => {
+    const vs = use(viewSection);
+    return !!vs && use(vs.selectedFields).length > 1;
+  });
+
+  // If all columns are empty or have formulas.
+  const multiType = Computed.create(owner, use => {
+    if (!use(isMultiSelect)) { return false; }
+    const vs = use(viewSection);
+    if (!vs) { return false; }
+    return use(vs.columnsBehavior);
+  });
+
+  // If all columns are empty or have formulas.
+  const isFormulaLike = Computed.create(owner, use => {
+    if (!use(isMultiSelect)) { return false; }
+    const vs = use(viewSection);
+    if (!vs) { return false; }
+    return use(vs.columnsAllIsFormula);
+  });
+
+  // Helper to get all selected columns refs.
+  const selectedColumns = () => viewSection.get()?.selectedFields.peek().map(f => f.column.peek()) || [];
+  const selectedColumnIds = () => selectedColumns().map(f => f.id.peek()) || [];
+
+   // Clear and reset all option for multiple selected columns.
+  const clearAndResetAll = () => selectOption(
+    () => Promise.all([
+      gristDoc.clearColumns(selectedColumnIds())
+    ]),
+    'Clear and reset', 'CrossSmall'
+  );
+
+  // Convert to data option for multiple selected columns.
+  const convertToDataAll = () => selectOption(
+    () => gristDoc.convertIsFormula(selectedColumnIds(), {toFormula: false, noRecalc: true}),
+    'Convert columns to data', 'Database',
+    dom.cls('disabled', isSummaryTable)
+  );
+
   // Menu helper that will show normal menu with some default options
   const menu = (label: DomContents, options: DomElementArg[]) =>
     cssRow(
       selectMenu(
         label,
-        () => options,
+        () => !isMultiSelect.get() ? options : [
+          isFormulaLike.get() ? convertToDataAll() : null,
+          clearAndResetAll(),
+        ],
         testId("field-behaviour"),
         // HACK: Menu helper will add tabindex to this element, which will make
         // this element focusable and will steal focus from clipboard. This in turn,
         // will not dispose the formula editor when menu is clicked.
         (el) => el.removeAttribute("tabindex"),
-        dom.cls(cssBlockedCursor.className, origColumn.disableModify),
-        dom.cls("disabled", origColumn.disableModify)),
+        dom.cls(cssBlockedCursor.className, disableModify),
+        dom.cls("disabled", disableModify)),
     );
 
-  // Behaviour label
+
+  // Behavior label
   const behaviorName = Computed.create(owner, behavior, (use, type) => {
-    if (type === 'formula') { return "Formula Column"; }
-    if (type === 'data') { return "Data Column"; }
-    return "Empty Column";
+    if (use(isMultiSelect)) {
+      const commonType = use(multiType);
+      if (commonType === 'formula') { return t('ColumnType', {context: 'formula', count: 2}); }
+      if (commonType === 'data') { return t('ColumnType', {context: 'data', count: 2}); }
+      if (commonType === 'mixed') { return t('ColumnType', {context: 'mixed', count: 2}); }
+      return t('ColumnType', {context: 'empty', count: 2});
+    } else {
+      if (type === 'formula') { return t('ColumnType', {context: 'formula', count: 1}); }
+      if (type === 'data') { return t('ColumnType', {context: 'data', count: 1}); }
+      return t('ColumnType', {context: 'empty', count: 1});
+    }
   });
   const behaviorIcon = Computed.create<IconName>(owner, (use) => {
-    return use(behaviorName) === "Data Column" ? "Database" : "Script";
+    return use(behaviorName) === t('ColumnType', {context: 'data', count: 2}) ||
+           use(behaviorName) === t('ColumnType', {context: 'data', count: 1}) ? "Database" : "Script";
   });
-  const behaviourLabel = () => selectTitle(behaviorName, behaviorIcon);
+  const behaviorLabel = () => selectTitle(behaviorName, behaviorIcon);
 
   // Actions on select menu:
 
   // Converts data column to formula column.
   const convertDataColumnToFormulaOption = () => selectOption(
     () => (maybeFormula.set(true), formulaField?.focus()),
-    'Clear and make into formula', 'Script');
+    t('ConvertColumn', {context: 'formula'}), 'Script');
 
   // Converts to empty column and opens up the editor. (label is the same, but this is used when we have no formula)
   const convertTriggerToFormulaOption = () => selectOption(
     () => gristDoc.convertIsFormula([origColumn.id.peek()], {toFormula: true, noRecalc: true}),
-    'Clear and make into formula', 'Script');
+    t('ConvertColumn', {context: 'formula'}), 'Script');
 
   // Convert column to data.
   // This method is also available through a text button.
   const convertToData = () => gristDoc.convertIsFormula([origColumn.id.peek()], {toFormula: false, noRecalc: true});
   const convertToDataOption = () => selectOption(
     convertToData,
-    'Convert column to data', 'Database',
+    t('ConvertColumn', {context: 'data'}), 'Database',
     dom.cls('disabled', isSummaryTable)
     );
 
   // Clears the column
   const clearAndResetOption = () => selectOption(
     () => gristDoc.clearColumns([origColumn.id.peek()]),
-    'Clear and reset', 'CrossSmall');
+    t('ClearAndReset'), 'CrossSmall');
 
   // Actions on text buttons:
 
@@ -226,59 +303,68 @@ export function buildFormulaConfig(
     }
   };
 
+  // Should we disable all other action buttons and formula editor. For now
+  // we will disable them when multiple columns are selected, or any of the column selected
+  // can't be modified.
+  const disableOtherActions = Computed.create(owner, use => use(disableModify) || use(isMultiSelect));
+
   const errorMessage = createFormulaErrorObs(owner, gristDoc, origColumn);
   // Helper that will create different flavors for formula builder.
   const formulaBuilder = (onSave: SaveHandler) => [
     cssRow(formulaField = buildFormula(
       origColumn,
       buildEditor,
-      "Enter formula",
+      t('EnterFormula'),
+      disableOtherActions,
       onSave,
       clearState)),
     dom.maybe(errorMessage, errMsg => cssRow(cssError(errMsg), testId('field-error-count'))),
   ];
 
   return dom.maybe(behavior, (type: BEHAVIOR) => [
-      cssLabel('COLUMN BEHAVIOR'),
+      cssLabel(t('ColumnBehavior')),
       ...(type === "empty" ? [
-        menu(behaviourLabel(), [
+        menu(behaviorLabel(), [
           convertToDataOption(),
         ]),
         cssEmptySeparator(),
         cssRow(textButton(
-          "Set formula",
+          t('SetFormula'),
           dom.on("click", setFormula),
-          dom.prop("disabled", origColumn.disableModify),
+          dom.prop("disabled", disableOtherActions),
           testId("field-set-formula")
         )),
-        cssRow(textButton(
-          "Set trigger formula",
-          dom.on("click", setTrigger),
-          dom.prop("disabled", use => use(isSummaryTable) || use(origColumn.disableModify)),
-          testId("field-set-trigger")
+        cssRow(withInfoTooltip(
+          textButton(
+            t('SetTriggerFormula'),
+            dom.on("click", setTrigger),
+            dom.prop("disabled", use => use(isSummaryTable) || use(disableOtherActions)),
+            testId("field-set-trigger")
+          ),
+          GristTooltips.setTriggerFormula(),
         )),
         cssRow(textButton(
-          "Make into data column",
+          t('MakeIntoDataColumn'),
           dom.on("click", convertToData),
-          dom.prop("disabled", use => use(isSummaryTable) || use(origColumn.disableModify)),
+          dom.prop("disabled", use => use(isSummaryTable) || use(disableOtherActions)),
           testId("field-set-data")
         ))
       ] : type === "formula" ? [
-        menu(behaviourLabel(), [
+        menu(behaviorLabel(), [
           convertToDataOption(),
           clearAndResetOption(),
         ]),
         formulaBuilder(onSaveConvertToFormula),
         cssEmptySeparator(),
         cssRow(textButton(
-          "Convert to trigger formula",
+          t('ConvertColumn', {context: 'triggerformula'}),
           dom.on("click", convertFormulaToTrigger),
           dom.hide(maybeFormula),
-          dom.prop("disabled", use => use(isSummaryTable) || use(origColumn.disableModify)),
+          dom.prop("disabled", use => use(isSummaryTable) || use(disableOtherActions)),
           testId("field-set-trigger")
         ))
       ] : /* type == 'data' */ [
-        menu(behaviourLabel(),
+        menu(behaviorLabel(),
           [
             dom.domComputed(origColumn.hasTriggerFormula, (hasTrigger) => hasTrigger ?
               // If we have trigger, we will convert it directly to a formula column
@@ -291,19 +377,25 @@ export function buildFormulaConfig(
         ),
         // If data column is or wants to be a trigger formula:
         dom.maybe((use) => use(maybeTrigger) || use(origColumn.hasTriggerFormula), () => [
-          cssLabel('TRIGGER FORMULA'),
+          cssLabel(t('TriggerFormula')),
           formulaBuilder(onSaveConvertToTrigger),
-          dom.create(buildFormulaTriggers, origColumn, maybeTrigger)
+          dom.create(buildFormulaTriggers, origColumn, {
+            disabled: disableOtherActions,
+            notTrigger: maybeTrigger,
+          })
         ]),
         // Else offer a way to convert to trigger formula.
         dom.maybe((use) => !(use(maybeTrigger) || use(origColumn.hasTriggerFormula)), () => [
           cssEmptySeparator(),
-          cssRow(textButton(
-            "Set trigger formula",
-            dom.on("click", convertDataColumnToTriggerColumn),
-            dom.prop("disabled", origColumn.disableModify),
-            testId("field-set-trigger")
-          ))
+          cssRow(withInfoTooltip(
+            textButton(
+              t("SetTriggerFormula"),
+              dom.on("click", convertDataColumnToTriggerColumn),
+              dom.prop("disabled", disableOtherActions),
+              testId("field-set-trigger")
+            ),
+            GristTooltips.setTriggerFormula()
+          )),
         ])
       ])
   ]);
@@ -313,11 +405,12 @@ function buildFormula(
     column: ColumnRec,
     buildEditor: BuildEditor,
     placeholder: string,
+    disabled: Observable<boolean>,
     onSave?: SaveHandler,
     onCancel?: () => void) {
   return cssFieldFormula(column.formula, {placeholder, maxLines: 2},
     dom.cls('formula_field_sidepane'),
-    cssFieldFormula.cls('-disabled', column.disableModify),
+    cssFieldFormula.cls('-disabled', disabled),
     cssFieldFormula.cls('-disabled-icon', use => !use(column.formula)),
     dom.cls('disabled'),
     {tabIndex: '-1'},
@@ -332,10 +425,10 @@ export const cssFieldFormula = styled(buildHighlightedCode, `
   cursor: pointer;
   margin-top: 4px;
   padding-left: 24px;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${theme.accentIcon};
 
   &-disabled-icon.formula_field_sidepane::before {
-    --icon-color: ${colors.slate};
+    --icon-color: ${theme.lightText};
   }
   &-disabled {
     pointer-events: none;
@@ -344,20 +437,20 @@ export const cssFieldFormula = styled(buildHighlightedCode, `
 
 const cssToggleButton = styled(cssIconButton, `
   margin-left: 8px;
-  background-color: var(--grist-color-medium-grey-opaque);
-  box-shadow: inset 0 0 0 1px ${colors.darkGrey};
+  background-color: ${theme.rightPanelToggleButtonDisabledBg};
+  box-shadow: inset 0 0 0 1px ${theme.inputBorder};
 
   &-selected, &-selected:hover {
     box-shadow: none;
-    background-color: ${colors.dark};
-    --icon-color: ${colors.light};
+    background-color: ${theme.rightPanelToggleButtonEnabledBg};
+    --icon-color: ${theme.rightPanelToggleButtonEnabledFg};
   }
   &-selected:hover {
-    --icon-color: ${colors.darkGrey};
+    --icon-color: ${theme.rightPanelToggleButtonEnabledHoverFg};
   }
   &-disabled, &-disabled:hover {
-    --icon-color: ${colors.light};
-    background-color: var(--grist-color-medium-grey-opaque);
+    --icon-color: ${theme.rightPanelToggleButtonDisabledFg};
+    background-color: ${theme.rightPanelToggleButtonDisabledBg};
   }
 `);
 
@@ -374,11 +467,30 @@ const cssColTieBlock = styled('div', `
 
 const cssColTieConnectors = styled('div', `
   position: absolute;
-  border: 2px solid var(--grist-color-dark-grey);
+  border: 2px solid ${theme.inputBorder};
   top: -9px;
   bottom: -9px;
   right: 11px;
   left: 0px;
   border-left: none;
   z-index: -1;
+`);
+
+const cssEmptySeparator = styled('div', `
+  margin-top: 16px;
+`);
+
+const cssInput = styled(textInput, `
+  color: ${theme.inputFg};
+  background-color: ${theme.mainPanelBg};
+  border: 1px solid ${theme.inputBorder};
+
+  &::placeholder {
+    color: ${theme.inputPlaceholderFg};
+  }
+
+  &[readonly] {
+    background-color: ${theme.inputDisabledBg};
+    color: ${theme.inputDisabledFg};
+  }
 `);

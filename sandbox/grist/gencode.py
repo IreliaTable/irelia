@@ -92,7 +92,10 @@ class GenCode(object):
     body = self._formula_cache.get(key)
     if body is None:
       default = get_type_default(col_info.type)
-      body = codebuilder.make_formula_body(col_info.formula, default, (table_id, col_info.colId))
+      # If we have a table_id like `Table._Summary`, then we don't want to actually associate
+      # this field with any real table/column.
+      assoc_value = None if table_id.endswith("._Summary") else (table_id, col_info.colId)
+      body = codebuilder.make_formula_body(col_info.formula, default, assoc_value)
     self._new_formula_cache[key] = body
 
     decorator = ''
@@ -128,7 +131,7 @@ class GenCode(object):
     If filter_for_user is True, includes only user-visible columns.
     """
     table_id = table_info.tableId
-    source_table_id = summary.decode_summary_table_name(table_id)
+    source_table_id = summary.decode_summary_table_name(table_info)
 
     # Sort columns by "isFormula" to output all data columns before all formula columns.
     columns = sorted(six.itervalues(table_info.columns), key=lambda c: c.isFormula)
@@ -147,7 +150,12 @@ class GenCode(object):
                              for c in six.itervalues(s.columns) if c.isFormula)
       parts.append(indent(textbuilder.Text("\nclass _Summary:\n")))
       for col_info in six.itervalues(formulas):
-        parts.append(indent(self._make_field(col_info, table_id), levels=2))
+        # Associate this field with the fake table `table_id + "._Summary"`.
+        # We don't know which summary table each formula belongs to, there might be several,
+        # and we don't care here because this is just for display in the code view.
+        # The real formula will be associated with the real summary table elsewhere.
+        # Previously this field was accidentally associated with the source table, causing bugs.
+        parts.append(indent(self._make_field(col_info, table_id + "._Summary"), levels=2))
 
     return textbuilder.Combiner(parts)
 
@@ -156,7 +164,7 @@ class GenCode(object):
     # Collect summary tables to group them by source table.
     summary_tables = {}
     for table_info in six.itervalues(schema):
-      source_table_id = summary.decode_summary_table_name(table_info.tableId)
+      source_table_id = summary.decode_summary_table_name(table_info)
       if source_table_id:
         summary_tables.setdefault(source_table_id, []).append(table_info)
 
@@ -167,7 +175,10 @@ class GenCode(object):
     for table_info in six.itervalues(schema):
       fullparts.append("\n\n")
       fullparts.append(self._make_table_model(table_info, summary_tables.get(table_info.tableId)))
-      if not _is_special_table(table_info.tableId):
+      if not (
+          _is_special_table(table_info.tableId) or
+          summary.decode_summary_table_name(table_info)
+      ):
         userparts.append("\n\n")
         userparts.append(self._make_table_model(table_info, summary_tables.get(table_info.tableId),
           filter_for_user=True))
@@ -193,22 +204,13 @@ class GenCode(object):
 
 
 def _is_special_table(table_id):
-  return table_id.startswith("_grist_") or bool(summary.decode_summary_table_name(table_id))
+  return table_id.startswith("_grist_")
 
 
 def exec_module_text(module_text):
+  mod = imp.new_module(codebuilder.code_filename)
+  codebuilder.save_to_linecache(module_text)
+  code_obj = compile(module_text, codebuilder.code_filename, "exec")
   # pylint: disable=exec-used
-  filename = "usercode"
-  mod = imp.new_module(filename)
-
-  # Ensure that source lines show in tracebacks
-  linecache.cache[filename] = (
-    len(module_text),
-    None,
-    [line + '\n' for line in module_text.splitlines()],
-    filename,
-  )
-
-  code_obj = compile(module_text, filename, "exec")
   exec(code_obj, mod.__dict__)
   return mod

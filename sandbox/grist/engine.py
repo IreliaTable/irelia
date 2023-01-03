@@ -19,7 +19,7 @@ from sortedcontainers import SortedSet
 import acl
 import actions
 import action_obj
-from autocomplete_context import AutocompleteContext
+from autocomplete_context import AutocompleteContext, lookup_autocomplete_options, eval_suggestion
 from codebuilder import DOLLAR_REGEX
 import depend
 import docactions
@@ -30,6 +30,7 @@ import match_counter
 import objtypes
 from objtypes import strict_equal
 from relation import SingleRowsIdentityRelation
+import sandbox
 import schema
 from schema import RecalcWhen
 import table as table_module
@@ -65,6 +66,16 @@ class OrderError(Exception):
   def set_requirer(self, node, row_id):
     self.requiring_node = node
     self.requiring_row_id = row_id
+
+
+class RequestingError(Exception):
+  """
+  An exception thrown and handled internally, a bit like OrderError.
+  Indicates that the formula called the REQUEST function and needs to delegate an HTTP request
+  to the NodeJS server.
+  """
+  pass
+
 
 # An item of work to be done by Engine._update
 WorkItem = namedtuple('WorkItem', ('node', 'row_ids', 'locks'))
@@ -186,6 +197,7 @@ class Engine(object):
     # What's currently being computed
     self._current_node = None
     self._current_row_id = None
+    self._is_current_node_formula = False  # True for formula columns, False for trigger formulas
 
     # Certain recomputations are triggered by a particular doc action. This keep track of it.
     self._triggering_doc_action = None
@@ -235,6 +247,19 @@ class Engine(object):
     self._autocomplete_context = None
 
     self._table_stats = {"meta": [], "user": []}
+
+    #### Attributes used by the REQUEST function:
+    # True when the formula should synchronously call the exported JS method to make the request
+    # immediately instead of reevaluating the formula later. Used when reevaluating a single
+    # formula cell to get an error traceback.
+    self._sync_request = False
+    # dict of string keys to responses, set by the RespondToRequests user action to reevaluate
+    # formulas based on a batch of completed requests.
+    self._request_responses = {}
+    # set of string keys identifying requests that are currently cached in files and can thus
+    # be fetched synchronously via the exported JS method. This allows a single formula to
+    # make multiple different requests without needing to keep all the responses in memory.
+    self._cached_request_keys = set()
 
   @property
   def autocomplete_context(self):
@@ -411,7 +436,7 @@ class Engine(object):
     m = match_counter.MatchCounter(sample)
     # Iterates through each valid column in the document, counting matches.
     for c in search_cols:
-      if (not gencode._is_special_table(c.tableId) and
+      if (not (gencode._is_special_table(c.tableId) or c.parentId.summarySourceTable) and
           column.is_visible_column(c.colId) and
           not c.type.startswith('Ref')):
         table = self.tables[c.tableId]
@@ -480,7 +505,7 @@ class Engine(object):
     if self._peeking:
       return
 
-    if self._current_node:
+    if self._is_current_node_formula:
       # Add an edge to indicate that the node being computed depends on the node passed in.
       # Note that during evaluation, we only *add* dependencies. We *remove* them by clearing them
       # whenever ALL rows for a node are invalidated (on schema changes and reloads).
@@ -671,6 +696,8 @@ class Engine(object):
     table = self.tables[table_id]
     col = table.get_column(col_id)
     checkpoint = self._get_undo_checkpoint()
+    # Makes calls to REQUEST synchronous, since raising a RequestingError can't work here.
+    self._sync_request = True
     try:
       result = self._recompute_one_cell(table, col, row_id)
       # If the error is gone for a trigger formula
@@ -686,6 +713,7 @@ class Engine(object):
       # It is possible for formula evaluation to have side-effects that produce DocActions (e.g.
       # lookupOrAddDerived() creates those). In case of get_formula_error(), these aren't fully
       # processed (e.g. don't get applied to DocStorage), so it's important to reverse them.
+      self._sync_request = False
       self._undo_to_checkpoint(checkpoint)
 
   def _recompute(self, node, row_ids=None):
@@ -757,9 +785,11 @@ class Engine(object):
     require_rows = sorted(require_rows or [])
 
     previous_current_node = self._current_node
+    previous_is_current_node_formula = self._is_current_node_formula
+    self._current_node = node
     # Prevents dependency creation for non-formula nodes. A non-formula column may include a
     # formula to eval for a newly-added record. Those shouldn't create dependencies.
-    self._current_node = node if col.is_formula() else None
+    self._is_current_node_formula = col.is_formula()
 
     changes = None
     cleaned = []    # this lists row_ids that can be removed from dirty_rows once we are no
@@ -789,11 +819,16 @@ class Engine(object):
           # For common-case formulas, all cells in a column are likely to fail in the same way,
           # so don't bother trying more from this column until we've reordered.
           return
+        save_value = True
+        value = None
         try:
           # We figure out if we've hit a cycle here.  If so, we just let _recompute_on_cell
           # know, so it can set the cell value appropriately and do some other bookkeeping.
           cycle = required and (node, row_id) in self._locked_cells
           value = self._recompute_one_cell(table, col, row_id, cycle=cycle, node=node)
+        except RequestingError:
+          # The formula will be evaluated again soon when we have a response.
+          save_value = False
         except OrderError as e:
           if not required:
             # We're out of order, but for a cell we were evaluating opportunistically.
@@ -822,19 +857,22 @@ class Engine(object):
         if column.is_validation_column_name(col.col_id):
           value = (value in (True, None))
 
-        # Convert the value, and if needed, set, and include into the returned action.
-        value = col.convert(value)
-        previous = col.raw_get(row_id)
-        if not strict_equal(value, previous):
-          if not changes:
-            changes = self._changes_map.setdefault(node, [])
-          changes.append((row_id, previous, value))
-          col.set(row_id, value)
+        if save_value:
+          # Convert the value, and if needed, set, and include into the returned action.
+          value = col.convert(value)
+          previous = col.raw_get(row_id)
+          if not strict_equal(value, previous):
+            if not changes:
+              changes = self._changes_map.setdefault(node, [])
+            changes.append((row_id, previous, value))
+            col.set(row_id, value)
+
         exclude.add(row_id)
         cleaned.append(row_id)
         self._recompute_done_counter += 1
     finally:
       self._current_node = previous_current_node
+      self._is_current_node_formula = previous_is_current_node_formula
       # Usually dirty_rows refers to self.recompute_map[node], so this modifies both
       dirty_rows -= cleaned
 
@@ -843,6 +881,43 @@ class Engine(object):
       # so here we check self.recompute_map[node] directly
       if not self.recompute_map[node]:
         self.recompute_map.pop(node)
+
+  def _requesting(self, key, args):
+    """
+    Called by the REQUEST function. If we don't have a response already and we can't
+    synchronously get it from the JS side, then note the request to be made in JS asynchronously
+    and raise RequestingError to indicate that the formula
+    should be evaluated again later when we have a response.
+    """
+    # This will make the formula reevaluate periodically with the UpdateCurrentTime action.
+    # This assumes that the response changes with time and having the latest data is ideal.
+    # We will probably want to reconsider this to avoid making unwanted requests,
+    # along with avoiding refreshing the request when the doc is loaded with the Calculate action.
+    self.use_current_time()
+
+    if key in self._request_responses:
+      # This formula is being reevaluated in a RespondToRequests action, and the response is ready.
+      return self._request_responses[key]
+    elif self._sync_request or key in self._cached_request_keys:
+      # Not always ideal, but in this case the best strategy is to make the request immediately
+      # and block while waiting for a response.
+      return sandbox.call_external("request", key, args)
+
+    # We can't get a response to this request now. Note the request so it can be delegated.
+    table_id, column_id = self._current_node
+    (self.out_actions.requests  # `out_actions.requests` is returned by apply_user_actions
+         # Here is where the request arguments are stored if they haven't been already
+         .setdefault(key, args)
+         # While all this stores the cell that made the request so that it can be invalidated later
+         .setdefault("deps", {})
+         .setdefault(table_id, {})
+         .setdefault(column_id, [])
+         .append(self._current_row_id))
+
+    # As with OrderError, note the exception so it gets raised even if the formula catches it
+    self._cell_required_error = RequestingError()
+
+    raise RequestingError()
 
   def _recompute_one_cell(self, table, col, row_id, cycle=False, node=None):
     """
@@ -1181,11 +1256,13 @@ class Engine(object):
     self._unused_lookups.add(lookup_map_column)
 
   def count_rows(self):
-    return sum(
-      table._num_rows()
-      for table_id, table in six.iteritems(self.tables)
-      if useractions.is_user_table(table_id)
-    )
+    result = {"total": 0}
+    for table_rec in self.docmodel.tables.all:
+      if useractions.is_user_table(table_rec.tableId):
+        count = self.tables[table_rec.tableId]._num_rows()
+        result[table_rec.id] = count
+        result["total"] += count
+    return result
 
   def apply_user_actions(self, user_actions, user=None):
     """
@@ -1198,6 +1275,11 @@ class Engine(object):
 
     self.out_actions = action_obj.ActionGroup()
     self._user = User(user, self.tables) if user else None
+
+    # These should usually be empty, but may be populated by the RespondToRequests action.
+    self._request_responses = {}
+    self._cached_request_keys = set()
+
     checkpoint = self._get_undo_checkpoint()
     try:
       for user_action in user_actions:
@@ -1252,6 +1334,8 @@ class Engine(object):
     self.out_actions.flush_calc_changes()
     self.out_actions.check_sanity()
     self._user = None
+    self._request_responses = {}
+    self._cached_request_keys = set()
     return self.out_actions
 
   def acl_split(self, action_group):
@@ -1324,16 +1408,39 @@ class Engine(object):
     if not self._in_update_loop:
       self._bring_mlookups_up_to_date(doc_action)
 
-  def autocomplete(self, txt, table_id, column_id, user):
+  def autocomplete(self, txt, table_id, column_id, row_id, user):
     """
     Return a list of suggested completions of the python fragment supplied.
     """
+    table = self.tables[table_id]
+
+    # Table.lookup methods are special to suggest arguments after '('
+    match = re.match(r"(\w+)\.(lookupRecords|lookupOne)\($", txt)
+    if match:
+      # Get the 'Table1' in 'Table1.lookupRecords('
+      lookup_table_id = match.group(1)
+      if lookup_table_id in self.tables:
+        lookup_table = self.tables[lookup_table_id]
+        # Add a keyword argument with no value for each column name in the lookup table.
+        result = [
+          txt + col_id + "="
+          for col_id in lookup_table.all_columns
+          if column.is_visible_column(col_id) or col_id == 'id'
+        ]
+        # Add specific complete lookups involving reference columns.
+        result += [
+          txt + option
+          for option in lookup_autocomplete_options(lookup_table, table, reverse_only=False)
+        ]
+        # Add a dummy empty example value for each result to produce the correct shape.
+        result = [(r, None) for r in result]
+        return sorted(result)
+
     # replace $ with rec. and add a dummy rec object
     tweaked_txt = DOLLAR_REGEX.sub(r'rec.', txt)
     # convert a bare $ with nothing after it also
     if txt == '$':
       tweaked_txt = 'rec.'
-    table = self.tables[table_id]
 
     autocomplete_context = self.autocomplete_context
     context = autocomplete_context.get_context()
@@ -1343,10 +1450,10 @@ class Engine(object):
     context.pop('value', None)
     context.pop('user', None)
 
-    column = table.get_column(column_id) if table.has_column(column_id) else None
-    if column and not column.is_formula():
+    col = table.get_column(column_id) if table.has_column(column_id) else None
+    if col and not col.is_formula():
       # Add trigger formula completions.
-      context['value'] = column.sample_value()
+      context['value'] = col.sample_value()
       context['user'] = User(user, self.tables, is_sample=True)
 
     completer = rlcompleter.Completer(context)
@@ -1360,13 +1467,38 @@ class Engine(object):
         break
       if skipped_completions.search(result):
         continue
-      results.append(autocomplete_context.process_result(result))
+      result = autocomplete_context.process_result(result)
+      results.append(result)
+      funcname = result[0]
+      # Suggest reverse reference lookups, specifically only for .lookupRecords(),
+      # not for .lookupOne().
+      if isinstance(result, tuple) and funcname.endswith(".lookupRecords"):
+        lookup_table_id = funcname.split(".")[0]
+        if lookup_table_id in self.tables:
+          lookup_table = self.tables[lookup_table_id]
+          results += [
+            funcname + "(" + option
+            for option in lookup_autocomplete_options(lookup_table, table, reverse_only=True)
+          ]
+
+    ### Add example values to all results where possible.
+    if row_id == "new":
+      row_id = table.row_ids.max()
+    rec = table.Record(row_id)
+    # Don't use the same user object as above because we don't want is_sample=True,
+    # which is only needed for the sake of suggesting completions.
+    # Here we want to show actual values.
+    user_obj = User(user, self.tables)
+    results = [
+      (result, eval_suggestion(result, rec, user_obj))
+      for result in results
+    ]
 
     # If we changed the prefix (expanding the $ symbol) we now need to change it back.
     if tweaked_txt != txt:
-      results = [txt + result[len(tweaked_txt):] for result in results]
+      results = [(txt + result[len(tweaked_txt):], value) for result, value in results]
     # pylint:disable=unidiomatic-typecheck
-    results.sort(key=lambda r: r[0] if type(r) == tuple else r)
+    results.sort(key=lambda r: r[0][0] if type(r[0]) == tuple else r[0])
     return results
 
   def _get_undo_checkpoint(self):

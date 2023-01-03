@@ -1,23 +1,23 @@
 import {createGroup} from 'app/client/components/commands';
-import {ACIndexImpl, ACItem, ACResults, buildHighlightedDom, HighlightFunc} from 'app/client/lib/ACIndex';
+import {ACIndexImpl, ACItem, ACResults,
+        buildHighlightedDom, HighlightFunc, normalizeText} from 'app/client/lib/ACIndex';
 import {IAutocompleteOptions} from 'app/client/lib/autocomplete';
 import {IToken, TokenField, tokenFieldStyles} from 'app/client/lib/TokenField';
-import {colors, testId} from 'app/client/ui2018/cssVars';
+import {colors, testId, theme} from 'app/client/ui2018/cssVars';
 import {menuCssClass} from 'app/client/ui2018/menus';
-import {cssInvalidToken} from 'app/client/widgets/ChoiceListCell';
 import {createMobileButtons, getButtonMargins} from 'app/client/widgets/EditorButtons';
 import {EditorPlacement} from 'app/client/widgets/EditorPlacement';
-import {NewBaseEditor, Options} from 'app/client/widgets/NewBaseEditor';
+import {FieldOptions, NewBaseEditor} from 'app/client/widgets/NewBaseEditor';
 import {csvEncodeRow} from 'app/common/csvFormat';
 import {CellValue} from "app/common/DocActions";
 import {decodeObject, encodeObject} from 'app/plugin/objtypes';
-import {dom, styled} from 'grainjs';
 import {ChoiceOptions, getRenderFillColor, getRenderTextColor} from 'app/client/widgets/ChoiceTextBox';
-import {choiceToken, cssChoiceACItem} from 'app/client/widgets/ChoiceToken';
+import {choiceToken, cssChoiceACItem, cssChoiceToken} from 'app/client/widgets/ChoiceToken';
 import {icon} from 'app/client/ui2018/icons';
+import {dom, styled} from 'grainjs';
 
 export class ChoiceItem implements ACItem, IToken {
-  public cleanText: string = this.label.toLowerCase().trim();
+  public cleanText: string = normalizeText(this.label);
   constructor(
     public label: string,
     public isInvalid: boolean,  // If set, this token is not one of the valid choices.
@@ -32,9 +32,9 @@ export class ChoiceListEditor extends NewBaseEditor {
   private _tokenField: TokenField<ChoiceItem>;
   private _textInput: HTMLInputElement;
   private _dom: HTMLElement;
-  private _editorPlacement: EditorPlacement;
+  private _editorPlacement!: EditorPlacement;
   private _contentSizer: HTMLElement;   // Invisible element to size the editor with all the tokens
-  private _inputSizer: HTMLElement;     // Part of _contentSizer to size the text input
+  private _inputSizer!: HTMLElement;     // Part of _contentSizer to size the text input
   private _alignment: string;
 
   // Whether to include a button to show a new choice.
@@ -44,7 +44,7 @@ export class ChoiceListEditor extends NewBaseEditor {
 
   private _choiceOptionsByName: ChoiceOptions;
 
-  constructor(options: Options) {
+  constructor(protected options: FieldOptions) {
     super(options);
 
     const choices: string[] = options.field.widgetOptionsJson.peek().choices || [];
@@ -79,7 +79,7 @@ export class ChoiceListEditor extends NewBaseEditor {
         dom.cls('font-underline', this._choiceOptionsByName[item.label]?.fontUnderline ?? false),
         dom.cls('font-italic', this._choiceOptionsByName[item.label]?.fontItalic ?? false),
         dom.cls('font-strikethrough', this._choiceOptionsByName[item.label]?.fontStrikethrough ?? false),
-        cssInvalidToken.cls('-invalid', item.isInvalid)
+        cssChoiceToken.cls('-invalid', item.isInvalid)
       ],
       createToken: label => new ChoiceItem(label, !choiceSet.has(label)),
       acOptions,
@@ -254,7 +254,7 @@ export class ChoiceListEditor extends NewBaseEditor {
 }
 
 const cssCellEditor = styled('div', `
-  background-color: white;
+  background-color: ${theme.cellEditorBg};
   font-family: var(--grist-font-family-data);
   font-size: var(--grist-medium-font-size);
 `);
@@ -270,7 +270,7 @@ const cssTokenField = styled(tokenFieldStyles.cssTokenField, `
   flex-wrap: wrap;
 `);
 
-const cssToken = styled(tokenFieldStyles.cssToken, `
+export const cssToken = styled(tokenFieldStyles.cssToken, `
   padding: 1px 4px;
   margin: 2px;
   line-height: 16px;
@@ -281,7 +281,7 @@ const cssToken = styled(tokenFieldStyles.cssToken, `
   }
 `);
 
-const cssDeleteButton = styled(tokenFieldStyles.cssDeleteButton, `
+export const cssDeleteButton = styled(tokenFieldStyles.cssDeleteButton, `
   position: absolute;
   top: -8px;
   right: -6px;
@@ -303,7 +303,7 @@ const cssDeleteButton = styled(tokenFieldStyles.cssDeleteButton, `
   }
 `);
 
-const cssDeleteIcon = styled(tokenFieldStyles.cssDeleteIcon, `
+export const cssDeleteIcon = styled(tokenFieldStyles.cssDeleteIcon, `
   --icon-color: ${colors.light};
   &:hover {
     --icon-color: ${colors.darkGrey};
@@ -333,7 +333,7 @@ const cssInputSizer = styled('div', `
 // Set z-index to be higher than the 1000 set for .cell_editor.
 export const cssChoiceList = styled('div', `
   z-index: 1001;
-  box-shadow: 0 0px 8px 0 rgba(38,38,51,0.6);
+  box-shadow: 0 0px 8px 0 ${theme.menuShadow};
   overflow-y: auto;
   padding: 8px 0 0 0;
   --weaseljs-menu-item-padding: 8px 16px;

@@ -1,4 +1,4 @@
-import {colors, testId, vars} from 'app/client/ui2018/cssVars';
+import {colors, testId, theme, vars} from 'app/client/ui2018/cssVars';
 import {IconName} from 'app/client/ui2018/IconList';
 import {icon} from 'app/client/ui2018/icons';
 import {isColorDark} from 'app/common/gutil';
@@ -24,6 +24,8 @@ export type ISelectorOption<T> = (T & string) | ISelectorOptionFull<T>;
  *
  * A "light" style is supported in CSS by passing cssButtonSelect.cls('-light') as an additional
  * argument.
+ *
+ * A disabled state is supported by passing cssButtonSelect.cls('-disabled').
  *
  * Usage:
  *    const fruit = observable("apple");
@@ -61,13 +63,13 @@ export function buttonToggleSelect<T>(
 /**
  * Pre-made text alignment selector.
  */
-export function alignmentSelect(obs: Observable<string>) {
+export function alignmentSelect(obs: Observable<string>, ...domArgs: DomElementArg[]) {
   const alignments: Array<ISelectorOption<string>> = [
     {value: 'left',   icon: 'LeftAlign'},
     {value: 'center', icon: 'CenterAlign'},
     {value: 'right',  icon: 'RightAlign'}
   ];
-  return buttonSelect(obs, alignments, {}, testId('alignment-select'));
+  return buttonSelect(obs, alignments, {}, testId('alignment-select'), ...domArgs);
 }
 
 /**
@@ -142,7 +144,7 @@ export const cssButtonSelect = styled('div', `
   display: flex;
 
   /* Vars */
-  color: ${colors.dark};
+  color: ${theme.text};
   flex: 1 1 0;
 `);
 
@@ -165,8 +167,9 @@ const cssSelectorBtn = styled('div', `
   white-space: nowrap;
   padding: 4px 10px;
 
-  border: 1px solid ${colors.darkGrey};
-  --icon-color: ${colors.slate};
+  background-color: ${theme.buttonGroupBg};
+  border: 1px solid ${theme.buttonGroupBorder};
+  --icon-color: ${theme.buttonGroupIcon};
 
   margin-left: -1px;
 
@@ -184,15 +187,15 @@ const cssSelectorBtn = styled('div', `
   }
 
   &:hover:not(&-selected) {
-    border: 1px solid ${colors.hover};
+    border: 1px solid ${theme.buttonGroupBorderHover};
     z-index: 5;  /* Update z-index so selected borders take precedent */
   }
 
   &-selected {
-    color: ${colors.light};
-    --icon-color: ${colors.light};
-    border: 1px solid ${colors.dark};
-    background-color: ${colors.dark};
+    color: ${theme.buttonGroupSelectedFg};
+    --icon-color: ${theme.buttonGroupSelectedFg};
+    border: 1px solid ${theme.buttonGroupSelectedBorder};
+    background-color: ${theme.buttonGroupSelectedBg};
     z-index: 10;  /* Update z-index so selected borders take precedent */
   }
 
@@ -202,18 +205,26 @@ const cssSelectorBtn = styled('div', `
     border-radius: ${vars.controlBorderRadius};
     margin-left: 0px;
     padding: 8px;
-    color: ${colors.slate};
-    --icon-color: ${colors.slate};
+    color: ${theme.buttonGroupLightFg};
+    --icon-color: ${theme.buttonGroupLightFg};
   }
   .${cssButtonSelect.className}-light > &-selected {
     border: none;
-    color: ${colors.lightGreen};
-    --icon-color: ${colors.lightGreen};
+    color: ${theme.buttonGroupLightSelectedFg};
+    --icon-color: ${theme.buttonGroupLightSelectedFg};
     background-color: initial;
   }
   .${cssButtonSelect.className}-light > &:hover {
     border: none;
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
+  }
+  .${cssButtonSelect.className}-disabled > &,
+  .${cssButtonSelect.className}-disabled > &:hover {
+    --icon-color: ${theme.rightPanelToggleButtonDisabledFg};
+    color: ${theme.rightPanelToggleButtonDisabledFg};
+    background-color: ${theme.rightPanelToggleButtonDisabledBg};
+    border-color: ${theme.buttonGroupBorder};
+    pointer-events: none;
   }
 `);
 

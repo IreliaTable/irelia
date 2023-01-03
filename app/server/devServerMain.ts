@@ -8,7 +8,7 @@
  *   STATIC_PORT  -- port for the static resource server (defaults to 9001)
  *   DOC_PORT     -- comma separated ports for doc workers (defaults to 9002)
  *   TEST_CLEAN_DATABASE -- reset the database(s) before starting
- *   IRELIA_SINGLE_PORT -- if set, just a single combined server on HOME_PORT
+ *   GRIST_SINGLE_PORT -- if set, just a single combined server on HOME_PORT
  *   DOC_WORKER_COUNT  -- if set, makes sure there are at least this number of
  *                        doc workers.  Will add ports incrementally after the last
  *                        worker added with DOC_PORT.
@@ -20,7 +20,7 @@
 
 import {updateDb} from 'app/server/lib/dbUtils';
 import {FlexServer} from 'app/server/lib/FlexServer';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {main as mergedServerMain} from 'app/server/mergedServerMain';
 import {promisifyAll} from 'bluebird';
 import * as fse from 'fs-extra';
@@ -56,14 +56,14 @@ export async function main() {
   log.info("devServer starting.  Please do not set any ports in environment :-)");
   log.info("Server will be available at http://localhost:8080");
 
-  process.env.IRELIA_HOSTED = "true";
-  if (!process.env.IRELIA_ADAPT_DOMAIN) {
-    process.env.IRELIA_ADAPT_DOMAIN = "true";
+  process.env.GRIST_HOSTED = "true";
+  if (!process.env.GRIST_ADAPT_DOMAIN) {
+    process.env.GRIST_ADAPT_DOMAIN = "true";
   }
 
   // Experimental plugins are enabled by default for devs
-  if (!process.env.IRELIA_EXPERIMENTAL_PLUGINS) {
-    process.env.IRELIA_EXPERIMENTAL_PLUGINS = "1";
+  if (!process.env.GRIST_EXPERIMENTAL_PLUGINS) {
+    process.env.GRIST_EXPERIMENTAL_PLUGINS = "1";
   }
 
   // For tests, it is useful to start with the database in a known state.
@@ -81,8 +81,8 @@ export async function main() {
   // In V1, we no longer create a config.json file automatically if it is missing.
   // It is convenient to do that in the dev and test environment.
   const appRoot = path.dirname(path.dirname(__dirname));
-  const instDir = process.env.IRELIA_INST_DIR || appRoot;
-  if (process.env.IRELIA_INST_DIR) {
+  const instDir = process.env.GRIST_INST_DIR || appRoot;
+  if (process.env.GRIST_INST_DIR) {
     const fileName = path.join(instDir, 'config.json');
     if (!(await fse.pathExists(fileName))) {
       const config = {
@@ -100,7 +100,7 @@ export async function main() {
     log.warn('GOOGLE_API_KEY is not defined, Url plugin will not be able to access public files.');
   }
 
-  if (process.env.IRELIA_SINGLE_PORT) {
+  if (process.env.GRIST_SINGLE_PORT) {
     log.info("==========================================================================");
     log.info("== mergedServer");
     const port = getPort("HOME_PORT", 8080);

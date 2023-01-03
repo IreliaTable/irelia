@@ -12,9 +12,6 @@ declare module "app/client/lib/browserGlobals";
 declare module "app/client/lib/dom";
 declare module "app/client/lib/koDom";
 declare module "app/client/lib/koForm";
-declare module "app/client/lib/koSession";
-declare module "app/client/widgets/UserType";
-declare module "app/client/widgets/UserTypeImpl";
 
 // tslint:disable:max-classes-per-file
 
@@ -33,14 +30,16 @@ declare module "app/client/components/BaseView" {
 
   import {Cursor, CursorPos} from 'app/client/components/Cursor';
   import {GristDoc} from 'app/client/components/GristDoc';
+  import {SelectionSummary} from 'app/client/components/SelectionSummary';
   import {Disposable} from 'app/client/lib/dispose';
-  import * as BaseRowModel from "app/client/models/BaseRowModel";
+  import BaseRowModel from "app/client/models/BaseRowModel";
   import {DataRowModel} from 'app/client/models/DataRowModel';
   import {LazyArrayModel} from "app/client/models/DataTableModel";
-  import * as DataTableModel from "app/client/models/DataTableModel";
-  import {ViewSectionRec} from "app/client/models/DocModel";
+  import DataTableModel from "app/client/models/DataTableModel";
+  import {ViewFieldRec, ViewSectionRec} from "app/client/models/DocModel";
   import {FilterInfo} from 'app/client/models/entities/ViewSectionRec';
   import {SortedRowSet} from 'app/client/models/rowset';
+  import {IColumnFilterMenuOptions} from 'app/client/ui/ColumnFilterMenu';
   import {FieldBuilder} from "app/client/widgets/FieldBuilder";
   import {DomArg} from 'grainjs';
   import {IOpenController} from 'popweasel';
@@ -58,43 +57,28 @@ declare module "app/client/components/BaseView" {
     public gristDoc: GristDoc;
     public cursor: Cursor;
     public sortedRows: SortedRowSet;
+    public rowSource: RowSource;
     public activeFieldBuilder: ko.Computed<FieldBuilder>;
+    public selectedColumns: ko.Computed<ViewFieldRec[]>|null;
     public disableEditing: ko.Computed<boolean>;
     public isTruncated: ko.Observable<boolean>;
     public tableModel: DataTableModel;
+    public selectionSummary?: SelectionSummary;
 
     constructor(gristDoc: GristDoc, viewSectionModel: any, options?: {addNewRow?: boolean, isPreview?: boolean});
     public setCursorPos(cursorPos: CursorPos): void;
-    public createFilterMenu(ctl: IOpenController, filterInfo: FilterInfo, onClose?: () => void): HTMLElement;
+    public createFilterMenu(ctl: IOpenController, filterInfo: FilterInfo,
+      options?: IColumnFilterMenuOptions): HTMLElement;
     public buildTitleControls(): DomArg;
     public getLoadingDonePromise(): Promise<void>;
     public activateEditorAtCursor(options?: Options): void;
+    public openDiscussionAtCursor(discussionId?: number): boolean;
     public onResize(): void;
     public prepareToPrint(onOff: boolean): void;
     public moveEditRowToCursor(): DataRowModel;
     public scrollToCursor(sync: boolean): Promise<void>;
   }
   export = BaseView;
-}
-
-declare module "app/client/components/RefSelect" {
-  import {Disposable} from 'app/client/lib/dispose';
-  import {ColumnRec} from "app/client/models/DocModel";
-  import {DocModel} from "app/client/models/DocModel";
-  import {FieldBuilder} from "app/client/widgets/FieldBuilder";
-
-  namespace RefSelect {}
-  class RefSelect extends Disposable {
-    public isForeignRefCol: ko.Computed<boolean>;
-
-    constructor(options: {
-      docModel: DocModel,
-      origColumn: ColumnRec,
-      fieldBuilder: ko.Computed<FieldBuilder|null>,
-    });
-    public buildDom(): HTMLElement;
-  }
-  export = RefSelect;
 }
 
 declare module "app/client/components/ViewConfigTab" {
@@ -113,10 +97,9 @@ declare module "app/client/components/ViewConfigTab" {
 
   class ViewConfigTab extends Disposable {
     constructor(options: {gristDoc: GristDoc, viewModel: ViewRec});
-    public buildSortDom(): DomContents;
+    public buildSortFilterDom(): DomContents;
     // TODO: these should be made private or renamed.
     public _buildAdvancedSettingsDom(): DomArg;
-    public _buildFilterDom(): DomArg;
     public _buildThemeDom(): DomArg;
     public _buildChartConfigDom(): DomContents;
     public _buildLayoutDom(): DomArg;
@@ -128,10 +111,13 @@ declare module "app/client/components/ViewConfigTab" {
 declare module "app/client/components/commands" {
   export class Command {
     public name: string;
+    public deprecated: boolean;
     public desc: string;
     public humanKeys: string[];
     public keys: string[];
-    public run: () => any;
+    public getDesc(): string;
+    public getKeysDesc(): string;
+    public run(): any;
   }
 
   export type CommandsGroup = any;
@@ -142,7 +128,7 @@ declare module "app/client/components/commands" {
 
 declare module "app/client/models/BaseRowModel" {
   import {Disposable} from 'app/client/lib/dispose';
-  import * as TableModel from 'app/client/models/TableModel';
+  import TableModel from 'app/client/models/TableModel';
   import {ColValues} from 'app/common/DocActions';
 
   namespace BaseRowModel {}
@@ -159,11 +145,20 @@ declare module "app/client/models/BaseRowModel" {
 }
 
 declare module "app/client/models/MetaRowModel" {
-  import * as BaseRowModel from "app/client/models/BaseRowModel";
+  import BaseRowModel from "app/client/models/BaseRowModel";
+  import {ColValues} from 'app/common/DocActions';
+  import {SchemaTypes} from 'app/common/schema';
+
+  type NPartial<T> = {
+    [P in keyof T]?: T[P]|null;
+  };
+  type Values<T> = T extends keyof SchemaTypes ? NPartial<SchemaTypes[T]> : ColValues;
+
   namespace MetaRowModel {}
-  class MetaRowModel extends BaseRowModel {
+  class MetaRowModel<TName extends (keyof SchemaTypes)|undefined = undefined> extends BaseRowModel {
     public _isDeleted: ko.Observable<boolean>;
     public events: { trigger: (key: string) => void };
+    public updateColValues(colValues: Values<TName>): Promise<void>;
   }
   export = MetaRowModel;
 }
@@ -197,6 +192,7 @@ declare module "app/client/models/modelUtil" {
     prop(propName: string): KoSaveableObservable<any>;
   }
 
+  function objObservable<T>(obs: ko.KoSaveableObservable<T>): SaveableObjObservable<T>;
   function objObservable<T>(obs: ko.Observable<T>): ObjObservable<T>;
   function jsonObservable(obs: KoSaveableObservable<string>,
                           modifierFunc?: any, optContext?: any): SaveableObjObservable<any>;
@@ -247,10 +243,10 @@ declare module "app/client/models/TableModel" {
 declare module "app/client/models/MetaTableModel" {
   import {KoArray} from "app/client/lib/koArray";
   import {DocModel} from "app/client/models/DocModel";
-  import * as MetaRowModel from "app/client/models/MetaRowModel";
+  import MetaRowModel from "app/client/models/MetaRowModel";
   import {RowSource} from "app/client/models/rowset";
   import {TableData} from "app/client/models/TableData";
-  import * as TableModel from "app/client/models/TableModel";
+  import TableModel from "app/client/models/TableModel";
   import {CellValue} from "app/common/DocActions";
 
   namespace MetaTableModel {}
@@ -271,12 +267,12 @@ declare module "app/client/models/MetaTableModel" {
 
 declare module "app/client/models/DataTableModel" {
   import {KoArray} from "app/client/lib/koArray";
-  import * as BaseRowModel from "app/client/models/BaseRowModel";
+  import BaseRowModel from "app/client/models/BaseRowModel";
   import {DocModel, TableRec} from "app/client/models/DocModel";
   import {TableQuerySets} from 'app/client/models/QuerySet';
   import {SortedRowSet} from "app/client/models/rowset";
   import {TableData} from "app/client/models/TableData";
-  import * as TableModel from "app/client/models/TableModel";
+  import TableModel from "app/client/models/TableModel";
   import {UIRowId} from "app/common/UIRowId";
 
   namespace DataTableModel {
@@ -319,3 +315,9 @@ declare module "app/client/lib/koUtil" {
 // with polyfills for old browsers.
 declare module "bowser/bundled";
 declare module "randomcolor";
+
+interface Location {
+  // We use reload(true) in places, which has an effect in Firefox, but may be more of a
+  // historical accident than an intentional choice.
+  reload(forceGet?: boolean): void;
+}

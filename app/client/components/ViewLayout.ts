@@ -1,4 +1,4 @@
-import * as BaseView from 'app/client/components/BaseView';
+import BaseView from 'app/client/components/BaseView';
 import {ChartView} from 'app/client/components/ChartView';
 import * as commands from 'app/client/components/commands';
 import {CustomView} from 'app/client/components/CustomView';
@@ -15,7 +15,7 @@ import {reportError} from 'app/client/models/errors';
 import {filterBar} from 'app/client/ui/FilterBar';
 import {viewSectionMenu} from 'app/client/ui/ViewSectionMenu';
 import {buildWidgetTitle} from 'app/client/ui/WidgetTitle';
-import {colors, mediaSmall, testId} from 'app/client/ui2018/cssVars';
+import {colors, isNarrowScreenObs, mediaSmall, testId, theme} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {DisposableWithEvents} from 'app/common/DisposableWithEvents';
 import {mod} from 'app/common/gutil';
@@ -155,6 +155,7 @@ export class ViewLayout extends DisposableWithEvents implements IDomComponent {
       nextSection: () => { this._otherSection(+1); },
       prevSection: () => { this._otherSection(-1); },
       printSection: () => { printViewSection(this._layout, this.viewModel.activeSection()).catch(reportError); },
+      sortFilterMenuOpen: (sectionId?: number) => { this._openSortFilterMenu(sectionId); },
     };
     this.autoDispose(commands.createGroup(commandGroup, this, true));
   }
@@ -267,6 +268,20 @@ export class ViewLayout extends DisposableWithEvents implements IDomComponent {
       this.gristDoc.viewModel.activeSectionId(layoutBox.leafId.peek());
     }
   }
+
+  /**
+   * Opens the sort and filter menu of the active view section.
+   *
+   * Optionally accepts a `sectionId` for opening a specific section's menu.
+   */
+  private _openSortFilterMenu(sectionId?: number)  {
+    const id = sectionId ?? this.viewModel.activeSectionId();
+    const leafBoxDom = this._layout.getLeafBox(id)?.dom;
+    if (!leafBoxDom) { return; }
+
+    const menu: HTMLElement | null = leafBoxDom.querySelector('.test-section-menu-sortAndFilter');
+    menu?.click();
+  }
 }
 
 export function buildViewSectionDom(options: {
@@ -294,7 +309,8 @@ export function buildViewSectionDom(options: {
     dom.cls('active_section', vs.hasFocus),
     dom.cls('active_section--no-indicator', !focusable),
     dom.maybe<BaseView|null>((use) => use(vs.viewInstance), (viewInstance) => dom('div.viewsection_title.flexhbox',
-      dom('span.viewsection_drag_indicator.glyphicon.glyphicon-option-vertical',
+      cssDragIcon('DragDrop',
+        dom.cls("viewsection_drag_indicator"),
         // Makes element grabbable only if grist is not readonly.
         dom.cls('layout_grabbable', (use) => !use(gristDoc.isReadonlyKo)),
         !draggable ? dom.style("visibility", "hidden") : null
@@ -304,12 +320,11 @@ export function buildViewSectionDom(options: {
       buildWidgetTitle(vs, options, testId('viewsection-title'), cssTestClick(testId("viewsection-blank"))),
       viewInstance.buildTitleControls(),
       dom('span.viewsection_buttons',
-        dom.create(viewSectionMenu, gristDoc.docModel, vs, gristDoc.isReadonly)
+        dom.create(viewSectionMenu, gristDoc, vs)
       )
      )),
-    dom.maybe((use) => use(vs.activeFilterBar) || use(vs.isRaw) && use(vs.activeFilters).length,
-      () => dom.create(filterBar, vs)),
-    dom.maybe<BaseView|null>(vs.viewInstance, (viewInstance) =>
+    dom.create(filterBar, gristDoc, vs),
+    dom.maybe<BaseView|null>(vs.viewInstance, (viewInstance) => [
       dom('div.view_data_pane_container.flexvbox',
         cssResizing.cls('', isResizing),
         dom.maybe(viewInstance.disableEditing, () =>
@@ -319,9 +334,10 @@ export function buildViewSectionDom(options: {
           dom('div.viewsection_truncated', 'Not all data is shown')
         ),
         dom.cls((use) => 'viewsection_type_' + use(vs.parentKey)),
-        viewInstance.viewPane
-      )
-    ),
+        viewInstance.viewPane,
+      ),
+      dom.maybe(use => !use(isNarrowScreenObs()), () => viewInstance.selectionSummary?.buildDom()),
+    ]),
     dom.on('mousedown', () => { viewModel?.activeSectionId(sectionRowId); }),
   );
 }
@@ -335,7 +351,7 @@ const cssTestClick = styled(`div`, `
 const cssSigmaIcon = styled(icon, `
   bottom: 1px;
   margin-right: 5px;
-  background-color: ${colors.slate}
+  background-color: ${theme.lightText}
 `);
 
 const cssViewLeaf = styled('div', `
@@ -352,12 +368,12 @@ const cssViewLeafInactive = styled('div', `
       overflow: hidden;
       background: repeating-linear-gradient(
         -45deg,
-        ${colors.mediumGreyOpaque},
-        ${colors.mediumGreyOpaque} 10px,
-        ${colors.lightGrey} 10px,
-        ${colors.lightGrey} 20px
+        ${theme.widgetInactiveStripesDark},
+        ${theme.widgetInactiveStripesDark} 10px,
+        ${theme.widgetInactiveStripesLight} 10px,
+        ${theme.widgetInactiveStripesLight} 20px
       );
-      border: 1px solid ${colors.darkGrey};
+      border: 1px solid ${theme.widgetBorder};
       border-radius: 4px;
       padding: 0 2px;
     }
@@ -412,6 +428,18 @@ const cssLayoutBox = styled('div', `
       min-height: 40px;
       min-width: 40px;
     }
+  }
+`);
+
+// z-index ensure it's above the resizer line, since it's hard to grab otherwise
+const cssDragIcon = styled(icon, `
+  visibility: hidden;
+  --icon-color: ${colors.slate};
+  top: -1px;
+  z-index: 100;
+
+  .viewsection_title:hover &.layout_grabbable {
+    visibility: visible;
   }
 `);
 

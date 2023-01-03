@@ -9,18 +9,18 @@ import {getAuthorizedUserId, getUserId, getUserProfiles, RequestWithLogin} from 
 import {getSessionUser, linkOrgWithEmail} from 'app/server/lib/BrowserSession';
 import {expressWrap} from 'app/server/lib/expressWrap';
 import {RequestWithOrg} from 'app/server/lib/extractOrg';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {addPermit, clearSessionCacheIfNeeded, getDocScope, getScope, integerParam,
         isParameterOn, sendOkReply, sendReply, stringParam} from 'app/server/lib/requestUtils';
 import {IWidgetRepository} from 'app/server/lib/WidgetRepository';
 import {Request} from 'express';
 
 import {User} from './entity/User';
-import {HomeDBManager} from './lib/HomeDBManager';
+import {HomeDBManager, QueryResult, Scope} from './lib/HomeDBManager';
 
 // Special public organization that contains examples and templates.
-const TEMPLATES_ORG_DOMAIN = process.env.IRELIA_ID_PREFIX ?
-  `templates-${process.env.IRELIA_ID_PREFIX}` :
+export const TEMPLATES_ORG_DOMAIN = process.env.GRIST_ID_PREFIX ?
+  `templates-${process.env.GRIST_ID_PREFIX}` :
   'templates';
 
 // exposed for testing purposes
@@ -73,11 +73,11 @@ export function addOrg(
   userId: number,
   props: Partial<OrganizationProperties>,
   options?: {
-    planType?: 'free'
+    planType?: string,
   }
 ): Promise<number> {
   return dbManager.connection.transaction(async manager => {
-    const user = await manager.findOne(User, userId);
+    const user = await manager.findOne(User, {where: {id: userId}});
     if (!user) { return handleDeletedUser(); }
     const query = await dbManager.addOrg(user, props, {
       ...options,
@@ -330,8 +330,9 @@ export class ApiServer {
     // Get user access information regarding an org
     this._app.get('/api/orgs/:oid/access', expressWrap(async (req, res) => {
       const org = getOrgKey(req);
-      const scope = addPermit(getScope(req), this._dbManager.getSupportUserId(), {org});
-      const query = await this._dbManager.getOrgAccess(scope, org);
+      const query = await this._withSupportUserAllowedToView(
+        org, req, (scope) => this._dbManager.getOrgAccess(scope, org)
+      );
       return sendReply(req, res, query);
     }));
 
@@ -411,7 +412,7 @@ export class ApiServer {
     // Get user's apiKey
     this._app.get('/api/profile/apikey', expressWrap(async (req, res) => {
       const userId = getUserId(req);
-      const user = await User.findOne(userId);
+      const user = await User.findOne({where: {id: userId}});
       if (user) {
         // The null value is of no interest to the user, let's show empty string instead.
         res.send(user.apiKey || '');
@@ -426,7 +427,7 @@ export class ApiServer {
       const userId = getAuthorizedUserId(req);
       const force = req.body ? req.body.force : false;
       const manager = this._dbManager.connection.manager;
-      let user = await manager.findOne(User, userId);
+      let user = await manager.findOne(User, {where: {id: userId}});
       if (!user) { return handleDeletedUser(); }
       if (!user.apiKey || force) {
         user = await updateApiKeyWithRetry(manager, user);
@@ -441,7 +442,7 @@ export class ApiServer {
     this._app.delete('/api/profile/apikey', expressWrap(async (req, res) => {
       const userId = getAuthorizedUserId(req);
       await this._dbManager.connection.transaction(async manager => {
-        const user = await manager.findOne(User, userId);
+        const user = await manager.findOne(User, {where: {id: userId}});
         if (!user) { return handleDeletedUser(); }
         user.apiKey = null;
         await manager.save(User, user);
@@ -454,9 +455,9 @@ export class ApiServer {
     this._app.get('/api/session/access/active', expressWrap(async (req, res) => {
       const fullUser = await this._getFullUser(req);
       const domain = getOrgFromRequest(req);
-      // Allow the support user enough access to every org to see the billing pages.
-      const scope = domain ? addPermit(getScope(req), this._dbManager.getSupportUserId(), {org: domain}) : null;
-      const org = scope ? (await this._dbManager.getOrg(scope, domain)) : null;
+      const org = domain ? (await this._withSupportUserAllowedToView(
+        domain, req, (scope) => this._dbManager.getOrg(scope, domain)
+      )) : null;
       const orgError = (org && org.errMessage) ? {error: org.errMessage, status: org.status} : undefined;
       return sendOkReply(req, res, {
         user: {...fullUser, helpScoutSignature: helpScoutSign(fullUser.email)},
@@ -526,6 +527,30 @@ export class ApiServer {
     const loginMethod = sessionUser && sessionUser.profile ? sessionUser.profile.loginMethod : undefined;
     const allowGoogleLogin = user.options?.allowGoogleLogin ?? true;
     return {...fullUser, loginMethod, allowGoogleLogin};
+  }
+
+
+  /**
+   * Run a query, and, if it is denied and the user is the support
+   * user, rerun the query with permission to view the current
+   * org. This is a bit inefficient, but only affects the support
+   * user. We wait to add the special permission only if needed, since
+   * it will in fact override any other access the support user has
+   * been granted, which could reduce their apparent access if that is
+   * part of what is returned by the query.
+   */
+  private async _withSupportUserAllowedToView<T>(
+    org: string|number, req: express.Request,
+    op: (scope: Scope) => Promise<QueryResult<T>>
+  ): Promise<QueryResult<T>> {
+    const scope = getScope(req);
+    const userId = getUserId(req);
+    const result = await op(scope);
+    if (result.status === 200 || userId !== this._dbManager.getSupportUserId()) {
+      return result;
+    }
+    const extendedScope = addPermit(scope, this._dbManager.getSupportUserId(), {org});
+    return await op(extendedScope);
   }
 }
 

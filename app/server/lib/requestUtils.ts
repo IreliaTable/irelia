@@ -5,17 +5,18 @@ import {DocScope, QueryResult, Scope} from 'app/gen-server/lib/HomeDBManager';
 import {getUserId, RequestWithLogin} from 'app/server/lib/Authorizer';
 import {RequestWithOrg} from 'app/server/lib/extractOrg';
 import {RequestWithGrist} from 'app/server/lib/GristServer';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {Permit} from 'app/server/lib/Permit';
 import {Request, Response} from 'express';
 import {URL} from 'url';
+import _ from 'lodash';
 
-// log api details outside of dev environment (when IRELIA_HOSTED_VERSION is set)
-const shouldLogApiDetails = Boolean(process.env.IRELIA_HOSTED_VERSION);
+// log api details outside of dev environment (when GRIST_HOSTED_VERSION is set)
+const shouldLogApiDetails = Boolean(process.env.GRIST_HOSTED_VERSION);
 
 // Offset to https ports in dev/testing environment.
-export const TEST_HTTPS_OFFSET = process.env.IRELIA_TEST_HTTPS_OFFSET ?
-  parseInt(process.env.IRELIA_TEST_HTTPS_OFFSET, 10) : undefined;
+export const TEST_HTTPS_OFFSET = process.env.GRIST_TEST_HTTPS_OFFSET ?
+  parseInt(process.env.GRIST_TEST_HTTPS_OFFSET, 10) : undefined;
 
 // Database fields that we permit in entities but don't want to cross the api.
 const INTERNAL_FIELDS = new Set([
@@ -26,7 +27,7 @@ const INTERNAL_FIELDS = new Set([
 
 /**
  * Adapt a home-server or doc-worker URL to match the hostname in the request URL. For custom
- * domains and when IRELIA_SERVE_SAME_ORIGIN is set, we replace the full hostname; otherwise just
+ * domains and when GRIST_SERVE_SAME_ORIGIN is set, we replace the full hostname; otherwise just
  * the base of the hostname. The changes to url are made in-place.
  *
  * For dev purposes, port is kept but possibly adjusted for TEST_HTTPS_OFFSET. Note that if port
@@ -36,7 +37,7 @@ const INTERNAL_FIELDS = new Set([
 export function adaptServerUrl(url: URL, req: RequestWithOrg): void {
   const reqBaseDomain = parseSubdomain(req.hostname).base;
 
-  if (process.env.IRELIA_SERVE_SAME_ORIGIN === 'true' || req.isCustomHost) {
+  if (process.env.GRIST_SERVE_SAME_ORIGIN === 'true' || req.isCustomHost) {
     url.hostname = req.hostname;
   } else if (reqBaseDomain) {
     const subdomain: string|undefined = parseSubdomain(url.hostname).org || DEFAULT_HOME_SUBDOMAIN;
@@ -84,8 +85,8 @@ export function trustOrigin(req: Request, resp: Response): boolean {
   // Note that the request origin is undefined for non-CORS requests.
   const origin = req.get('origin');
   if (!origin) { return true; } // Not a CORS request.
-  if (process.env.IRELIA_HOST && req.hostname === process.env.IRELIA_HOST) { return true; }
-  if (!allowHost(req, new URL(origin))) { return false; }
+  if (process.env.GRIST_HOST && req.hostname === process.env.GRIST_HOST) { return true; }
+  if (!allowHost(req, new URL(origin)) && !isEnvironmentAllowedHost(new URL(origin))) { return false; }
 
   // For a request to a custom domain, the full hostname must match.
   resp.header("Access-Control-Allow-Origin", origin);
@@ -102,13 +103,24 @@ export function allowHost(req: Request, allowedHost: string|URL) {
   const allowedUrl = (typeof allowedHost === 'string') ? new URL(`${proto}://${allowedHost}`) : allowedHost;
   if (mreq.isCustomHost) {
     // For a request to a custom domain, the full hostname must match.
-    return actualUrl.hostname === allowedUrl.hostname;
+  return actualUrl.hostname === allowedUrl.hostname;
   } else {
     // For requests to a native subdomains, only the base domain needs to match.
     const allowedDomain = parseSubdomain(allowedUrl.hostname);
     const actualDomain = parseSubdomain(actualUrl.hostname);
-    return (actualDomain.base === allowedDomain.base);
+    return (!_.isEmpty(actualDomain) ? actualDomain.base === allowedDomain.base : allowedUrl.hostname === actualUrl.hostname);
   }
+}
+
+export function matchesBaseDomain(domain: string, baseDomain: string) {
+  return domain === baseDomain || domain.endsWith("." + baseDomain);
+}
+
+export function isEnvironmentAllowedHost(url: string|URL) {
+  const urlHost = (typeof url === 'string') ? url : url.hostname;
+  return (process.env.GRIST_ALLOWED_HOSTS || "").split(",").some(domain =>
+    domain && matchesBaseDomain(urlHost, domain)
+  );
 }
 
 export function isParameterOn(parameter: any): boolean {
@@ -181,7 +193,7 @@ export async function sendReply<T>(
   result: QueryResult<T>,
   options: SendReplyOptions = {},
 ) {
-  const data = pruneAPIResult(result.data || null, options.allowedFields);
+  const data = pruneAPIResult(result.data, options.allowedFields);
   if (shouldLogApiDetails && req) {
     const mreq = req as RequestWithLogin;
     log.rawDebug('api call', {
@@ -196,7 +208,7 @@ export async function sendReply<T>(
     });
   }
   if (result.status === 200) {
-    return res.json(data);
+    return res.json(data ?? null); // can't handle undefined
   } else {
     return res.status(result.status).json({error: result.errMessage});
   }
@@ -228,7 +240,7 @@ export function pruneAPIResult<T>(data: T, allowedFields?: Set<string>): T {
       if (key === 'connectId' && value === null) { return undefined; }
       return INTERNAL_FIELDS.has(key) ? undefined : value;
     });
-  return JSON.parse(output);
+  return output !== undefined ? JSON.parse(output) : undefined;
 }
 
 /**
@@ -258,8 +270,14 @@ export function stringParam(p: any, name: string, allowed?: string[]): string {
 
 export function integerParam(p: any, name: string): number {
   if (typeof p === 'number') { return Math.floor(p); }
-  if (typeof p === 'string') { return parseInt(p, 10); }
-  throw new Error(`${name} parameter should be an integer: ${p}`);
+  if (typeof p === 'string') {
+    const result = parseInt(p, 10);
+    if (isNaN(result)) {
+      throw new ApiError(`${name} parameter cannot be understood as an integer: ${p}`, 400);
+    }
+    return result;
+  }
+  throw new ApiError(`${name} parameter should be an integer: ${p}`, 400);
 }
 
 export function optIntegerParam(p: any): number|undefined {

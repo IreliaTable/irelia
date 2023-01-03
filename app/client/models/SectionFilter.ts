@@ -6,7 +6,7 @@ import {buildColFilter, ColumnFilterFunc} from 'app/common/ColumnFilterFunc';
 import {buildRowFilter, RowFilterFunc, RowValueFunc } from 'app/common/RowFilterFunc';
 import {Computed, Disposable, MutableObsArray, obsArray, Observable, UseCB} from 'grainjs';
 
-export {ColumnFilterFunc} from 'app/common/ColumnFilterFunc';
+export type {ColumnFilterFunc};
 
 interface OpenColumnFilter {
   colRef: number;
@@ -37,7 +37,7 @@ export class SectionFilter extends Disposable {
     const columnFilterFunc = Computed.create(this, this._openFilterOverride, (use, openFilter) => {
       const openFilterFilterFunc = openFilter && use(openFilter.colFilter.filterFunc);
       function getFilterFunc(fieldOrColumn: ViewFieldRec|ColumnRec, colFilter: ColumnFilterFunc|null) {
-        if (openFilter?.colRef === fieldOrColumn.getRowId()) {
+        if (openFilter?.colRef === fieldOrColumn.origCol().getRowId()) {
           return openFilterFilterFunc;
         }
         return colFilter;

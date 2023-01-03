@@ -1,11 +1,13 @@
 import {ApiError} from 'app/common/ApiError';
 import {buildColFilter} from 'app/common/ColumnFilterFunc';
-import {DocData} from 'app/common/DocData';
+import {TableDataAction} from 'app/common/DocActions';
 import {DocumentSettings} from 'app/common/DocumentSettings';
 import * as gristTypes from 'app/common/gristTypes';
 import * as gutil from 'app/common/gutil';
+import {nativeCompare} from 'app/common/gutil';
+import {isTableCensored} from 'app/common/isHiddenTable';
 import {buildRowFilter} from 'app/common/RowFilterFunc';
-import {SchemaTypes} from 'app/common/schema';
+import {schema, SchemaTypes} from 'app/common/schema';
 import {SortFunc} from 'app/common/SortFunc';
 import {Sort} from 'app/common/SortSpec';
 import {MetaRowRecord, MetaTableData} from 'app/common/TableData';
@@ -79,6 +81,21 @@ export interface ExportParameters {
 }
 
 /**
+ * Options parameters for CSV and XLSX export functions.
+ */
+export interface DownloadOptions {
+  filename: string;
+  tableId: string;
+  viewSectionId: number | undefined;
+  filters: Filter[];
+  sortOrder: number[];
+}
+
+interface FilteredMetaTables {
+  [tableId: string]: TableDataAction;
+}
+
+/**
  * Gets export parameters from a request.
  */
 export function parseExportParameters(req: express.Request): ExportParameters {
@@ -91,24 +108,39 @@ export function parseExportParameters(req: express.Request): ExportParameters {
     tableId,
     viewSectionId,
     sortOrder,
-    filters
+    filters,
   };
 }
 
-// Makes assertion that value does exists or throws an error
+// Helper for getting filtered metadata tables.
+async function getMetaTables(activeDoc: ActiveDoc, req: express.Request): Promise<FilteredMetaTables> {
+  const docSession = docSessionFromRequest(req as RequestWithLogin);
+  return safe(await activeDoc.fetchMetaTables(docSession), "No metadata available in active document");
+}
+
+// Makes assertion that value does exist or throws an error
 function safe<T>(value: T, msg: string) {
   if (!value) { throw new ApiError(msg, 404); }
   return value as NonNullable<T>;
 }
 
-// Helper to for getting table from docData.
-function safeTable<TableId extends keyof SchemaTypes>(docData: DocData, name: TableId) {
-  return safe(docData.getMetaTable(name), `No table '${name}' in document with id ${docData}`);
+// Helper for getting table from filtered metadata.
+function safeTable<TableId extends keyof SchemaTypes>(metaTables: FilteredMetaTables, tableId: TableId) {
+  const table = safe(metaTables[tableId], `No table '${tableId}' in document`);
+  const colTypes = safe(schema[tableId], `No table '${tableId}' in document schema`);
+  return new MetaTableData<TableId>(tableId, table, colTypes);
 }
 
-// Helper for getting record safe
+// Helper for getting record safely: it throws if the record is missing.
 function safeRecord<TableId extends keyof SchemaTypes>(table: MetaTableData<TableId>, id: number) {
   return safe(table.getRecord(id), `No record ${id} in table ${table.tableId}`);
+}
+
+// Check that tableRef points to an uncensored table, or throw otherwise.
+function checkTableAccess(tables: MetaTableData<"_grist_Tables">, tableRef: number): void {
+  if (isTableCensored(tables, tableRef)) {
+    throw new ApiError(`Cannot find or access table`, 404);
+  }
 }
 
 /**
@@ -119,13 +151,14 @@ function safeRecord<TableId extends keyof SchemaTypes>(table: MetaTableData<Tabl
 export async function exportDoc(
   activeDoc: ActiveDoc,
   req: express.Request) {
-  const docData = safe(activeDoc.docData, "No docData in active document");
-  const tables = safeTable(docData, '_grist_Tables');
+  const metaTables = await getMetaTables(activeDoc, req);
+  const tables = safeTable(metaTables, '_grist_Tables');
   // select raw tables
-  const tableIds = tables.filterRowIds({ summarySourceTable: 0 });
+  const tableRefs = tables.filterRowIds({ summarySourceTable: 0 });
   const tableExports = await Promise.all(
-    tableIds
-      .map(tId => exportTable(activeDoc, tId, req))
+    tableRefs
+      .filter(tId => !isTableCensored(tables, tId))     // Omit censored tables
+      .map(tId => exportTable(activeDoc, tId, req, {metaTables}))
   );
   return tableExports;
 }
@@ -135,20 +168,25 @@ export async function exportDoc(
  */
 export async function exportTable(
   activeDoc: ActiveDoc,
-  tableId: number,
-  req: express.Request): Promise<ExportData> {
-  const docData = safe(activeDoc.docData, "No docData in active document");
-  const tables = safeTable(docData, '_grist_Tables');
-  const table = safeRecord(tables, tableId);
-  const tableColumns = safeTable(docData, '_grist_Tables_column')
+  tableRef: number,
+  req: express.Request,
+  {metaTables}: {metaTables?: FilteredMetaTables} = {},
+): Promise<ExportData> {
+  metaTables = metaTables || await getMetaTables(activeDoc, req);
+  const tables = safeTable(metaTables, '_grist_Tables');
+  checkTableAccess(tables, tableRef);
+  const table = safeRecord(tables, tableRef);
+  const tableColumns = safeTable(metaTables, '_grist_Tables_column')
     .getRecords()
+    // sort by parentPos and id, which should be the same order as in raw data
+    .sort((c1, c2) => nativeCompare(c1.parentPos, c2.parentPos) || nativeCompare(c1.id, c2.id))
     // remove manual sort column
     .filter(col => col.colId !== gristTypes.MANUALSORT);
   // Produce a column description matching what user will see / expect to export
   const tableColsById = _.indexBy(tableColumns, 'id');
   const columns = tableColumns.map(tc => {
     // remove all columns that don't belong to this table
-    if (tc.parentId !== tableId) {
+    if (tc.parentId !== tableRef) {
       return emptyCol;
     }
     // remove all helpers
@@ -171,9 +209,9 @@ export async function exportTable(
   }).filter(tc => tc !== emptyCol);
 
   // fetch actual data
-  const data = await activeDoc.fetchTable(docSessionFromRequest(req as RequestWithLogin), table.tableId, true);
-  const rowIds = data[2];
-  const dataByColId = data[3];
+  const {tableData} = await activeDoc.fetchTable(docSessionFromRequest(req as RequestWithLogin), table.tableId, true);
+  const rowIds = tableData[2];
+  const dataByColId = tableData[3];
   // sort rows
   const getters = new ServerColumnGetters(rowIds, dataByColId, columns);
   // create cell accessors
@@ -183,12 +221,12 @@ export async function exportTable(
   // since tables ids are not very friendly, borrow name from a primary view
   if (table.primaryViewId) {
     const viewId = table.primaryViewId;
-    const views = safeTable(docData, '_grist_Views');
+    const views = safeTable(metaTables, '_grist_Views');
     const view = safeRecord(views, viewId);
     tableName = view.name;
   }
 
-  const docInfo = safeRecord(safeTable(docData, '_grist_DocInfo'), 1);
+  const docInfo = safeRecord(safeTable(metaTables, '_grist_DocInfo'), 1);
   const docSettings = gutil.safeJsonParse(docInfo.documentSettings, {});
   return {
     tableName,
@@ -208,18 +246,21 @@ export async function exportSection(
   viewSectionId: number,
   sortSpec: Sort.SortSpec | null,
   filters: Filter[] | null,
-  req: express.Request): Promise<ExportData> {
-
-  const docData = safe(activeDoc.docData, "No docData in active document");
-  const viewSections = safeTable(docData, '_grist_Views_section');
+  req: express.Request,
+  {metaTables}: {metaTables?: FilteredMetaTables} = {},
+): Promise<ExportData> {
+  metaTables = metaTables || await getMetaTables(activeDoc, req);
+  const viewSections = safeTable(metaTables, '_grist_Views_section');
   const viewSection = safeRecord(viewSections, viewSectionId);
-  const tables = safeTable(docData, '_grist_Tables');
+  safe(viewSection.tableRef, `Cannot find or access table`);
+  const tables = safeTable(metaTables, '_grist_Tables');
+  checkTableAccess(tables, viewSection.tableRef);
   const table = safeRecord(tables, viewSection.tableRef);
-  const columns = safeTable(docData, '_grist_Tables_column')
+  const columns = safeTable(metaTables, '_grist_Tables_column')
     .filterRecords({parentId: table.id});
-  const viewSectionFields = safeTable(docData, '_grist_Views_section_field');
+  const viewSectionFields = safeTable(metaTables, '_grist_Views_section_field');
   const fields = viewSectionFields.filterRecords({parentId: viewSection.id});
-  const savedFilters = safeTable(docData, '_grist_Filters')
+  const savedFilters = safeTable(metaTables, '_grist_Filters')
     .filterRecords({viewSectionRef: viewSection.id});
 
   const tableColsById = _.indexBy(columns, 'id');
@@ -232,10 +273,7 @@ export async function exportSection(
     const displayCol = tableColsById[field?.displayCol || col.displayCol || col.id];
     const colWidgetOptions = gutil.safeJsonParse(col.widgetOptions, {});
     const fieldWidgetOptions = field ? gutil.safeJsonParse(field.widgetOptions, {}) : {};
-    const filterString = unsavedFiltersByColRef[col.id]?.filter || savedFiltersByColRef[col.id]?.filter;
-    const filterFunc = buildColFilter(filterString, col.type);
     return {
-      filterFunc,
       id: displayCol.id,
       colId: displayCol.colId,
       label: col.label,
@@ -244,9 +282,19 @@ export async function exportSection(
       widgetOptions: Object.assign(colWidgetOptions, fieldWidgetOptions),
     };
   };
-  const tableColumns = columns
+  const buildFilters = (col: GristTablesColumn, field?: GristViewsSectionField) => {
+    const filterString = unsavedFiltersByColRef[col.id]?.filter || savedFiltersByColRef[col.id]?.filter;
+    const filterFunc = buildColFilter(filterString, col.type);
+    return {
+      filterFunc,
+      id: col.id,
+      colId: col.colId,
+      type: col.type,
+    };
+  };
+  const columnsForFilters = columns
     .filter(column => !gristTypes.isHiddenCol(column.colId))
-    .map(column => viewify(column, fieldsByColRef[column.id]));
+    .map(column => buildFilters(column, fieldsByColRef[column.id]));
   const viewColumns = _.sortBy(fields, 'parentPos')
     .map((field) => viewify(tableColsById[field.colRef], field));
 
@@ -263,24 +311,24 @@ export async function exportSection(
   });
 
   // fetch actual data
-  const data = await activeDoc.fetchTable(docSessionFromRequest(req as RequestWithLogin), table.tableId, true);
-  let rowIds = data[2];
-  const dataByColId = data[3];
+  const {tableData} = await activeDoc.fetchTable(docSessionFromRequest(req as RequestWithLogin), table.tableId, true);
+  let rowIds = tableData[2];
+  const dataByColId = tableData[3];
   // sort rows
   const getters = new ServerColumnGetters(rowIds, dataByColId, columns);
   const sorter = new SortFunc(getters);
   sorter.updateSpec(sortSpec);
   rowIds.sort((a, b) => sorter.compare(a, b));
   // create cell accessors
-  const tableAccess = tableColumns.map(col => getters.getColGetter(col.id)!);
+  const tableAccess = columnsForFilters.map(col => getters.getColGetter(col.id)!);
   // create row filter based on all columns filter
-  const rowFilter = tableColumns
+  const rowFilter = columnsForFilters
     .map((col, c) => buildRowFilter(tableAccess[c], col.filterFunc))
     .reduce((prevFilter, curFilter) => (id) => prevFilter(id) && curFilter(id), () => true);
   // filter rows numbers
   rowIds = rowIds.filter(rowFilter);
 
-  const docInfo = safeRecord(safeTable(docData, '_grist_DocInfo'), 1);
+  const docInfo = safeRecord(safeTable(metaTables, '_grist_DocInfo'), 1);
   const docSettings = gutil.safeJsonParse(docInfo.documentSettings, {});
 
   return {

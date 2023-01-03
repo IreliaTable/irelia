@@ -3,6 +3,7 @@ import {ApiError} from 'app/common/ApiError';
 import {BrowserSettings} from "app/common/BrowserSettings";
 import {BulkColValues, ColValues, fromTableDataAction, TableColValues, TableRecordValue} from 'app/common/DocActions';
 import {isRaisedException} from "app/common/gristTypes";
+import {parseUrlId} from "app/common/gristUrls";
 import {isAffirmative} from "app/common/gutil";
 import {SortFunc} from 'app/common/SortFunc';
 import {Sort} from 'app/common/SortSpec';
@@ -32,9 +33,9 @@ import {DocManager} from "app/server/lib/DocManager";
 import {docSessionFromRequest, makeExceptionalDocSession, OptDocSession} from "app/server/lib/DocSession";
 import {DocWorker} from "app/server/lib/DocWorker";
 import {IDocWorkerMap} from "app/server/lib/DocWorkerMap";
-import {parseExportParameters} from "app/server/lib/Export";
-import {downloadCSV, DownloadCSVOptions} from "app/server/lib/ExportCSV";
-import {downloadXLSX, DownloadXLSXOptions} from "app/server/lib/ExportXLSX";
+import {DownloadOptions, parseExportParameters} from "app/server/lib/Export";
+import {downloadCSV} from "app/server/lib/ExportCSV";
+import {downloadXLSX} from "app/server/lib/ExportXLSX";
 import {expressWrap} from 'app/server/lib/expressWrap';
 import {filterDocumentInPlace} from "app/server/lib/filterUtils";
 import {googleAuthTokenMiddleware} from "app/server/lib/GoogleAuth";
@@ -48,6 +49,7 @@ import {
   getScope,
   integerParam,
   isParameterOn,
+  optIntegerParam,
   optStringParam,
   sendOkReply,
   sendReply,
@@ -58,16 +60,16 @@ import {localeFromRequest} from "app/server/lib/ServerLocale";
 import {allowedEventTypes, isUrlAllowed, WebhookAction, WebHookSecret} from "app/server/lib/Triggers";
 import {handleOptionalUpload, handleUpload} from "app/server/lib/uploads";
 import * as assert from 'assert';
-import * as contentDisposition from 'content-disposition';
+import contentDisposition from 'content-disposition';
 import {Application, NextFunction, Request, RequestHandler, Response} from "express";
 import * as _ from "lodash";
-import * as LRUCache from 'lru-cache';
+import LRUCache from 'lru-cache';
 import * as moment from 'moment';
 import fetch from 'node-fetch';
 import * as path from 'path';
 import * as t from "ts-interface-checker";
 import {Checker} from "ts-interface-checker";
-import * as uuidv4 from "uuid/v4";
+import uuidv4 from "uuid/v4";
 
 // Cap on the number of requests that can be outstanding on a single document via the
 // rest doc api.  When this limit is exceeded, incoming requests receive an immediate
@@ -83,10 +85,15 @@ const MAX_ACTIVE_DOCS_USAGE_CACHE = 1000;
 type WithDocHandler = (activeDoc: ActiveDoc, req: RequestWithLogin, resp: Response) => Promise<void>;
 
 // Schema validators for api endpoints that creates or updates records.
-const {RecordsPatch, RecordsPost, RecordsPut} = t.createCheckers(DocApiTypesTI, GristDataTI);
-RecordsPatch.setReportedPath("body");
-RecordsPost.setReportedPath("body");
-RecordsPut.setReportedPath("body");
+const {
+  RecordsPatch, RecordsPost, RecordsPut,
+  ColumnsPost, ColumnsPatch,
+  TablesPost, TablesPatch,
+} = t.createCheckers(DocApiTypesTI, GristDataTI);
+
+for (const checker of [RecordsPatch, RecordsPost, RecordsPut, ColumnsPost, ColumnsPatch, TablesPost, TablesPatch]) {
+  checker.setReportedPath("body");
+}
 
 /**
  * Middleware for validating request's body with a Checker instance.
@@ -157,7 +164,7 @@ export class DocWorkerApi {
       }
       const tableId = optTableId || req.params.tableId;
       const session = docSessionFromRequest(req);
-      const tableData = await handleSandboxError(tableId, [], activeDoc.fetchQuery(
+      const {tableData} = await handleSandboxError(tableId, [], activeDoc.fetchQuery(
         session, {tableId, filters}, !immediate));
       // For metaTables we don't need to specify columns, search will infer it from the sort expression.
       const isMetaTable = tableId.startsWith('_grist');
@@ -222,6 +229,21 @@ export class DocWorkerApi {
       })
     );
 
+    // Get the tables of the specified document in recordish format
+    this._app.get('/api/docs/:docId/tables', canView,
+      withDoc(async (activeDoc, req, res) => {
+        const records = await getTableRecords(activeDoc, req, "_grist_Tables");
+        const tables = records.map((record) => ({
+          id: record.fields.tableId,
+          fields: {
+            ..._.omit(record.fields, "tableId"),
+            tableRef: record.id,
+          }
+        })).filter(({id}) => id);
+        res.json({tables});
+      })
+    );
+
     // The upload should be a multipart post with an 'upload' field containing one or more files.
     // Returns the list of rowIds for the rows created in the _grist_Attachments table.
     this._app.post('/api/docs/:docId/attachments', canEdit, withDoc(async (activeDoc, req, res) => {
@@ -249,18 +271,27 @@ export class DocWorkerApi {
 
     // Returns cleaned metadata for a given attachment ID (i.e. a rowId in _grist_Attachments table).
     this._app.get('/api/docs/:docId/attachments/:attId', canView, withDoc(async (activeDoc, req, res) => {
-      const attRecord = activeDoc.getAttachmentMetadata(req.params.attId as string);
+      const attId = integerParam(req.params.attId, 'attId');
+      const attRecord = activeDoc.getAttachmentMetadata(attId);
       res.json(cleanAttachmentRecord(attRecord));
     }));
 
     // Responds with attachment contents, with suitable Content-Type and Content-Disposition.
     this._app.get('/api/docs/:docId/attachments/:attId/download', canView, withDoc(async (activeDoc, req, res) => {
-      const attRecord = activeDoc.getAttachmentMetadata(req.params.attId as string);
+      const attId = integerParam(req.params.attId, 'attId');
+      const tableId = optStringParam(req.params.tableId);
+      const colId = optStringParam(req.params.colId);
+      const rowId = optIntegerParam(req.params.rowId);
+      if ((tableId || colId || rowId) && !(tableId && colId && rowId)) {
+        throw new ApiError('define all of tableId, colId and rowId, or none.', 400);
+      }
+      const attRecord = activeDoc.getAttachmentMetadata(attId);
+      const cell = (tableId && colId && rowId) ? {tableId, colId, rowId} : undefined;
       const fileIdent = attRecord.fileIdent as string;
       const ext = path.extname(fileIdent);
       const origName = attRecord.fileName as string;
       const fileName = ext ? path.basename(origName, path.extname(origName)) + ext : origName;
-      const fileData = await activeDoc.getAttachmentData(docSessionFromRequest(req), fileIdent);
+      const fileData = await activeDoc.getAttachmentData(docSessionFromRequest(req), attRecord, {cell});
       res.status(200)
         .type(ext)
         // Construct a content-disposition header of the form 'attachment; filename="NAME"'
@@ -318,6 +349,40 @@ export class DocWorkerApi {
       })
     );
 
+    // Create columns in a table, given as records of the _grist_Tables_column metatable.
+    this._app.post('/api/docs/:docId/tables/:tableId/columns', canEdit, validate(ColumnsPost),
+      withDoc(async (activeDoc, req, res) => {
+        const body = req.body as Types.ColumnsPost;
+        const {tableId} = req.params;
+        const actions = body.columns.map(({fields, id: colId}) =>
+          // AddVisibleColumn adds the column to all widgets of the table.
+          // This isn't necessarily what the user wants, but it seems like a good default.
+          // Maybe there should be a query param to control this?
+          ["AddVisibleColumn", tableId, colId, fields || {}]
+        );
+        const {retValues} = await handleSandboxError(tableId, [],
+          activeDoc.applyUserActions(docSessionFromRequest(req), actions)
+        );
+        const columns = retValues.map(({colId}) => ({id: colId}));
+        res.json({columns});
+      })
+    );
+
+    // Create new tables in a doc. Unlike POST /records or /columns, each 'record' (table) should have a `columns`
+    // property in the same format as POST /columns above, and no `fields` property.
+    this._app.post('/api/docs/:docId/tables', canEdit, validate(TablesPost),
+      withDoc(async (activeDoc, req, res) => {
+        const body = req.body as Types.TablesPost;
+        const actions = body.tables.map(({columns, id}) => {
+          const colInfos = columns.map(({fields, id: colId}) => ({...fields, id: colId}));
+          return ["AddTable", id, colInfos];
+        });
+        const {retValues} = await activeDoc.applyUserActions(docSessionFromRequest(req), actions);
+        const tables = retValues.map(({table_id}) => ({id: table_id}));
+        res.json({tables});
+      })
+    );
+
     this._app.post('/api/docs/:docId/tables/:tableId/data/delete', canEdit, withDoc(async (activeDoc, req, res) => {
       const rowIds = req.body;
       const op = getTableOperations(req, activeDoc);
@@ -329,10 +394,15 @@ export class DocWorkerApi {
     // TODO: look at download behavior if ActiveDoc is shutdown during call (cannot
     // use withDoc wrapper)
     this._app.get('/api/docs/:docId/download', canView, throttled(async (req, res) => {
+      // Support a dryRun flag to check if user has the right to download the
+      // full document.
+      const dryRun = isAffirmative(req.query.dryrun || req.query.dryRun);
+      const dryRunSuccess = () => res.status(200).json({dryRun: 'allowed'});
       // We want to be have a way download broken docs that ActiveDoc may not be able
       // to load.  So, if the user owns the document, we unconditionally let them
       // download.
-      if (await this._isOwner(req)) {
+      if (await this._isOwner(req, {acceptTrunkForSnapshot: true})) {
+        if (dryRun) { dryRunSuccess(); return; }
         try {
           // We carefully avoid creating an ActiveDoc for the document being downloaded,
           // in case it is broken in some way.  It is convenient to be able to download
@@ -355,6 +425,7 @@ export class DocWorkerApi {
         if (!await activeDoc.canDownload(docSessionFromRequest(req))) {
           throw new ApiError('not authorized to download this document', 403);
         }
+        if (dryRun) { dryRunSuccess(); return; }
         return this._docWorker.downloadDoc(req, res, this._docManager.storageManager);
       }
     }));
@@ -395,6 +466,48 @@ export class DocWorkerApi {
         const body = req.body as Types.RecordsPatch;
         const ops = getTableOperations(req, activeDoc);
         await ops.update(body.records);
+        res.json(null);
+      })
+    );
+
+    // Update columns given in records format
+    this._app.patch('/api/docs/:docId/tables/:tableId/columns', canEdit, validate(ColumnsPatch),
+      withDoc(async (activeDoc, req, res) => {
+        const tablesTable = activeDoc.docData!.getMetaTable("_grist_Tables");
+        const columnsTable = activeDoc.docData!.getMetaTable("_grist_Tables_column");
+        const {tableId} = req.params;
+        const tableRef = tablesTable.findMatchingRowId({tableId});
+        if (!tableRef) {
+          throw new ApiError(`Table not found "${tableId}"`, 404);
+        }
+        const body = req.body as Types.ColumnsPatch;
+        const columns: Types.Record[] = body.columns.map((col) => {
+          const id = columnsTable.findMatchingRowId({parentId: tableRef, colId: col.id});
+          if (!id) {
+            throw new ApiError(`Column not found "${col.id}"`, 404);
+          }
+          return {...col, id};
+        });
+        const ops = getTableOperations(req, activeDoc, "_grist_Tables_column");
+        await ops.update(columns);
+        res.json(null);
+      })
+    );
+
+    // Update tables given in records format
+    this._app.patch('/api/docs/:docId/tables', canEdit, validate(TablesPatch),
+      withDoc(async (activeDoc, req, res) => {
+        const tablesTable = activeDoc.docData!.getMetaTable("_grist_Tables");
+        const body = req.body as Types.TablesPatch;
+        const tables: Types.Record[] = body.tables.map((table) => {
+          const id = tablesTable.findMatchingRowId({tableId: table.id});
+          if (!id) {
+            throw new ApiError(`Table not found "${table.id}"`, 404);
+          }
+          return {...table, id};
+        });
+        const ops = getTableOperations(req, activeDoc, "_grist_Tables");
+        await ops.update(tables);
         res.json(null);
       })
     );
@@ -476,33 +589,49 @@ export class DocWorkerApi {
       withDoc(async (activeDoc, req, res) => {
         const metaTables = await getMetaTables(activeDoc, req);
         const tableRef = tableIdToRef(metaTables, req.params.tableId);
-        const {triggerId, unsubscribeKey, webhookId} = req.body;
+        const {unsubscribeKey, webhookId} = req.body as WebhookSubscription;
 
         // Validate combination of triggerId, webhookId, and tableRef.
         // This is overly strict, webhookId should be enough,
         // but it should be easy to relax that later if we want.
         const [, , triggerRowIds, triggerColData] = metaTables._grist_Triggers;
-        const triggerRowIndex = triggerRowIds.indexOf(triggerId);
+        const triggerRowIndex = triggerColData.actions.findIndex(a => {
+          const actions: any[] = JSON.parse((a || '[]') as string);
+          return actions.some(action => action.id === webhookId && action?.type === "webhook");
+        });
         if (triggerRowIndex === -1) {
-          throw new ApiError(`Trigger not found "${triggerId}"`, 404);
+          throw new ApiError(`Webhook not found "${webhookId || ''}"`, 404);
         }
         if (triggerColData.tableRef[triggerRowIndex] !== tableRef) {
           throw new ApiError(`Wrong table`, 400);
         }
-        const actions = JSON.parse(triggerColData.actions[triggerRowIndex] as string);
-        if (!_.find(actions, {type: "webhook", id: webhookId})) {
-          throw new ApiError(`Webhook not found "${webhookId}"`, 404);
-        }
+        const triggerRowId = triggerRowIds[triggerRowIndex];
 
+        const checkKey = !(await this._isOwner(req));
         // Validate unsubscribeKey before deleting trigger from document
-        await this._dbManager.removeWebhook(webhookId, activeDoc.docName, unsubscribeKey);
+        await this._dbManager.removeWebhook(webhookId, activeDoc.docName, unsubscribeKey, checkKey);
 
         // TODO handle trigger containing other actions when that becomes possible
         await handleSandboxError("_grist_Triggers", [], activeDoc.applyUserActions(
           docSessionFromRequest(req),
-          [['RemoveRecord', "_grist_Triggers", triggerId]]));
+          [['RemoveRecord', "_grist_Triggers", triggerRowId]]));
 
         res.json({success: true});
+      })
+    );
+
+    // Clears all outgoing webhooks in the queue for this document.
+    this._app.delete('/api/docs/:docId/webhooks/queue', isOwner,
+      withDoc(async (activeDoc, req, res) => {
+        await activeDoc.clearWebhookQueue();
+        res.json({success: true});
+      })
+    );
+
+    // Lists all webhooks and their current status in the document.
+    this._app.get('/api/docs/:docId/webhooks', isOwner,
+      withDoc(async (activeDoc, req, res) => {
+        res.json(await activeDoc.webhooksSummary());
       })
     );
 
@@ -539,7 +668,8 @@ export class DocWorkerApi {
     }));
 
     this._app.get('/api/docs/:docId/snapshots', canView, withDoc(async (activeDoc, req, res) => {
-      const {snapshots} = await activeDoc.getSnapshots(isAffirmative(req.query.raw));
+      const docSession = docSessionFromRequest(req);
+      const {snapshots} = await activeDoc.getSnapshots(docSession, isAffirmative(req.query.raw));
       res.json({snapshots});
     }));
 
@@ -554,8 +684,8 @@ export class DocWorkerApi {
       if (req.body.select === 'unlisted') {
         // Remove any snapshots not listed in inventory.  Ideally, there should be no
         // snapshots, and this undocumented feature is just for fixing up problems.
-        const full = (await activeDoc.getSnapshots(true)).snapshots.map(s => s.snapshotId);
-        const listed = new Set((await activeDoc.getSnapshots()).snapshots.map(s => s.snapshotId));
+        const full = (await activeDoc.getSnapshots(docSession, true)).snapshots.map(s => s.snapshotId);
+        const listed = new Set((await activeDoc.getSnapshots(docSession)).snapshots.map(s => s.snapshotId));
         const unlisted = full.filter(snapshotId => !listed.has(snapshotId));
         await activeDoc.removeSnapshots(docSession, unlisted);
         res.json({snapshotIds: unlisted});
@@ -564,7 +694,7 @@ export class DocWorkerApi {
       if (req.body.select === 'past') {
         // Remove all but the latest snapshot.  Useful for sanitizing history if something
         // bad snuck into previous snapshots and they are not valuable to preserve.
-        const past = (await activeDoc.getSnapshots(true)).snapshots.map(s => s.snapshotId);
+        const past = (await activeDoc.getSnapshots(docSession, true)).snapshots.map(s => s.snapshotId);
         past.shift();  // remove current version.
         await activeDoc.removeSnapshots(docSession, past);
         res.json({snapshotIds: past});
@@ -589,8 +719,20 @@ export class DocWorkerApi {
     // and frees it for reassignment if not.  Has no effect if document is in the
     // expected group.  Does not require specific rights.  Returns true if the document
     // is freed up for reassignment, otherwise false.
+    //
+    // Optionally accepts a `group` query param for updating the document's group prior
+    // to (possible) reassignment. A blank string unsets the current group, if any.
+    // (Requires a special permit.)
     this._app.post('/api/docs/:docId/assign', canEdit, throttled(async (req, res) => {
       const docId = getDocId(req);
+      const group = optStringParam(req.query.group);
+      if (group !== undefined && req.specialPermit?.action === 'assign-doc') {
+        if (group.trim() === '') {
+          await this._docWorkerMap.removeDocGroup(docId);
+        } else {
+          await this._docWorkerMap.updateDocGroup(docId, group);
+        }
+      }
       const status = await this._docWorkerMap.getDocWorker(docId);
       if (!status) { res.json(false); return; }
       const workerGroup = await this._docWorkerMap.getWorkerGroup(status.docWorker.id);
@@ -615,6 +757,18 @@ export class DocWorkerApi {
       const options: DocReplacementOptions = {};
       if (req.body.sourceDocId) {
         options.sourceDocId = await this._confirmDocIdForRead(req, String(req.body.sourceDocId));
+        // Make sure that if we wanted to download the full source, we would be allowed.
+        const result = await fetch(this._grist.getHomeUrl(req, `/api/docs/${options.sourceDocId}/download?dryrun=1`), {
+          method: 'GET',
+          headers: {
+            ...getTransitiveHeaders(req),
+            'Content-Type': 'application/json',
+          }
+        });
+        if (result.status !== 200) {
+          const jsonResult = await result.json();
+          throw new ApiError(jsonResult.error, result.status);
+        }
         // We should make sure the source document has flushed recently.
         // It may not be served by the same worker, so work through the api.
         await fetch(this._grist.getHomeUrl(req, `/api/docs/${options.sourceDocId}/flush`), {
@@ -628,7 +782,8 @@ export class DocWorkerApi {
       if (req.body.snapshotId) {
         options.snapshotId = String(req.body.snapshotId);
       }
-      await activeDoc.replace(options);
+      const docSession = docSessionFromRequest(req);
+      await activeDoc.replace(docSession, options);
       res.json(null);
     }));
 
@@ -714,24 +869,21 @@ export class DocWorkerApi {
     this._app.get('/api/docs/:docId/download/csv', canView, withDoc(async (activeDoc, req, res) => {
       // Query DB for doc metadata to get the doc title.
       const {name: docTitle} = await this._dbManager.getDoc(req);
-
-      const params = parseExportParameters(req);
-      const filename = docTitle + (params.tableId === docTitle ? '' : '-' + params.tableId);
-
-      const options: DownloadCSVOptions = {
-        ...params,
-        filename,
-      };
+      const options = this._getDownloadOptions(req, docTitle);
 
       await downloadCSV(activeDoc, req, res, options);
     }));
 
     this._app.get('/api/docs/:docId/download/xlsx', canView, withDoc(async (activeDoc, req, res) => {
       // Query DB for doc metadata to get the doc title (to use as the filename).
-      const {name: filename} = await this._dbManager.getDoc(req);
-
-      const options: DownloadXLSXOptions = {filename};
-
+      const {name: docTitle} = await this._dbManager.getDoc(req);
+      const options = !_.isEmpty(req.query) ? this._getDownloadOptions(req, docTitle) : {
+        filename: docTitle,
+        tableId: '',
+        viewSectionId: undefined,
+        filters: [],
+        sortOrder: [],
+      };
       await downloadXLSX(activeDoc, req, res, options);
     }));
 
@@ -791,6 +943,15 @@ export class DocWorkerApi {
     if (docAuth.error) { throw docAuth.error; }
     assertAccess('viewers', docAuth);
     return docAuth.docId!;
+  }
+
+  private _getDownloadOptions(req: Request, name: string): DownloadOptions {
+    const params = parseExportParameters(req);
+    const options: DownloadOptions = {
+      ...params,
+      filename: name + (params.tableId === name ? '' : '-' + params.tableId),
+    }
+    return options
   }
 
   private _getActiveDoc(req: RequestWithLogin): Promise<ActiveDoc> {
@@ -880,7 +1041,9 @@ export class DocWorkerApi {
 
     // Note the increased API usage on redis and in our local cache.
     // Update redis in the background so that the rest of the request can continue without waiting for redis.
-    const multi = this._docWorkerMap.getRedisClient().multi();
+    const cli = this._docWorkerMap.getRedisClient();
+    if (!cli) { throw new Error('redis unexpectedly not available'); }
+    const multi = cli.multi();
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       // Incrementing the local count immediately prevents many requests from being squeezed through every minute
@@ -912,18 +1075,27 @@ export class DocWorkerApi {
                               req: Request, res: Response, next: NextFunction) {
     const scope = getDocScope(req);
     allowRemoved = scope.showAll || scope.showRemoved || allowRemoved;
-    const docAuth = await getOrSetDocAuth(req as RequestWithLogin, this._dbManager, scope.urlId);
+    const docAuth = await getOrSetDocAuth(req as RequestWithLogin, this._dbManager, this._grist, scope.urlId);
     if (role) { assertAccess(role, docAuth, {allowRemoved}); }
     next();
   }
 
   /**
    * Check if user is an owner of the document.
+   * If acceptTrunkForSnapshot is set, being an owner of the trunk of the document (if it is a snapshot)
+   * is sufficient. Uses cachedDoc, which could be stale if access has changed recently.
    */
-  private async _isOwner(req: Request) {
+  private async _isOwner(req: Request, options?: { acceptTrunkForSnapshot?: boolean }) {
     const scope = getDocScope(req);
-    const docAuth = await getOrSetDocAuth(req as RequestWithLogin, this._dbManager, scope.urlId);
-    return docAuth.access === 'owners';
+    const docAuth = await getOrSetDocAuth(req as RequestWithLogin, this._dbManager, this._grist, scope.urlId);
+    if (docAuth.access === 'owners') {
+      return true;
+    }
+    if (options?.acceptTrunkForSnapshot && docAuth.cachedDoc?.trunkAccess === 'owners') {
+      const parts = parseUrlId(scope.urlId);
+      if (parts.snapshotId) { return true; }
+    }
+    return false;
   }
 
   // Helper to generate a 503 if the ActiveDoc has been muted.
@@ -1168,12 +1340,12 @@ function getErrorPlatform(tableId: string): TableOperationsPlatform {
   };
 }
 
-function getTableOperations(req: RequestWithLogin, activeDoc: ActiveDoc): TableOperationsImpl {
+function getTableOperations(req: RequestWithLogin, activeDoc: ActiveDoc, tableId?: string): TableOperationsImpl {
   const options: OpOptions = {
     parseStrings: !isAffirmative(req.query.noparse)
   };
   const platform: TableOperationsPlatform = {
-    ...getErrorPlatform(req.params.tableId),
+    ...getErrorPlatform(tableId ?? req.params.tableId),
     applyUserActions(actions, opts) {
       if (!activeDoc) { throw new Error('no document'); }
       return activeDoc.applyUserActions(
@@ -1264,4 +1436,9 @@ export function getDocApiUsageKeysToIncr(
     keys[i] = docPeriodicApiUsageKey(docId, false, period, m);
   }
   // Usage exceeded all the time buckets, so return undefined to reject the request.
+}
+
+export interface WebhookSubscription {
+  unsubscribeKey: string;
+  webhookId: string;
 }

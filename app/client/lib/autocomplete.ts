@@ -21,6 +21,11 @@ export interface IAutocompleteOptions<Item extends ACItem> {
   // Popper options for positioning the popup.
   popperOptions?: Partial<PopperOptions>;
 
+  // To which element to append the popup content. Null means triggerElem.parentNode; string is
+  // a selector for the closest matching ancestor of triggerElem, e.g. 'body'.
+  // Defaults to the document body.
+  attach?: Element|string|null;
+
   // Given a search term, return the list of Items to render.
   search(searchText: string): Promise<ACResults<Item>>;
 
@@ -86,8 +91,10 @@ export class Autocomplete<Item extends ACItem> extends Disposable {
     this.search();
     this.autoDispose(dom.onElem(_triggerElem, 'input', () => this.search()));
 
-    // Attach the content to the page.
-    document.body.appendChild(content);
+    const attachElem = _options.attach === undefined ? document.body : _options.attach;
+    const containerElem = getContainer(_triggerElem, attachElem) ?? document.body;
+    containerElem.appendChild(content);
+
     this.onDispose(() => { dom.domDispose(content); content.remove(); });
 
     // Prepare and create the Popper instance, which places the content according to the options.
@@ -199,10 +206,19 @@ export const defaultPopperOptions: Partial<PopperOptions> = {
 
 
 /**
+ * Helper that finds the container according to attachElem. Null means
+ * elem.parentNode; string is a selector for the closest matching ancestor, e.g. 'body'.
+ */
+ function getContainer(elem: Element, attachElem: Element|string|null): Node|null {
+  return (typeof attachElem === 'string') ? elem.closest(attachElem) :
+    (attachElem || elem.parentNode);
+}
+
+/**
  * Helper function which returns the direct child of ancestor which is an ancestor of elem, or
  * null if elem is not a descendant of ancestor.
  */
-function findAncestorChild(ancestor: Element, elem: Element|null): Element|null {
+export function findAncestorChild(ancestor: Element, elem: Element|null): Element|null {
   while (elem && elem.parentElement !== ancestor) {
     elem = elem.parentElement;
   }
@@ -215,7 +231,7 @@ function findAncestorChild(ancestor: Element, elem: Element|null): Element|null 
  * instance) it's not immediately highlighted, but only when a user moves the mouse.
  * Returns an object with a reset() method, which restarts the wait for mousemove.
  */
-function attachMouseOverOnMove<T extends EventTarget>(elem: T, callback: EventCB<MouseEvent, T>) {
+export function attachMouseOverOnMove<T extends EventTarget>(elem: T, callback: EventCB<MouseEvent, T>) {
   let lis: IDisposable|undefined;
   function setListener(eventType: 'mouseover'|'mousemove', cb: EventCB<MouseEvent, T>) {
     if (lis) { lis.dispose(); }

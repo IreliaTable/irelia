@@ -26,6 +26,7 @@ import {DisposableWithEvents} from 'app/common/DisposableWithEvents';
 import {CompareFunc, sortedIndex} from 'app/common/gutil';
 import {SkippableRows} from 'app/common/TableData';
 import {RowFilterFunc} from "app/common/RowFilterFunc";
+import {Observable} from 'grainjs';
 
 /**
  * Special constant value that can be used for the `rows` array for the 'rowNotify'
@@ -390,7 +391,10 @@ class RowGroupHelper<Value> extends RowSource {
 }
 
 // ----------------------------------------------------------------------
-
+/**
+ * Helper function that does map.get(key).push(r), creating an Array for the given key if
+ * necessary.
+ */
 function _addToMapOfArrays<K, V>(map: Map<K, V[]>, key: K, r: V): void {
   let arr = map.get(key);
   if (!arr) { map.set(key, arr = []); }
@@ -436,11 +440,6 @@ export class RowGrouping<Value> extends RowListener {
   }
 
   // Implementation of the RowListener interface.
-
-  /**
-   * Helper function that does map.get(key).push(r), creating an Array for the given key if
-   * necessary.
-   */
 
   public onAddRows(rows: RowList) {
     const groupedRows = new Map();
@@ -630,7 +629,7 @@ export class SortedRowSet extends RowListener {
     // Note that the logic is all or none, since we can't assume that a single row is in its right
     // place by comparing to neighbors because the neighbors might themselves be affected and wrong.
     const sortedRows = Array.from(rows).sort(this._compareFunc);
-    if (_allRowsSorted(this._koArray.peek(), sortedRows, this._compareFunc)) {
+    if (_allRowsSorted(this._koArray.peek(), this._allRows, sortedRows, this._compareFunc)) {
       return;
     }
 
@@ -707,6 +706,41 @@ export class SortedRowSet extends RowListener {
   }
 }
 
+type RowTester = (rowId: RowId) => boolean;
+/**
+ * RowWatcher is a RowListener that maintains an observable function that checks whether a row
+ * is in the connected RowSource.
+ */
+export class RowWatcher extends RowListener {
+  /**
+   * Observable function that returns true if the row is in the connected RowSource.
+   */
+  public rowFilter: Observable<RowTester> = Observable.create(this, () => false);
+  // We count the number of times the row is added or removed from the source.
+  // In most cases row is added and removed only once.
+  private _rowCounter: Map<RowId, number> = new Map();
+
+  public clear() {
+    this._rowCounter.clear();
+    this.rowFilter.set(() => false);
+    this.stopListening();
+  }
+
+  protected onAddRows(rows: RowList) {
+    for (const r of rows) {
+      this._rowCounter.set(r, (this._rowCounter.get(r) || 0) + 1);
+    }
+    this.rowFilter.set((row) => (this._rowCounter.get(row) ?? 0) > 0);
+  }
+
+  protected onRemoveRows(rows: RowList) {
+    for (const r of rows) {
+      this._rowCounter.set(r, (this._rowCounter.get(r) || 0) - 1);
+    }
+    this.rowFilter.set((row) => (this._rowCounter.get(row) ?? 0) > 0);
+  }
+}
+
 function isSmallChange(rows: RowList) {
   return Array.isArray(rows) && rows.length <= 2;
 }
@@ -724,12 +758,15 @@ function _isIndexInOrder<T>(array: T[], index: number, compareFunc: CompareFunc<
  * Helper function to tell if each of sortedRows, if present in the array, is in order relative to
  * its neighbors. sortedRows should be sorted the same way as the array.
  */
-function _allRowsSorted<T>(array: T[], sortedRows: Iterable<T>, compareFunc: CompareFunc<T>): boolean {
+function _allRowsSorted<T>(array: T[], allRows: Set<T>, sortedRows: Iterable<T>, compareFunc: CompareFunc<T>): boolean {
   let last = 0;
   for (const r of sortedRows) {
+    if (!allRows.has(r)) {
+      continue;
+    }
     const index = array.indexOf(r, last);
-    if (index === -1) { continue; }
-    if (!_isIndexInOrder(array, index, compareFunc)) {
+    if (index === -1 || !_isIndexInOrder(array, index, compareFunc)) {
+      // rows of sortedRows are not present in the array in the same relative order.
       return false;
     }
     last = index;

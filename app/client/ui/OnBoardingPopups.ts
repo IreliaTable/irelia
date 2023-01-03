@@ -25,15 +25,18 @@
 import { Disposable, dom, DomElementArg, Holder, makeTestId, styled, svg } from "grainjs";
 import { createPopper, Placement } from '@popperjs/core';
 import { FocusLayer } from 'app/client/lib/FocusLayer';
+import {makeT} from 'app/client/lib/localization';
 import * as Mousetrap from 'app/client/lib/Mousetrap';
 import { bigBasicButton, bigPrimaryButton } from "app/client/ui2018/buttons";
-import { colors, vars } from "app/client/ui2018/cssVars";
+import { theme, vars } from "app/client/ui2018/cssVars";
 import range = require("lodash/range");
 import {IGristUrlState} from "app/common/gristUrls";
 import {urlState} from "app/client/models/gristUrlState";
 import {delay} from "app/common/delay";
 import {reportError} from "app/client/models/errors";
 import {cssBigIcon, cssCloseButton} from "./ExampleCard";
+
+const t = makeT('OnBoardingPopups');
 
 const testId = makeTestId('test-onboarding-');
 
@@ -296,7 +299,7 @@ class OnBoardingPopupsCtl extends Disposable {
           {style: `margin-right: 8px; visibility: ${isFirstStep ? 'hidden' : 'visible'}`},
         ),
         bigPrimaryButton(
-          isLastStep ? 'Finish' : 'Next', testId('next'),
+          isLastStep ? t('Finish') : t('Next'), testId('next'),
           dom.on('click', () => this._move(+1, true)),
         ),
       )
@@ -321,13 +324,13 @@ function buildArrow() {
 
 const Container = styled('div', `
   align-self: center;
-  border: 2px solid ${colors.lightGreen};
+  border: 2px solid ${theme.accentBorder};
   border-radius: 3px;
   z-index: 1000;
   max-width: 490px;
   position: relative;
-  background-color: white;
-  box-shadow: 0 2px 18px 0 rgba(31,37,50,0.31), 0 0 1px 0 rgba(76,86,103,0.24);
+  background-color: ${theme.popupBg};
+  box-shadow: 0 2px 18px 0 ${theme.popupInnerShadow}, 0 0 1px 0 ${theme.popupOuterShadow};
   outline: unset;
 `);
 
@@ -339,9 +342,9 @@ const ArrowContainer = styled('div', `
   position: absolute;
 
   & path {
-    stroke: ${colors.lightGreen};
+    stroke: ${theme.accentBorder};
     stroke-width: 2px;
-    fill: white;
+    fill: ${theme.popupBg};
   }
 
   ${sideSelectorChunk('top')} > & {
@@ -376,7 +379,7 @@ const ArrowContainer = styled('div', `
 const ContentWrapper = styled('div', `
   position: relative;
   padding: 32px;
-  background-color: white;
+  background-color: ${theme.popupBg};
 `);
 
 const Footer = styled('div', `
@@ -384,11 +387,14 @@ const Footer = styled('div', `
   flex-direction: row;
   margin-top: 32px;
   justify-content: space-between;
+  align-items: center;
 `);
 
 const ProgressBar = styled('div', `
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
+  row-gap: 12px;
 `);
 
 const Buttons = styled('div', `
@@ -402,9 +408,9 @@ const Dot = styled('div', `
   border-radius: 3px;
   margin-right: 12px;
   align-self: center;
-  background-color: ${colors.lightGreen};
+  background-color: ${theme.progressBarFg};
   &-done {
-    background-color: ${colors.darkGrey};
+    background-color: ${theme.progressBarBg};
   }
 `);
 
@@ -424,10 +430,11 @@ const Overlay = styled('div', `
 const cssTitle = styled('div', `
   font-size: ${vars.xxxlargeFontSize};
   font-weight: ${vars.headerControlTextWeight};
-  color: ${colors.dark};
+  color: ${theme.text};
   margin: 0 0 16px 0;
   line-height: 32px;
 `);
 
 const cssBody = styled('div', `
+  color: ${theme.text};
 `);

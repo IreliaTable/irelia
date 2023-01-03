@@ -1,6 +1,5 @@
 from collections import namedtuple
 import json
-import re
 
 import six
 
@@ -14,7 +13,7 @@ ColInfo = namedtuple('ColInfo', ('colId', 'type', 'isFormula', 'formula',
                                  'widgetOptions', 'label'))
 
 
-def _make_col_info(col=None, **values):
+def make_col_info(col=None, **values):
   """Return a ColInfo() with the given fields, optionally copying values from the given column."""
   for key in ColInfo._fields:
     values.setdefault(key, getattr(col, key) if col else None)
@@ -22,11 +21,11 @@ def _make_col_info(col=None, **values):
 
 def _make_sum_col_info(col):
   """Return a ColInfo() for the sum formula column for column col."""
-  return _make_col_info(col=col, isFormula=True,
+  return make_col_info(col=col, isFormula=True,
                         formula='SUM($group.%s)' % col.colId)
 
 
-def _get_colinfo_dict(col_info, with_id=False):
+def get_colinfo_dict(col_info, with_id=False):
   """Return a dict suitable to use with AddColumn or AddTable (when with_id=True) actions."""
   col_values = {k: v for k, v in six.iteritems(col_info._asdict())
                      if v is not None and k != 'colId'}
@@ -79,41 +78,37 @@ def _copy_widget_options(options):
     return options
   return json.dumps({k: v for k, v in options.items() if k != "rulesOptions"})
 
-# To generate code, we need to know for each summary table, what its source table is. It would be
-# easy if we had access to metadata records, but (at least for now) we generate all code based on
-# schema only. So we encode the source table name inside of the summary table name.
-#
-# The encoding includes the length of the source table name, to avoid the possibility of ambiguity
-# between the second summary table for "Foo", and the first summary table for "Foo2".
-#
-# Note that it means we need to rename summary tables when the source table is renamed.
 
-def encode_summary_table_name(source_table_name):
+def encode_summary_table_name(source_table_id, groupby_col_ids):
   """
-  Create a summary table name that reliably encodes the source table name. It can be decoded even
-  if a suffix is added to the returned name.
+  Create a summary table name based on the source table ID and the groupby column IDs.
   """
-  return "GristSummary_%d_%s" % (len(source_table_name), source_table_name)
+  result = source_table_id + '_summary'
+  if groupby_col_ids:
+    result += '_' + '_'.join(sorted(groupby_col_ids))
+  return result
 
 
-_summary_re = re.compile(r'GristSummary_(\d+)_')
-
-def decode_summary_table_name(summary_table_name):
+def decode_summary_table_name(summary_table_info):
   """
-  Extract the name of the source table from the summary table name.
+  Extract the name of the source table from the summary table schema info.
   """
-  m = _summary_re.match(summary_table_name)
-  if m:
-    start = m.end(0)
-    length = int(m.group(1))
-    source_name = summary_table_name[start : start + length]
-    if len(source_name) == length:
-      return source_name
+  # To generate code, we need to know for each summary table, what its source table is. It would be
+  # easy if we had access to metadata records, but (at least for now) we generate all code based on
+  # schema only. So we use the type of special 'group' column in the summary table.
+  group_col = summary_table_info.columns.get('group')
+  if (
+      group_col
+      and 'getSummarySourceGroup' in group_col.formula
+      and group_col.type.startswith('RefList:')
+  ):
+    return group_col.type[8:]
   return None
+
 
 def _group_colinfo(source_table):
   """Returns ColInfo() for the 'group' column that must be present in every summary table."""
-  return _make_col_info(colId='group', type='RefList:%s' % source_table.tableId,
+  return make_col_info(colId='group', type='RefList:%s' % source_table.tableId,
                         isFormula=True, formula='table.getSummarySourceGroup(rec)')
 
 
@@ -176,7 +171,7 @@ class SummaryActions(object):
         yield col
       else:
         result = self.useractions.doAddColumn(table.tableId, ci.colId,
-                                              _get_colinfo_dict(ci, with_id=False))
+                                              get_colinfo_dict(ci, with_id=False))
         yield self.docmodel.columns.table.get_record(result['colRef'])
 
 
@@ -190,7 +185,7 @@ class SummaryActions(object):
     key = tuple(sorted(int(c) for c in source_groupby_columns))
 
     groupby_colinfo = [
-      _make_col_info(
+      make_col_info(
         col=c,
         isFormula=False,
         formula='',
@@ -202,10 +197,12 @@ class SummaryActions(object):
     summary_table = next((t for t in source_table.summaryTables if t.summaryKey == key), None)
     created = False
     if not summary_table:
+      groupby_col_ids = [c.colId for c in groupby_colinfo]
       result = self.useractions.doAddTable(
-        encode_summary_table_name(source_table.tableId),
-        [_get_colinfo_dict(ci, with_id=True) for ci in groupby_colinfo + formula_colinfo],
-        summarySourceTableRef=source_table.id)
+        encode_summary_table_name(source_table.tableId, groupby_col_ids),
+        [get_colinfo_dict(ci, with_id=True) for ci in groupby_colinfo + formula_colinfo],
+        summarySourceTableRef=source_table.id,
+        raw_section=True)
       summary_table = self.docmodel.tables.table.get_record(result['id'])
       created = True
       # Note that in this case, _get_or_add_columns() below should not add any new columns,
@@ -239,7 +236,7 @@ class SummaryActions(object):
       if srcCol in source_groupby_colset:
         prev_group_cols.append(col)
       elif col.isFormula and col.colId not in groupby_colids:
-        formula_colinfo.append(_make_col_info(col))
+        formula_colinfo.append(make_col_info(col))
       else:
         # if user is removing a numeric column from the group by columns we must add it back as a
         # sum formula column
@@ -329,7 +326,7 @@ class SummaryActions(object):
     """
     c = self._find_sister_column(source_table, col.colId)
     if c:
-      all_colinfo.append(_make_col_info(col=c))
+      all_colinfo.append(make_col_info(col=c))
     elif col.type in ('Int', 'Numeric'):
       all_colinfo.append(_make_sum_col_info(col))
 
@@ -352,7 +349,7 @@ class SummaryActions(object):
     # 'count' was already added (which we would then prefer as presumably more useful). We add the
     # default 'count' right after 'group', to make it the first of the visible formula columns.
     if not any(c.colId == 'count' for c in all_colinfo):
-      all_colinfo.insert(1, _make_col_info(colId='count', type='Int',
+      all_colinfo.insert(1, make_col_info(colId='count', type='Int',
                                            isFormula=True, formula='len($group)'))
     return all_colinfo
 
@@ -382,24 +379,26 @@ class SummaryActions(object):
     field_col_recs = [f.colRef for f in fields]
 
     # Prepare the column info for each column.
-    col_info = [_make_col_info(col=c) for c in field_col_recs if c.colId != 'group']
+    col_info = [make_col_info(col=c) for c in field_col_recs if c.colId != 'group']
 
     # Prepare the 'group' column, which is that one column that's different from the original.
     group_args = ', '.join(
       '%s=%s' % (
         c.summarySourceCol.colId,
-        'CONTAINS($%s)' % c.colId
-        if c.summarySourceCol.type.startswith(('ChoiceList', 'RefList:')) else
-        '$%s' % c.colId,
+        (
+          'CONTAINS($%s, match_empty="")' if c.summarySourceCol.type == 'ChoiceList' else
+          'CONTAINS($%s, match_empty=0)' if c.summarySourceCol.type.startswith('Reflist') else
+          '$%s'
+        ) % c.colId,
       )
       for c in field_col_recs if c.summarySourceCol
     )
-    col_info.append(_make_col_info(colId='group', type='RefList:%s' % source_table_id,
+    col_info.append(make_col_info(colId='group', type='RefList:%s' % source_table_id,
                                    isFormula=True,
                                    formula='%s.lookupRecords(%s)' % (source_table_id, group_args)))
 
     # Create the new table.
-    res = self.useractions.AddTable(None, [_get_colinfo_dict(ci, with_id=True) for ci in col_info])
+    res = self.useractions.AddTable(None, [get_colinfo_dict(ci, with_id=True) for ci in col_info])
     new_table = self.docmodel.tables.table.get_record(res["id"])
 
     # Remember the original table, which we need later e.g. to adjust the sort spec (sortColRefs).

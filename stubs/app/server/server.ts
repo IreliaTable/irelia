@@ -1,32 +1,33 @@
 /**
  * Main entrypoint for grist-core server.
  *
- * By default, starts up on port 8686.
+ * By default, starts up on port 8484.
  */
 
 import {isAffirmative} from 'app/common/gutil';
 import {HomeDBManager} from 'app/gen-server/lib/HomeDBManager';
+import {TEAM_FREE_PLAN} from 'app/common/Features';
 
 const debugging = isAffirmative(process.env.DEBUG) || isAffirmative(process.env.VERBOSE);
 
 // Set log levels before importing anything.
 if (!debugging) {
   // Be a lot less noisy by default.
-  setDefaultEnv('IRELIA_LOG_LEVEL', 'error');
-  setDefaultEnv('IRELIA_LOG_SKIP_HTTP', 'true');
+  setDefaultEnv('GRIST_LOG_LEVEL', 'error');
+  setDefaultEnv('GRIST_LOG_SKIP_HTTP', 'true');
 }
 
 // Use a distinct cookie.  Bump version to 2.
-setDefaultEnv('IRELIA_SESSION_COOKIE', 'grist_core2');
+setDefaultEnv('GRIST_SESSION_COOKIE', 'grist_core2');
 
-setDefaultEnv('IRELIA_SERVE_SAME_ORIGIN', 'true');
-setDefaultEnv('IRELIA_SINGLE_PORT', 'true');
-setDefaultEnv('IRELIA_DEFAULT_PRODUCT', 'Free');
+setDefaultEnv('GRIST_SERVE_SAME_ORIGIN', 'true');
+setDefaultEnv('GRIST_SINGLE_PORT', 'true');
+setDefaultEnv('GRIST_DEFAULT_PRODUCT', 'Free');
 
-if (!process.env.IRELIA_SINGLE_ORG) {
+if (!process.env.GRIST_SINGLE_ORG) {
   // org identifiers in domains are fiddly to configure right, so by
   // default don't do that.
-  setDefaultEnv('IRELIA_ORG_IN_PATH', 'true');
+  setDefaultEnv('GRIST_ORG_IN_PATH', 'true');
 }
 
 import {updateDb} from 'app/server/lib/dbUtils';
@@ -53,18 +54,23 @@ export async function main() {
   }
 
   // If SAML is not configured, there's no login system, so provide a default email address.
-  setDefaultEnv('IRELIA_DEFAULT_EMAIL', 'you@example.com');
+  setDefaultEnv('GRIST_DEFAULT_EMAIL', 'happy@everyday.com');
   // Set directory for uploaded documents.
-  setDefaultEnv('IRELIA_DATA_DIR', 'docs');
-  await fse.mkdirp(process.env.IRELIA_DATA_DIR!);
+  setDefaultEnv('GRIST_DATA_DIR', 'docs');
+  await fse.mkdirp(process.env.GRIST_DATA_DIR!);
   // Make a blank db if needed.
-  await updateDb();
+  if (process.env.TEST_CLEAN_DATABASE) {
+    const {createInitialDb} = require('test/gen-server/seed');
+    await createInitialDb();
+  } else {
+    await updateDb();
+  }
   const db = new HomeDBManager();
   await db.connect();
   await db.initializeSpecialIds({skipWorkspaces: true});
 
   // If a team/organization is specified, make sure it exists.
-  const org = process.env.IRELIA_SINGLE_ORG;
+  const org = process.env.GRIST_SINGLE_ORG;
   if (org && org !== 'docs') {
     try {
       db.unwrapQueryResult(await db.getOrg({
@@ -75,32 +81,33 @@ export async function main() {
       if (!String(e).match(/organization not found/)) {
         throw e;
       }
-      const email = process.env.IRELIA_DEFAULT_EMAIL;
+      const email = process.env.GRIST_DEFAULT_EMAIL;
       if (!email) {
-        throw new Error('need IRELIA_DEFAULT_EMAIL to create site');
+        throw new Error('need GRIST_DEFAULT_EMAIL to create site');
       }
       const profile = {email, name: email};
       const user = await db.getUserByLogin(email, {profile});
       if (!user) {
         // This should not happen.
-        throw new Error('failed to create IRELIA_DEFAULT_EMAIL user');
+        throw new Error('failed to create GRIST_DEFAULT_EMAIL user');
       }
-      await db.addOrg(user, {
+      db.unwrapQueryResult(await db.addOrg(user, {
         name: org,
         domain: org,
       }, {
         setUserAsOwner: false,
         useNewPlan: true,
-        planType: 'free'
-      });
+        planType: TEAM_FREE_PLAN
+      }));
     }
   }
 
   // Launch single-port, self-contained version of Grist.
   const server = await mergedServerMain(G.port, ["home", "docs", "static"]);
-  if (process.env.IRELIA_TESTING_SOCKET) {
+  if (process.env.GRIST_TESTING_SOCKET) {
     await server.addTestingHooks();
   }
+  return server;
 }
 
 if (require.main === module) {

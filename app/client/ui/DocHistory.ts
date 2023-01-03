@@ -1,3 +1,4 @@
+import {makeT} from 'app/client/lib/localization';
 import {createSessionObs} from 'app/client/lib/sessionObs';
 import {DocPageModel} from 'app/client/models/DocPageModel';
 import {reportError} from 'app/client/models/errors';
@@ -5,14 +6,16 @@ import {urlState} from 'app/client/models/gristUrlState';
 import {getTimeFromNow} from 'app/client/models/HomeModel';
 import {buildConfigContainer} from 'app/client/ui/RightPanel';
 import {buttonSelect} from 'app/client/ui2018/buttonSelect';
-import {colors, testId, vars} from 'app/client/ui2018/cssVars';
+import {testId, theme, vars} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {menu, menuAnnotate, menuItemLink} from 'app/client/ui2018/menus';
 import {buildUrlId, parseUrlId} from 'app/common/gristUrls';
 import {StringUnion} from 'app/common/StringUnion';
 import {DocSnapshot} from 'app/common/UserAPI';
 import {Disposable, dom, IDomComponent, MultiHolder, Observable, styled} from 'grainjs';
-import * as moment from 'moment';
+import moment from 'moment';
+
+const t = makeT('DocHistory');
 
 const DocHistorySubTab = StringUnion("activity", "snapshots");
 
@@ -25,8 +28,8 @@ export class DocHistory extends Disposable implements IDomComponent {
 
   public buildDom() {
     const tabs = [
-      {value: 'activity', label: 'Activity'},
-      {value: 'snapshots', label: 'Snapshots'},
+      {value: 'activity', label: t('Activity')},
+      {value: 'snapshots', label: t('Snapshots')},
     ];
     return [
       cssSubTabs(
@@ -65,11 +68,19 @@ export class DocHistory extends Disposable implements IDomComponent {
     }
 
     const snapshots = Observable.create<DocSnapshot[]>(owner, []);
+    const snapshotsDenied = Observable.create<boolean>(owner, false);
     const userApi = this._docPageModel.appModel.api;
     const docApi = userApi.getDocAPI(origUrlId);
     docApi.getSnapshots().then(result =>
-      snapshots.isDisposed() || snapshots.set(result.snapshots)).catch(reportError);
-    return dom('div',
+      snapshots.isDisposed() || snapshots.set(result.snapshots)).catch(err => {
+        snapshotsDenied.set(true);
+        reportError(err);
+      });
+    return dom(
+      'div',
+      dom.maybe(snapshotsDenied, () => cssSnapshotDenied(
+        t('SnapshotsUnavailable'),
+        testId('doc-history-error'))),
       // Note that most recent snapshots are first.
       dom.domComputed(snapshots, (snapshotList) => snapshotList.map((snapshot, index) => {
         const modified = moment(snapshot.lastModified);
@@ -87,11 +98,11 @@ export class DocHistory extends Disposable implements IDomComponent {
             ),
             cssMenuDots(icon('Dots'),
               menu(() => [
-                  menuItemLink(setLink(snapshot), 'Open Snapshot'),
-                  menuItemLink(setLink(snapshot, origUrlId), 'Compare to Current',
-                    menuAnnotate('Beta')),
-                  prevSnapshot && menuItemLink(setLink(prevSnapshot, snapshot.docId), 'Compare to Previous',
-                    menuAnnotate('Beta')),
+                  menuItemLink(setLink(snapshot), t('OpenSnapshot')),
+                  menuItemLink(setLink(snapshot, origUrlId), t('CompareToCurrent'),
+                    menuAnnotate(t('Beta'))),
+                  prevSnapshot && menuItemLink(setLink(prevSnapshot, snapshot.docId), t('CompareToPrevious'),
+                    menuAnnotate(t('Beta'))),
                 ],
                 {placement: 'bottom-end', parentSelectorToMark: '.' + cssSnapshotCard.className}
               ),
@@ -108,33 +119,38 @@ export class DocHistory extends Disposable implements IDomComponent {
 
 const cssSubTabs = styled('div', `
   padding: 16px;
-  border-bottom: 1px solid ${colors.mediumGrey};
+  border-bottom: 1px solid ${theme.pagePanelsBorder};
 `);
 
 const cssSnapshot = styled('div', `
   margin: 8px 16px;
 `);
 
+const cssSnapshotDenied = styled('div', `
+  margin: 8px 16px;
+`);
+
 const cssSnapshotTime = styled('div', `
   text-align: right;
-  color: ${colors.slate};
+  color: ${theme.lightText};
   font-size: ${vars.smallFontSize};
 `);
 
 const cssSnapshotCard = styled('div', `
-  border: 1px solid ${colors.mediumGrey};
+  border: 1px solid ${theme.documentHistorySnapshotBorder};
   padding: 8px;
-  background: white;
+  color: ${theme.documentHistorySnapshotFg};
+  background: ${theme.documentHistorySnapshotBg};
   border-radius: 8px;
   overflow: hidden;
   display: flex;
   align-items: center;
-  --icon-color: ${colors.slate};
+  --icon-color: ${theme.controlSecondaryFg};
 
   &-current {
-    background-color: ${colors.dark};
-    color: ${colors.light};
-    --icon-color: ${colors.light};
+    background-color: ${theme.documentHistorySnapshotSelectedBg};
+    color: ${theme.documentHistorySnapshotSelectedFg};
+    --icon-color: ${theme.documentHistorySnapshotSelectedFg};
   }
 `);
 
@@ -152,6 +168,6 @@ const cssMenuDots = styled('div', `
   border-radius: 3px;
   cursor: default;
   &:hover, &.weasel-popup-open {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
   }
 `);

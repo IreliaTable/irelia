@@ -1,13 +1,24 @@
 /**
  * Note that it assumes the presence of cssVars.cssRootVars on <body>.
  */
+import * as commands from 'app/client/components/commands';
+import {watchElementForBlur} from 'app/client/lib/FocusLayer';
 import {urlState} from "app/client/models/gristUrlState";
 import {resizeFlexVHandle} from 'app/client/ui/resizeHandle';
-import {transition} from 'app/client/ui/transitions';
-import {colors, cssHideForNarrowScreen, mediaNotSmall, mediaSmall} from 'app/client/ui2018/cssVars';
+import {transition, TransitionWatcher} from 'app/client/ui/transitions';
+import {cssHideForNarrowScreen, isScreenResizing, mediaNotSmall, mediaSmall, theme} from 'app/client/ui2018/cssVars';
 import {isNarrowScreenObs} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
-import {dom, DomArg, noTestId, Observable, styled, subscribe, TestId} from "grainjs";
+import {dom, DomElementArg, MultiHolder, noTestId, Observable, styled, subscribe, TestId} from "grainjs";
+import noop from 'lodash/noop';
+import once from 'lodash/once';
+import {SessionObs} from 'app/client/lib/sessionObs';
+import debounce from 'lodash/debounce';
+
+const AUTO_EXPAND_TIMEOUT_MS = 400;
+
+// delay must be greater than the time needed for transientInput to update focus (ie: 10ms);
+const DELAY_BEFORE_TESTING_FOCUS_CHANGE_MS = 12;
 
 export interface PageSidePanel {
   // Note that widths need to start out with a correct default in JS (having them in CSS is not
@@ -15,21 +26,21 @@ export interface PageSidePanel {
   panelWidth: Observable<number>;
   panelOpen: Observable<boolean>;
   hideOpener?: boolean;           // If true, don't show the opener handle.
-  header: DomArg;
-  content: DomArg;
+  header: DomElementArg;
+  content: DomElementArg;
 }
 
 export interface PageContents {
   leftPanel: PageSidePanel;
   rightPanel?: PageSidePanel;     // If omitted, the right panel isn't shown at all.
 
-  headerMain: DomArg;
-  contentMain: DomArg;
+  headerMain: DomElementArg;
+  contentMain: DomElementArg;
 
   onResize?: () => void;          // Callback for when either pane is opened, closed, or resized.
   testId?: TestId;
-  contentTop?: DomArg;
-  contentBottom?: DomArg;
+  contentTop?: DomElementArg;
+  contentBottom?: DomElementArg;
 }
 
 export function pagePanels(page: PageContents) {
@@ -37,19 +48,28 @@ export function pagePanels(page: PageContents) {
   const left = page.leftPanel;
   const right = page.rightPanel;
   const onResize = page.onResize || (() => null);
+  const leftOverlap = Observable.create(null, false);
+  const dragResizer = Observable.create(null, false);
+  const isScreenResizingObs = isScreenResizing();
 
   let lastLeftOpen = left.panelOpen.get();
   let lastRightOpen = right?.panelOpen.get() || false;
+  let leftPaneDom: HTMLElement;
+  let rightPaneDom: HTMLElement;
+  let onLeftTransitionFinish = noop;
 
   // When switching to mobile mode, close panels; when switching to desktop, restore the
   // last desktop state.
   const sub1 = subscribe(isNarrowScreenObs(), (use, narrow) => {
     if (narrow) {
-      lastLeftOpen = left.panelOpen.get();
+      lastLeftOpen = leftOverlap.get() ? false : left.panelOpen.get();
       lastRightOpen = right?.panelOpen.get() || false;
     }
     left.panelOpen.set(narrow ? false : lastLeftOpen);
     right?.panelOpen.set(narrow ? false : lastRightOpen);
+
+    // overlap should always be OFF when switching screen mode
+    leftOverlap.set(false);
   });
 
   // When url changes, we must have navigated; close the left panel since if it were open, it was
@@ -60,38 +80,165 @@ export function pagePanels(page: PageContents) {
     }
   });
 
+  const pauseSavingLeft = (yesNo: boolean) => {
+    (left.panelOpen as SessionObs<boolean>)?.pauseSaving?.(yesNo);
+  };
+
+  const commandsGroup = commands.createGroup({
+    leftPanelOpen: () => new Promise((resolve) => {
+      const watcher = new TransitionWatcher(leftPaneDom);
+      watcher.onDispose(() => resolve(undefined));
+      left.panelOpen.set(true);
+    }),
+    rightPanelOpen: () => new Promise((resolve, reject) => {
+      if (!right) {
+        reject(new Error('PagePanels rightPanelOpen called while right panel is undefined'));
+        return;
+      }
+
+      const watcher = new TransitionWatcher(rightPaneDom);
+      watcher.onDispose(() => resolve(undefined));
+      right.panelOpen.set(true);
+    }),
+  }, null, true);
+  let contentWrapper: HTMLElement;
   return cssPageContainer(
     dom.autoDispose(sub1),
     dom.autoDispose(sub2),
+    dom.autoDispose(commandsGroup),
+    dom.autoDispose(leftOverlap),
     page.contentTop,
     cssContentMain(
-      cssLeftPane(
+      leftPaneDom = cssLeftPane(
         testId('left-panel'),
-        cssTopHeader(left.header),
-        left.content,
+        cssOverflowContainer(
+          contentWrapper = cssLeftPanelContainer(
+            cssLeftPaneHeader(left.header),
+            left.content,
+          ),
+        ),
+
+        // Show plain border when the resize handle is hidden.
+        cssResizeDisabledBorder(
+          dom.hide((use) => use(left.panelOpen) && !use(leftOverlap)),
+          cssHideForNarrowScreen.cls(''),
+          testId('left-disabled-resizer'),
+        ),
 
         dom.style('width', (use) => use(left.panelOpen) ? use(left.panelWidth) + 'px' : ''),
 
         // Opening/closing the left pane, with transitions.
         cssLeftPane.cls('-open', left.panelOpen),
         transition(use => (use(isNarrowScreenObs()) ? false : use(left.panelOpen)), {
-          prepare(elem, open) { elem.style.marginRight = (open ? -1 : 1) * (left.panelWidth.get() - 48) + 'px'; },
-          run(elem, open) { elem.style.marginRight = ''; },
-          finish: onResize,
+          prepare(elem, open) {
+            elem.style.width = (open ? 60 : left.panelWidth.get()) + 'px';
+          },
+          run(elem, open) {
+            elem.style.width = contentWrapper.style.width = (open ? left.panelWidth.get() : 60) + 'px';
+          },
+          finish() {
+            onResize();
+            contentWrapper.style.width = '';
+            onLeftTransitionFinish();
+          },
         }),
+
+        // opening left panel on over
+        dom.on('mouseenter', (evt1, elem) => {
+
+
+          if (left.panelOpen.get()
+
+            // when no opener should not auto-expand
+            || left.hideOpener
+
+            // if user is resizing the window, don't expand.
+            || isScreenResizingObs.get()) { return; }
+
+
+
+          let isMouseInsideLeftPane = true;
+          let isFocusInsideLeftPane = false;
+          let isMouseDragging = false;
+
+          const owner = new MultiHolder();
+          const startExpansion = () => {
+            leftOverlap.set(true);
+            pauseSavingLeft(true); // prevents from updating state in the window storage
+            left.panelOpen.set(true);
+            onLeftTransitionFinish = noop;
+            watchBlur();
+          };
+          const startCollapse = () => {
+            left.panelOpen.set(false);
+            pauseSavingLeft(false);
+            // turns overlap off only when the transition finishes
+            onLeftTransitionFinish = once(() => leftOverlap.set(false));
+            clear();
+          };
+          const clear = () => {
+            if (owner.isDisposed()) { return; }
+            clearTimeout(timeoutId);
+            owner.dispose();
+          };
+          dom.onDisposeElem(elem, clear);
+
+          // updates isFocusInsideLeftPane and starts watch for blur on activeElement.
+          const watchBlur = debounce(() => {
+            if (owner.isDisposed()) { return; }
+            isFocusInsideLeftPane = Boolean(leftPaneDom.contains(document.activeElement) ||
+              document.activeElement?.closest('.grist-floating-menu'));
+            maybeStartCollapse();
+            if (document.activeElement) {
+              maybePatchDomAndChangeFocus(); // This is to support projects test environment
+              watchElementForBlur(document.activeElement, watchBlur);
+            }
+          }, DELAY_BEFORE_TESTING_FOCUS_CHANGE_MS);
+
+          // starts collapsed only if neither mouse nor focus are inside the left pane. Return true
+          // if started collapsed, false otherwise.
+          const maybeStartCollapse = () => {
+            if (!isMouseInsideLeftPane && !isFocusInsideLeftPane && !isMouseDragging) {
+              startCollapse();
+            }
+          };
+
+          // mouse events
+          const onMouseEvt = (evt: MouseEvent) => {
+            const rect = leftPaneDom.getBoundingClientRect();
+            isMouseInsideLeftPane = evt.clientX <= rect.right;
+            isMouseDragging = evt.buttons !== 0;
+            maybeStartCollapse();
+          };
+          owner.autoDispose(dom.onElem(document, 'mousemove', onMouseEvt));
+          owner.autoDispose(dom.onElem(document, 'mouseup', onMouseEvt));
+
+          // Enables collapsing when the cursor leaves the window. This comes handy in a split
+          // screen setup, especially when Grist is on the right side: moving the cursor back and
+          // forth between the 2 windows, the cursor is likely to hover the left pane and expand it
+          // inadvertendly. This line collapses it back.
+          const onMouseLeave = () => {
+            isMouseInsideLeftPane = false;
+            maybeStartCollapse();
+          };
+          owner.autoDispose(dom.onElem(document.body, 'mouseleave', onMouseLeave));
+
+          // schedule start of expansion
+          const timeoutId = setTimeout(startExpansion, AUTO_EXPAND_TIMEOUT_MS);
+        }),
+        cssLeftPane.cls('-overlap', leftOverlap),
+        cssLeftPane.cls('-dragging', dragResizer),
       ),
 
       // Resizer for the left pane.
       // TODO: resizing to small size should collapse. possibly should allow expanding too
       cssResizeFlexVHandle(
-        {target: 'left', onSave: (val) => { left.panelWidth.set(val); onResize(); }},
+        {target: 'left', onSave: (val) => { left.panelWidth.set(val); onResize();
+                                            leftPaneDom.style['width'] = val + 'px';
+                                            setTimeout(() => dragResizer.set(false), 0); },
+         onDrag: (val) => { dragResizer.set(true); }},
         testId('left-resizer'),
-        dom.show(left.panelOpen),
-        cssHideForNarrowScreen.cls('')),
-
-      // Show plain border when the resize handle is hidden.
-      cssResizeDisabledBorder(
-        dom.hide(left.panelOpen),
+        dom.show((use) => use(left.panelOpen) && !use(leftOverlap)),
         cssHideForNarrowScreen.cls('')),
 
       cssMainPane(
@@ -115,6 +262,7 @@ export function pagePanels(page: PageContents) {
           ),
         ),
         page.contentMain,
+        cssMainPane.cls('-left-overlap', leftOverlap),
         testId('main-pane'),
       ),
       (right ? [
@@ -125,9 +273,9 @@ export function pagePanels(page: PageContents) {
           dom.show(right.panelOpen),
           cssHideForNarrowScreen.cls('')),
 
-        cssRightPane(
+        rightPaneDom = cssRightPane(
           testId('right-panel'),
-          cssTopHeader(right.header),
+          cssRightPaneHeader(right.header),
           right.content,
 
           dom.style('width', (use) => use(right.panelOpen) ? use(right.panelWidth) + 'px' : ''),
@@ -187,6 +335,7 @@ function toggleObs(boolObs: Observable<boolean>) {
   boolObs.set(!boolObs.get());
 }
 
+const bottomFooterHeightPx = 48;
 const cssVBox = styled('div', `
   display: flex;
   flex-direction: column;
@@ -203,11 +352,11 @@ const cssPageContainer = styled(cssVBox, `
   right: 0;
   bottom: 0;
   min-width: 600px;
-  // background-color: ${colors.lightGrey};
+  background-color: ${theme.mainPanelBg};
 
   @media ${mediaSmall} {
     & {
-      padding-bottom: 48px;
+      padding-bottom: ${bottomFooterHeightPx}px;
       min-width: 240px;
     }
     .interface-light & {
@@ -221,18 +370,18 @@ const cssContentMain = styled(cssHBox, `
 `);
 export const cssLeftPane = styled(cssVBox, `
   position: relative;
-  background-color: ${colors.lightGreen};
-  width: 60px;
+  background-color: ${theme.mainPanelBg};
+  width: px;
   margin-right: 0px;
-  overflow: hidden;
-  transition: margin-right 0.4s;
+  transition: width 0.4s;
+  will-change: width;
   @media ${mediaSmall} {
     & {
       width: 240px;
       position: fixed;
       z-index: 10;
       top: 0;
-      bottom: 0;
+      bottom: ${bottomFooterHeightPx}px;
       left: -${240 + 15}px; /* adds an extra 15 pixels to also hide the box shadow */
       visibility: hidden;
       box-shadow: 10px 0 5px rgba(0, 0, 0, 0.2);
@@ -248,7 +397,7 @@ export const cssLeftPane = styled(cssVBox, `
     width: 240px;
     min-width: 160px;
     max-width: 320px;
-    background-color: ${colors.light};
+    background-color: ${theme.mainPanelBg};
   }
   @media print {
     & {
@@ -258,17 +407,37 @@ export const cssLeftPane = styled(cssVBox, `
   .interface-light & {
     display: none;
   }
+  &-overlap {
+    position: fixed;
+    z-index: 10;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    min-width: unset;
+  }
+  &-dragging {
+    transition: unset;
+    min-width: 160px;
+    max-width: 320px;
+  }
+`);
+const cssOverflowContainer = styled(cssVBox, `
+  overflow: hidden;
+  flex: 1 1 0px;
 `);
 const cssMainPane = styled(cssVBox, `
   position: relative;
   flex: 1 1 0px;
   min-width: 0px;
-  background-color: white;
+  background-color: ${theme.mainPanelBg};
   z-index: 1;
+  &-left-overlap {
+    margin-left: 60px;
+  }
 `);
 const cssRightPane = styled(cssVBox, `
   position: relative;
-  background-color: ${colors.lightGrey};
+  background-color: ${theme.rightPanelBg};
   width: 0px;
   margin-left: 0px;
   overflow: hidden;
@@ -280,7 +449,7 @@ const cssRightPane = styled(cssVBox, `
       position: fixed;
       z-index: 10;
       top: 0;
-      bottom: 0;
+      bottom: ${bottomFooterHeightPx}px;
       right: -${240 + 15}px; /* adds an extra 15 pixels to also hide the box shadow */
       box-shadow: -10px 0 5px rgba(0, 0, 0, 0.2);
       visibility: hidden;
@@ -306,13 +475,13 @@ const cssRightPane = styled(cssVBox, `
     display: none;
   }
 `);
-const cssTopHeader = styled('div', `
-  height: 48px;
+const cssHeader = styled('div', `
+  height: 49px;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid ${colors.mediumGrey};
+  border-bottom: 1px solid ${theme.pagePanelsBorder};
 
   @media print {
     & {
@@ -324,9 +493,18 @@ const cssTopHeader = styled('div', `
     display: none;
   }
 `);
+const cssTopHeader = styled(cssHeader, `
+  background-color: ${theme.topHeaderBg};
+`);
+const cssLeftPaneHeader = styled(cssHeader, `
+  background-color: ${theme.leftPanelBg};
+`);
+const cssRightPaneHeader = styled(cssHeader, `
+  background-color: ${theme.rightPanelBg};
+`);
 const cssBottomFooter = styled ('div', `
-  height: 48px;
-  background-color: white;
+  height: ${bottomFooterHeightPx}px;
+  background-color: ${theme.bottomFooterBg};
   z-index: 20;
   display: flex;
   flex-direction: row;
@@ -337,7 +515,7 @@ const cssBottomFooter = styled ('div', `
   bottom: 0;
   left: 0;
   right: 0;
-  border-top: 1px solid ${colors.mediumGrey};
+  border-top: 1px solid ${theme.pagePanelsBorder};
   @media ${mediaNotSmall} {
     & {
       display: none;
@@ -353,9 +531,9 @@ const cssBottomFooter = styled ('div', `
   }
 `);
 const cssResizeFlexVHandle = styled(resizeFlexVHandle, `
-  --resize-handle-color: ${colors.mediumGrey};
-  --resize-handle-highlight: ${colors.lightGreen};
-  padding-top: 47px;
+  --resize-handle-color: ${theme.pagePanelsBorder};
+  --resize-handle-highlight: ${theme.pagePanelsBorderResizing};
+  padding-top: ${bottomFooterHeightPx}px;
 
   @media print {
     & {
@@ -367,7 +545,12 @@ const cssResizeDisabledBorder = styled('div', `
   flex: none;
   width: 1px;
   height: 100%;
-  background-color: ${colors.mediumGrey};
+  background-color: ${theme.pagePanelsBorder};
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -1px;
+  z-index: 2;
 `);
 const cssPanelOpener = styled(icon, `
   flex: none;
@@ -376,20 +559,20 @@ const cssPanelOpener = styled(icon, `
   padding: 8px 8px;
   cursor: pointer;
   -webkit-mask-size: 16px 16px;
-  background-color: ${colors.lightGreen};
+  background-color: ${theme.controlFg};
   transition: transform 0.4s;
-  &:hover { background-color: ${colors.darkGreen}; }
+  &:hover { background-color: ${theme.controlHoverFg}; }
   &-open { transform: rotateY(180deg); }
 `);
 const cssPanelOpenerNarrowScreenBtn = styled('div', `
   width: 32px;
   height: 32px;
-  --icon-color: ${colors.slate};
+  --icon-color: ${theme.sidePanelOpenerFg};
   cursor: pointer;
   border-radius: 4px;
   &-open {
-    background-color: ${colors.lightGreen};
-    --icon-color: white;
+    background-color: ${theme.sidePanelOpenerActiveBg};
+    --icon-color: ${theme.sidePanelOpenerActiveFg};
   }
 `);
 const cssPanelOpenerNarrowScreen = styled(icon, `
@@ -403,7 +586,7 @@ const cssContentOverlay = styled('div', `
   left: 0;
   bottom: 0;
   right: 0;
-  background-color: grey;
+  background-color: ${theme.pageBackdrop};
   opacity: 0.5;
   display: none;
   z-index: 9;
@@ -413,3 +596,28 @@ const cssContentOverlay = styled('div', `
     }
   }
 `);
+const cssLeftPanelContainer = styled('div', `
+  flex: 1 1 0px;
+  display: flex;
+  flex-direction: column;
+`);
+const cssHiddenInput = styled('input', `
+  position: absolute;
+  top: -100px;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  font-size: 1;
+  z-index: -1;
+`);
+
+// watchElementForBlur does not work if focus is on body. Which never happens when running in Grist
+// because focus is constantly given to the copypasteField. But it does happen when running inside a
+// projects test. For that latter case we had a hidden <input> field to the dom and give it focus.
+function maybePatchDomAndChangeFocus() {
+  if (document.activeElement?.matches('body')) {
+    const hiddenInput = cssHiddenInput();
+    document.body.appendChild(hiddenInput);
+    hiddenInput.focus();
+  }
+}

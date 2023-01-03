@@ -12,7 +12,6 @@
  *
  */
 
-import { insertPositions } from "app/client/lib/tableUtil";
 import { BulkColValues, UserAction } from "app/common/DocActions";
 import { nativeCompare } from "app/common/gutil";
 import { obsArray, ObsArray } from "grainjs";
@@ -25,6 +24,7 @@ import reverse = require("lodash/reverse");
  * `TreeModel` and any item in it implements `TreeItem`.
  */
 export interface TreeNode {
+  hidden?: boolean;
   // Returns an observable array of children. Or null if the node does not accept children.
   children(): ObsArray<TreeItem>|null;
 
@@ -62,7 +62,7 @@ export interface TreeTableData {
 }
 
 // describes a function that builds dom for a particular record
-type DomBuilder = (id: number) => HTMLElement;
+type DomBuilder = (id: number, hidden: boolean) => HTMLElement;
 
 
 // Returns a list of the records from table that is suitable to build the tree model, ie: records
@@ -109,8 +109,9 @@ export function fromTableData(table: TreeTableData, buildDom: DomBuilder, oldMod
     const children = indentations[rec.indentation + 1] || [];
     delete indentations[rec.indentation + 1];
     const item = oldItems[rec.id] || new TreeItemRecord();
+    item.hidden = rec.hidden;
     item.init(storage, index, reverse(children));
-    item.buildDom = () => buildDom(rec.id);
+    item.buildDom = () => buildDom(rec.id, rec.hidden);
     siblings.push(item);
   });
   return new TreeModelRecord(storage, reverse(indentations[0] || []));
@@ -124,7 +125,7 @@ interface Storage {
 
 // TreeNode implementation that uses a grist table.
 export class TreeNodeRecord implements TreeNode {
-
+  public hidden: boolean = false;
   public storage: Storage;
   public index: number|"root";
   public children: () => ObsArray<TreeItemRecord>;
@@ -155,24 +156,21 @@ export class TreeNodeRecord implements TreeNode {
       const indentations = records.map((rec, i) => rec.indentation + indent - records[0].indentation);
 
       // adjust positions
-      let upperPos, lowerPos: number|null;
+      let upperPos: number|null;
       if (nextChild) {
         const index = nextChild.index;
         upperPos = this._records[index].pagePos;
-        lowerPos = index ? this._records[index - 1].pagePos : null;
       } else {
         const lastIndex = this.findLastIndex();
         if (lastIndex !== "root") {
           upperPos = (this._records[lastIndex + 1] || {pagePos: null}).pagePos;
-          lowerPos = this._records[lastIndex].pagePos;
         } else {
-          upperPos = lowerPos = null;
+          upperPos = null;
         }
       }
-      const positions = insertPositions(lowerPos, upperPos, records.length);
 
       // do update
-      const update = records.map((rec, i) => ({...rec, indentation: indentations[i], pagePos: positions[i]}));
+      const update = records.map((rec, i) => ({...rec, indentation: indentations[i], pagePos: upperPos!}));
       await this.sendActions({update});
     }
   }
@@ -191,6 +189,7 @@ export class TreeNodeRecord implements TreeNode {
       forEach(update[0], (val, key) => values[key] = update.map(rec => rec[key]));
       const rowIds = values.id;
       delete values.id;
+      delete values.hidden;
       userActions.push(["BulkUpdateRecord", rowIds, values]);
     }
 

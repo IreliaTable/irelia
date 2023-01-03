@@ -1,7 +1,7 @@
 import {ApiError} from 'app/common/ApiError';
 import {APPROACHING_LIMIT_RATIO, DataLimitStatus, DocumentUsage, getUsageRatio} from 'app/common/DocUsage';
 import {Features} from 'app/common/Features';
-import * as moment from 'moment-timezone';
+import moment from 'moment-timezone';
 
 /**
  * Error class indicating failure due to limits being exceeded.
@@ -53,7 +53,7 @@ export function getDataLimitRatio(
   const {rowCount, dataSizeBytes} = docUsage;
   const maxRows = productFeatures?.baseMaxRowsPerDocument;
   const maxDataSize = productFeatures?.baseMaxDataSizePerDocument;
-  const rowRatio = getUsageRatio(rowCount, maxRows);
+  const rowRatio = getUsageRatio(rowCount?.total, maxRows);
   const dataSizeRatio = getUsageRatio(dataSizeBytes, maxDataSize);
   return Math.max(rowRatio, dataSizeRatio);
 }

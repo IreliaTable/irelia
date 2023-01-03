@@ -1,4 +1,5 @@
 import * as sqlite3 from '@gristlabs/sqlite3';
+import {ApiError} from 'app/common/ApiError';
 import {mapGetOrSet} from 'app/common/AsyncCreate';
 import {delay} from 'app/common/delay';
 import {DocEntry} from 'app/common/DocListAPI';
@@ -19,14 +20,14 @@ import {LogMethods} from "app/server/lib/LogMethods";
 import {fromCallback} from 'app/server/lib/serverUtils';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import * as uuidv4 from "uuid/v4";
+import uuidv4 from "uuid/v4";
 import { OpenMode, SQLiteDB } from './SQLiteDB';
 
 // Check for a valid document id.
 const docIdRegex = /^[-=_\w~%]+$/;
 
 // Wait this long after a change to the document before trying to make a backup of it.
-const IRELIA_BACKUP_DELAY_SECS = parseInt(process.env.IRELIA_BACKUP_DELAY_SECS || '15', 10);
+const GRIST_BACKUP_DELAY_SECS = parseInt(process.env.GRIST_BACKUP_DELAY_SECS || '15', 10);
 
 // This constant controls how many pages of the database we back up in a single step.
 // The larger it is, the faster the backup overall, but the slower each step is.
@@ -58,7 +59,7 @@ export interface HostedStorageOptions {
 }
 
 const defaultOptions: HostedStorageOptions = {
-  secondsBeforePush: IRELIA_BACKUP_DELAY_SECS,
+  secondsBeforePush: GRIST_BACKUP_DELAY_SECS,
   secondsBeforeFirstRetry: 3.0,
   pushDocUpdateTimes: true
 };
@@ -200,14 +201,14 @@ export class HostedStorageManager implements IDocStorageManager {
   }
 
   public getPath(docName: string): string {
-    return this.getAssetPath(docName) + '.irelia';
+    return this.getAssetPath(docName) + '.grist';
   }
 
   // Where to store files related to a document locally.  Document goes in <assetPath>.grist,
   // and other files go in <assetPath>/ directory.
   public getAssetPath(docName: string): string {
     checkValidDocId(docName);
-    return path.join(this._docsRoot, path.basename(docName, '.irelia'));
+    return path.join(this._docsRoot, path.basename(docName, '.grist'));
   }
 
   // We don't deal with sample docs
@@ -219,7 +220,7 @@ export class HostedStorageManager implements IDocStorageManager {
    * ever be used, but stripping seems better than asserting.)
    */
   public async getCanonicalDocName(altDocName: string): Promise<string> {
-    return path.basename(altDocName, '.irelia');
+    return path.basename(altDocName, '.grist');
   }
 
   /**
@@ -438,6 +439,13 @@ export class HostedStorageManager implements IDocStorageManager {
     this._uploads.expediteOperations();
   }
 
+  // forcibly stop operations that might otherwise retry indefinitely,
+  // for testing purposes.
+  public async testStopOperations() {
+    this._uploads.stopOperations();
+    await this._uploads.wait();
+  }
+
   /**
    * Finalize any operations involving the named document.
    */
@@ -589,9 +597,9 @@ export class HostedStorageManager implements IDocStorageManager {
         // skip S3, just use file system
         let present: boolean = await fse.pathExists(this.getPath(docName));
         if ((forkId || snapshotId) && !present) {
-          if (!canCreateFork) { throw new Error(`Cannot create fork`); }
+          if (!canCreateFork) { throw new ApiError("Document fork not found", 404); }
           if (snapshotId && snapshotId !== 'current') {
-            throw new Error(`cannot find snapshot ${snapshotId} of ${docName}`);
+            throw new ApiError(`cannot find snapshot ${snapshotId} of ${docName}`, 404);
           }
           if (await fse.pathExists(this.getPath(trunkId))) {
             await fse.copy(this.getPath(trunkId), this.getPath(docName));
@@ -674,10 +682,10 @@ export class HostedStorageManager implements IDocStorageManager {
     if (!await this._ext.exists(destIdWithoutSnapshot)) {
       if (!options.trunkId) { return false; }   // Document not found in S3
       // No such fork in s3 yet, try from trunk (if we are allowed to create the fork).
-      if (!options.canCreateFork) { throw new Error('Cannot create fork'); }
+      if (!options.canCreateFork) { throw new ApiError("Document fork not found", 404); }
       // The special NEW_DOCUMENT_CODE trunk means we should create an empty document.
       if (options.trunkId === NEW_DOCUMENT_CODE) { return false; }
-      if (!await this._ext.exists(options.trunkId)) { throw new Error('Cannot find original'); }
+      if (!await this._ext.exists(options.trunkId)) { throw new ApiError('Cannot find original', 404); }
       sourceDocId = options.trunkId;
     }
     await this._ext.downloadTo(sourceDocId, destId, this.getPath(destId), options.snapshotId);
@@ -731,23 +739,29 @@ export class HostedStorageManager implements IDocStorageManager {
         ...label && {label},
         t,
       };
-      const prevSnapshotId = this._latestVersions.get(docId) || null;
-      const newSnapshotId = await this._ext.upload(docId, tmpPath, metadata);
-      if (newSnapshotId === Unchanged) {
-        // Nothing uploaded because nothing changed
-        return;
+      let changeMade: boolean = false;
+      await this._inventory.uploadAndAdd(docId, async () => {
+        const prevSnapshotId = this._latestVersions.get(docId) || null;
+        const newSnapshotId = await this._ext.upload(docId, tmpPath as string, metadata);
+        if (newSnapshotId === Unchanged) {
+          // Nothing uploaded because nothing changed
+          return { prevSnapshotId };
+        }
+        if (!newSnapshotId) {
+          // This is unexpected.
+          throw new Error('No snapshotId allocated after upload');
+        }
+        const snapshot = {
+          lastModified: t,
+          snapshotId: newSnapshotId,
+          metadata
+        };
+        changeMade = true;
+        return { snapshot, prevSnapshotId };
+      });
+      if (changeMade) {
+        await this._onInventoryChange(docId);
       }
-      if (!newSnapshotId) {
-        // This is unexpected.
-        throw new Error('No snapshotId allocated after upload');
-      }
-      const snapshot = {
-        lastModified: t,
-        snapshotId: newSnapshotId,
-        metadata
-      };
-      await this._inventory.add(docId, snapshot, prevSnapshotId);
-      await this._onInventoryChange(docId);
     } finally {
       // Clean up backup.
       // NOTE: fse.remove succeeds also when the file does not exist.

@@ -1,5 +1,6 @@
 import {KoArray} from 'app/client/lib/koArray';
-import {DocModel, IRowModel, recordSet, refRecord, TableRec, ViewFieldRec} from 'app/client/models/DocModel';
+import {CellRec, DocModel, IRowModel, recordSet,
+        refRecord, TableRec, ViewFieldRec} from 'app/client/models/DocModel';
 import {jsonObservable, ObjObservable} from 'app/client/models/modelUtil';
 import * as gristTypes from 'app/common/gristTypes';
 import {getReferencedTableId} from 'app/common/gristTypes';
@@ -9,7 +10,11 @@ import {
   createVisibleColFormatterRaw,
   FullFormatterArgs
 } from 'app/common/ValueFormatter';
+import {createParser} from 'app/common/ValueParser';
 import * as ko from 'knockout';
+
+// Column behavior type, used primarily in the UI.
+export type BEHAVIOR = "empty"|"formula"|"data";
 
 // Represents a column in a user-defined table.
 export interface ColumnRec extends IRowModel<"_grist_Tables_column"> {
@@ -38,6 +43,9 @@ export interface ColumnRec extends IRowModel<"_grist_Tables_column"> {
   // Convenience observable to obtain and set the type with no suffix
   pureType: ko.Computed<string>;
 
+  // Column behavior as seen by the user.
+  behavior: ko.Computed<BEHAVIOR>;
+
   // The column's display column
   _displayColModel: ko.Computed<ColumnRec>;
 
@@ -49,7 +57,7 @@ export interface ColumnRec extends IRowModel<"_grist_Tables_column"> {
   visibleColModel: ko.Computed<ColumnRec>;
 
   disableModifyBase: ko.Computed<boolean>;    // True if column config can't be modified (name, type, etc.)
-  disableModify: ko.Computed<boolean>;        // True if column can't be modified or is being transformed.
+  disableModify: ko.Computed<boolean>;        // True if column can't be modified (is summary) or is being transformed.
   disableEditData: ko.Computed<boolean>;      // True to disable editing of the data in this column.
 
   isHiddenCol: ko.Computed<boolean>;
@@ -67,9 +75,12 @@ export interface ColumnRec extends IRowModel<"_grist_Tables_column"> {
   // (i.e. they aren't actually referenced but they exist in the visible column and are relevant to e.g. autocomplete)
   // `formatter` formats actual cell values, e.g. a whole list from the display column.
   formatter: ko.Computed<BaseFormatter>;
+  cells: ko.Computed<KoArray<CellRec>>;
 
   // Helper which adds/removes/updates column's displayCol to match the formula.
   saveDisplayFormula(formula: string): Promise<void>|undefined;
+
+  createValueParser(): (value: string) => any;
 }
 
 export function createColumnRec(this: ColumnRec, docModel: DocModel): void {
@@ -77,6 +88,7 @@ export function createColumnRec(this: ColumnRec, docModel: DocModel): void {
   this.widgetOptionsJson = jsonObservable(this.widgetOptions);
   this.viewFields = recordSet(this, docModel.viewFields, 'colRef');
   this.summarySource = refRecord(docModel.columns, this.summarySourceCol);
+  this.cells = recordSet(this, docModel.cells, 'colRef');
 
   // Is this an empty column (undecided if formula or data); denoted by an empty formula.
   this.isEmpty = ko.pureComputed(() => this.isFormula() && this.formula() === '');
@@ -124,7 +136,7 @@ export function createColumnRec(this: ColumnRec, docModel: DocModel): void {
   // Returns the rowModel for the referenced table, or null, if this is not a reference column.
   this.refTable = ko.pureComputed(() => {
     const refTableId = getReferencedTableId(this.type() || "");
-    return refTableId ? docModel.allTables.all().find(t => t.tableId() === refTableId) || null : null;
+    return refTableId ? docModel.visibleTables.all().find(t => t.tableId() === refTableId) || null : null;
   });
 
   // Helper for Reference/ReferenceList columns, which returns a formatter according to the visibleCol
@@ -132,6 +144,13 @@ export function createColumnRec(this: ColumnRec, docModel: DocModel): void {
   this.visibleColFormatter = ko.pureComputed(() => formatterForRec(this, this, docModel, 'vcol'));
 
   this.formatter = ko.pureComputed(() => formatterForRec(this, this, docModel, 'full'));
+
+  this.createValueParser = function() {
+    const parser = createParser(docModel.docData, this.id.peek());
+    return parser.cleanParse.bind(parser);
+  };
+
+  this.behavior = ko.pureComputed(() => this.isEmpty() ? 'empty' : this.isFormula() ? 'formula' : 'data');
 }
 
 export function formatterForRec(

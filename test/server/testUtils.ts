@@ -11,9 +11,7 @@
 /* global before, after */
 
 import * as _ from 'underscore';
-import * as chai from 'chai';
 import { assert } from 'chai';
-import * as chaiAsPromised from 'chai-as-promised';
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import clone = require('lodash/clone');
@@ -22,10 +20,8 @@ import * as winston from 'winston';
 import { serialize } from 'winston/lib/winston/common';
 
 import * as docUtils from 'app/server/lib/docUtils';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import { getAppRoot } from 'app/server/lib/places';
-
-chai.use(chaiAsPromised);
 
 /**
  * Creates a temporary file with the given contents.
@@ -126,7 +122,7 @@ export function setTmpLogLevel(level: string, optCaptureFunc?: (level: string, m
  * captures those at minLevel and higher. Returns a promise for the array of "level: message"
  * strings. These may be tested using testUtils.assertMatchArray(). Callback may return a promise.
  */
-export async function captureLog(minLevel: string, callback: any) {
+export async function captureLog(minLevel: string, callback: () => void|Promise<void>): Promise<string[]> {
   const messages: string[] = [];
   const prevLogLevel = log.transports.file.level;
   const name = _.uniqueId('CaptureLog');
@@ -137,7 +133,9 @@ export async function captureLog(minLevel: string, callback: any) {
     }
   }
 
-  log.transports.file.level = -1 as any;   // Suppress all log output.
+  if (!process.env.VERBOSE) {
+    log.transports.file.level = -1 as any;   // Suppress all log output.
+  }
   log.add(CaptureTransport as any, { captureFunc: capture, name });  // types are off.
   try {
     await callback();

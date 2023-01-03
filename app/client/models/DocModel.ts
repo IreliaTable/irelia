@@ -13,16 +13,18 @@ import {KoArray} from 'app/client/lib/koArray';
 import {KoSaveableObservable} from 'app/client/models/modelUtil';
 
 import * as ko from 'knockout';
+import memoize from 'lodash/memoize';
 
 import * as koArray from 'app/client/lib/koArray';
 import * as koUtil from 'app/client/lib/koUtil';
-import * as DataTableModel from 'app/client/models/DataTableModel';
+import DataTableModel from 'app/client/models/DataTableModel';
 import {DocData} from 'app/client/models/DocData';
 import {urlState} from 'app/client/models/gristUrlState';
-import * as MetaRowModel from 'app/client/models/MetaRowModel';
-import * as MetaTableModel from 'app/client/models/MetaTableModel';
+import MetaRowModel from 'app/client/models/MetaRowModel';
+import MetaTableModel from 'app/client/models/MetaTableModel';
 import * as rowset from 'app/client/models/rowset';
-import {isHiddenTable, isRawTable} from 'app/common/isHiddenTable';
+import {isHiddenTable, isSummaryTable} from 'app/common/isHiddenTable';
+import {RowFilterFunc} from 'app/common/RowFilterFunc';
 import {schema, SchemaTypes} from 'app/common/schema';
 
 import {ACLRuleRec, createACLRuleRec} from 'app/client/models/entities/ACLRuleRec';
@@ -36,29 +38,21 @@ import {createValidationRec, ValidationRec} from 'app/client/models/entities/Val
 import {createViewFieldRec, ViewFieldRec} from 'app/client/models/entities/ViewFieldRec';
 import {createViewRec, ViewRec} from 'app/client/models/entities/ViewRec';
 import {createViewSectionRec, ViewSectionRec} from 'app/client/models/entities/ViewSectionRec';
+import {CellRec, createCellRec} from 'app/client/models/entities/CellRec';
 import {RefListValue} from 'app/common/gristTypes';
 import {decodeObject} from 'app/plugin/objtypes';
 
 // Re-export all the entity types available. The recommended usage is like this:
 //    import {ColumnRec, ViewFieldRec} from 'app/client/models/DocModel';
-export {ColumnRec} from 'app/client/models/entities/ColumnRec';
-export {DocInfoRec} from 'app/client/models/entities/DocInfoRec';
-export {FilterRec} from 'app/client/models/entities/FilterRec';
-export {PageRec} from 'app/client/models/entities/PageRec';
-export {TabBarRec} from 'app/client/models/entities/TabBarRec';
-export {TableRec} from 'app/client/models/entities/TableRec';
-export {ValidationRec} from 'app/client/models/entities/ValidationRec';
-export {ViewFieldRec} from 'app/client/models/entities/ViewFieldRec';
-export {ViewRec} from 'app/client/models/entities/ViewRec';
-export {ViewSectionRec} from 'app/client/models/entities/ViewSectionRec';
-
+export type {ColumnRec, DocInfoRec, FilterRec, PageRec, TabBarRec, TableRec, ValidationRec,
+    ViewFieldRec, ViewRec, ViewSectionRec, CellRec};
 
 /**
  * Creates the type for a MetaRowModel containing a KoSaveableObservable for each field listed in
  * the auto-generated app/common/schema.ts. It represents the metadata record in the database.
  * Particular DocModel entities derive from this, and add other helpful computed values.
  */
-export type IRowModel<TName extends keyof SchemaTypes> = MetaRowModel & {
+export type IRowModel<TName extends keyof SchemaTypes> = MetaRowModel<TName> & {
   [ColId in keyof SchemaTypes[TName]]: KoSaveableObservable<SchemaTypes[TName][ColId]>;
 };
 
@@ -131,12 +125,15 @@ export class DocModel {
   public pages: MTM<PageRec> = this._metaTableModel("_grist_Pages", createPageRec);
   public rules: MTM<ACLRuleRec> = this._metaTableModel("_grist_ACLRules", createACLRuleRec);
   public filters: MTM<FilterRec> = this._metaTableModel("_grist_Filters", createFilterRec);
+  public cells: MTM<CellRec> = this._metaTableModel("_grist_Cells", createCellRec);
 
   public docInfoRow: DocInfoRec;
 
-  public allTables: KoArray<TableRec>;
-  public rawTables: KoArray<TableRec>;
-  public allTableIds: KoArray<string>;
+  public visibleTables: KoArray<TableRec>;
+  public rawDataTables: KoArray<TableRec>;
+  public rawSummaryTables: KoArray<TableRec>;
+
+  public visibleTableIds: KoArray<string>;
 
   // A mapping from tableId to DataTableModel for user-defined tables.
   public dataTables: {[tableId: string]: DataTableModel} = {};
@@ -146,6 +143,8 @@ export class DocModel {
 
   public allTabs: KoArray<TabBarRec> = this.tabBar.createAllRowsModel('tabPos');
 
+  /** Pages that are shown in the menu. These can include censored pages if they have children. */
+  public menuPages: ko.Computed<PageRec[]>;
   // Excludes pages hidden by ACL rules or other reasons (e.g. doc-tour)
   public visibleDocPages: ko.Computed<PageRec[]>;
 
@@ -169,12 +168,15 @@ export class DocModel {
 
     // An observable array of user-visible tables, sorted by tableId, excluding summary tables.
     // This is a publicly exposed member.
-    this.allTables = createUserTablesArray(this.tables);
-    this.rawTables = createRawTablesArray(this.tables);
+    this.visibleTables = createVisibleTablesArray(this.tables);
 
-    // An observable array of user-visible tableIds. A shortcut mapped from allTables.
-    const allTableIds = ko.computed(() => this.allTables.all().map(t => t.tableId()));
-    this.allTableIds = koArray.syncedKoArray(allTableIds);
+    // Observable arrays of raw data and summary tables, sorted by tableId.
+    this.rawDataTables = createRawDataTablesArray(this.tables);
+    this.rawSummaryTables = createRawSummaryTablesArray(this.tables);
+
+    // An observable array of user-visible tableIds. A shortcut mapped from visibleTables.
+    const visibleTableIds = ko.computed(() => this.visibleTables.all().map(t => t.tableId()));
+    this.visibleTableIds = koArray.syncedKoArray(visibleTableIds);
 
     // Create an observable array of RowModels for all the data tables. We'll trigger
     // onAddTable/onRemoveTable in response to this array's splice events below.
@@ -190,6 +192,19 @@ export class DocModel {
 
     // Get a list of only the visible pages.
     const allPages = this.pages.createAllRowsModel('pagePos');
+    this.menuPages = ko.computed(() => {
+      const pagesToShow = allPages.all().filter(p => !p.isSpecial()).sort((a, b) => a.pagePos() - b.pagePos());
+      // Helper to find all children of a page.
+      const children = memoize((page: PageRec) => {
+        const following = pagesToShow.slice(pagesToShow.indexOf(page) + 1);
+        const firstOutside = following.findIndex(p => p.indentation() <= page.indentation());
+        return firstOutside >= 0 ? following.slice(0, firstOutside) : following;
+      });
+      // Helper to test if the page is hidden and all its children are hidden.
+      // In that case, we won't show it at all.
+      const hide = memoize((page: PageRec): boolean => page.isCensored() && children(page).every(p => hide(p)));
+      return pagesToShow.filter(p => !hide(p));
+    });
     this.visibleDocPages = ko.computed(() => allPages.all().filter(p => !p.isHidden()));
   }
 
@@ -227,24 +242,40 @@ export class DocModel {
   }
 }
 
-
 /**
- * Helper to create an observable array of tables, sorted by tableId, and excluding hidden
- * tables.
+ * Creates an observable array of tables, sorted by tableId.
+ *
+ * An optional `filterFunc` may be specified to filter tables.
  */
-function createUserTablesArray(tablesModel: MetaTableModel<TableRec>): KoArray<TableRec> {
-  const rowSource = new rowset.FilteredRowSource(r => !isHiddenTable(tablesModel.tableData, r));
+function createTablesArray(
+  tablesModel: MetaTableModel<TableRec>,
+  filterFunc: RowFilterFunc<rowset.RowId> = (_row) => true
+) {
+  const rowSource = new rowset.FilteredRowSource(filterFunc);
   rowSource.subscribeTo(tablesModel);
   // Create an observable RowModel array based on this rowSource, sorted by tableId.
   return tablesModel._createRowSetModel(rowSource, 'tableId');
 }
 
 /**
- * Helper to create an observable array of tables, sorted by tableId, and excluding summary tables.
+ * Returns an observable array of user tables, sorted by tableId, and excluding hidden/summary
+ * tables.
  */
- function createRawTablesArray(tablesModel: MetaTableModel<TableRec>): KoArray<TableRec> {
-  const rowSource = new rowset.FilteredRowSource(r => isRawTable(tablesModel.tableData, r));
-  rowSource.subscribeTo(tablesModel);
-  // Create an observable RowModel array based on this rowSource, sorted by tableId.
-  return tablesModel._createRowSetModel(rowSource, 'tableId');
+function createVisibleTablesArray(tablesModel: MetaTableModel<TableRec>): KoArray<TableRec> {
+  return createTablesArray(tablesModel, r => !isHiddenTable(tablesModel.tableData, r));
+}
+
+/**
+ * Returns an observable array of raw data tables, sorted by tableId, and excluding summary
+ * tables.
+ */
+function createRawDataTablesArray(tablesModel: MetaTableModel<TableRec>): KoArray<TableRec> {
+  return createTablesArray(tablesModel, r => !isSummaryTable(tablesModel.tableData, r));
+}
+
+/**
+ * Returns an observable array of raw summary tables, sorted by tableId.
+ */
+ function createRawSummaryTablesArray(tablesModel: MetaTableModel<TableRec>): KoArray<TableRec> {
+  return createTablesArray(tablesModel, r => isSummaryTable(tablesModel.tableData, r));
 }

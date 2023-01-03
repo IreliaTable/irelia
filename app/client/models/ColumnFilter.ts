@@ -1,6 +1,9 @@
 import {ColumnFilterFunc, makeFilterFunc} from "app/common/ColumnFilterFunc";
 import {CellValue} from 'app/common/DocActions';
-import {FilterSpec, FilterState, isRangeFilter, makeFilterState} from "app/common/FilterState";
+import {
+  FilterSpec, FilterState, IRelativeDateSpec, isRangeFilter, isRelativeBound, makeFilterState
+} from "app/common/FilterState";
+import {toUnixTimestamp} from "app/common/RelativeDates";
 import {nativeCompare} from 'app/common/gutil';
 import {Computed, Disposable, Observable} from 'grainjs';
 
@@ -14,8 +17,8 @@ import {Computed, Disposable, Observable} from 'grainjs';
  */
 export class ColumnFilter extends Disposable {
 
-  public min = Observable.create<number|undefined>(this, undefined);
-  public max = Observable.create<number|undefined>(this, undefined);
+  public min = Observable.create<number|undefined|IRelativeDateSpec>(this, undefined);
+  public max = Observable.create<number|undefined|IRelativeDateSpec>(this, undefined);
 
   public readonly filterFunc = Observable.create<ColumnFilterFunc>(this, () => true);
 
@@ -24,6 +27,8 @@ export class ColumnFilter extends Disposable {
 
   // Computed that returns the current filter state.
   public readonly state: Computed<FilterState> = Computed.create(this, this.filterFunc, () => this._getState());
+
+  public readonly isRange: Computed<boolean> = Computed.create(this, this.filterFunc, () => this._isRange());
 
   private _include: boolean;
   private _values: Set<CellValue>;
@@ -38,6 +43,10 @@ export class ColumnFilter extends Disposable {
 
   public get columnType() {
     return this._columnType;
+  }
+
+  public get initialFilterJson() {
+    return this._initialFilterJson;
   }
 
   public setState(filterJson: string|FilterSpec) {
@@ -115,6 +124,12 @@ export class ColumnFilter extends Disposable {
     return this.makeFilterJson() !== this._initialFilterJson;
   }
 
+  public getBoundsValue(minMax: 'min' | 'max'): number | undefined {
+    const value = this[minMax].get();
+    return isRelativeBound(value) ? toUnixTimestamp(value) : value;
+  }
+
+
   private _updateState(): void {
     this.filterFunc.set(makeFilterFunc(this._getState(), this._columnType));
   }
@@ -138,4 +153,18 @@ export class ColumnFilter extends Disposable {
   }
 }
 
-export const allInclusive = '{"excluded":[]}';
+/**
+ * A JSON-encoded filter spec that includes every value.
+ */
+export const ALL_INCLUSIVE_FILTER_JSON = '{"excluded":[]}';
+
+/**
+ * A blank JSON-encoded filter spec.
+ *
+ * This is interpreted the same as `ALL_INCLUSIVE_FILTER_JSON` in the context
+ * of parsing filters. However, it's still useful in scenarios where it's
+ * necessary to discern between new filters and existing filters; initializing
+ * a `ColumnFilter` with `NEW_FIlTER_JSON` makes it clear that a new filter
+ * is being created.
+ */
+export const NEW_FILTER_JSON = '{}';

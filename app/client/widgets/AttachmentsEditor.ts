@@ -14,8 +14,9 @@ import {editableLabel} from 'app/client/ui2018/editableLabel';
 import {icon} from 'app/client/ui2018/icons';
 import {IModalControl, modal} from 'app/client/ui2018/modals';
 import {renderFileType} from 'app/client/widgets/AttachmentsWidget';
-import {NewBaseEditor, Options} from 'app/client/widgets/NewBaseEditor';
+import {FieldOptions, NewBaseEditor} from 'app/client/widgets/NewBaseEditor';
 import {CellValue} from 'app/common/DocActions';
+import {SingleCell} from 'app/common/TableData';
 import {clamp, encodeQueryParams} from 'app/common/gutil';
 import {UploadResult} from 'app/common/uploads';
 import * as mimeTypes from 'mime-types';
@@ -55,11 +56,16 @@ export class AttachmentsEditor extends NewBaseEditor {
   private _index: LiveIndex;
   private _selected: Computed<Attachment|null>;
 
-  constructor(options: Options) {
+  constructor(options: FieldOptions) {
     super(options);
 
     const docData: DocData = options.gristDoc.docData;
     const cellValue: CellValue = options.cellValue;
+    const cell: SingleCell = {
+      rowId: options.rowId,
+      colId: options.field.colId(),
+      tableId: options.field.column().table().tableId(),
+    };
 
     // editValue is abused slightly to indicate a 1-based index of the attachment.
     const initRowIndex: number|undefined = (options.editValue && parseInt(options.editValue, 0) - 1) || 0;
@@ -79,8 +85,8 @@ export class AttachmentsEditor extends NewBaseEditor {
         fileType,
         filename,
         hasPreview: Boolean(this._attachmentsTable.getValue(val, 'imageHeight')),
-        url: computed((use) => this._getUrl(fileIdent, use(filename))),
-        inlineUrl: computed((use) => this._getUrl(fileIdent, use(filename), true))
+        url: computed((use) => this._getUrl(cell, val, use(filename))),
+        inlineUrl: computed((use) => this._getUrl(cell, val, use(filename), true))
       };
     });
     this._index = makeLiveIndex(this, this._attachments, initRowIndex);
@@ -135,8 +141,10 @@ export class AttachmentsEditor extends NewBaseEditor {
         ),
         dom.maybe(this._selected, selected =>
           cssTitle(
-            cssEditableLabel(selected.filename, (val) => this._renameAttachment(selected, val),
-              testId('pw-name'))
+            cssEditableLabel(selected.filename, {
+              save: (val) => this._renameAttachment(selected, val),
+              inputArgs: [testId('pw-name')],
+            }),
           )
         ),
         cssFlexExpand(
@@ -190,11 +198,13 @@ export class AttachmentsEditor extends NewBaseEditor {
     att.filename.set(this._attachmentsTable.getValue(att.rowId, 'fileName')!);
   }
 
-  private _getUrl(fileIdent: string, filename: string, inline?: boolean): string {
+  private _getUrl(cell: SingleCell, attId: number, filename: string, inline?: boolean): string {
     return this._docComm.docUrl('attachment') + '?' + encodeQueryParams({
       ...this._docComm.getUrlParams(),
-      ident: fileIdent,
       name: filename,
+      ...cell,
+      maybeNew: 1,  // The attachment may be uploaded by the user but not stored in the cell yet.
+      attId,
       ...(inline ? {inline: 1} : {})
     });
   }

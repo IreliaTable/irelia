@@ -1,5 +1,5 @@
+import { isTeamPlan, Product } from 'app/common/Features';
 import { normalizeEmail } from 'app/common/emails';
-import { Features } from 'app/common/Features';
 import { PermissionData, PermissionDelta } from 'app/common/UserAPI';
 
 /**
@@ -28,12 +28,23 @@ export interface ShareAnnotations {
   users: Map<string, ShareAnnotation>;  // Annotations keyed by normalized user email.
 }
 
+export interface ShareAnnotatorOptions {
+  supportEmail?: string;   // Known email address of the support user (e.g. support@getgrist.com).
+}
+
 /**
  * Helper for annotating users mentioned in a proposed change of shares, given the
  * current shares in place.
  */
 export class ShareAnnotator {
-  constructor(private _features: Features, private _state: PermissionData) {
+  private _features = this._product?.features ?? {};
+  private _supportEmail = this._options.supportEmail;
+
+  constructor(
+    private _product: Product|null,
+    private _state: PermissionData,
+    private _options: ShareAnnotatorOptions = {}
+  ) {
   }
 
   public updateState(state: PermissionData) {
@@ -43,7 +54,7 @@ export class ShareAnnotator {
   public annotateChanges(change: PermissionDelta): ShareAnnotations {
     const features = this._features;
     const annotations: ShareAnnotations = {
-      hasTeam: features.maxWorkspacesPerOrg !== 1,
+      hasTeam: !this._product || isTeamPlan(this._product.name),
       users: new Map(),
     };
     if (features.maxSharesPerDocPerRole || features.maxSharesPerWorkspace) {
@@ -53,11 +64,11 @@ export class ShareAnnotator {
     }
     const top = features.maxSharesPerDoc;
     let at = 0;
-    const makeAnnotation = (user: {email: string, isMember?: boolean, access: string|null}) => {
+    const makeAnnotation = (user: {email: string, isMember?: boolean, isSupport?: boolean, access: string|null}) => {
       const annotation: ShareAnnotation = {
         isMember: user.isMember,
       };
-      if (user.email === 'support@getgrist.com') {
+      if (user.isSupport) {
         return { isSupport: true };
       }
       if (!annotation.isMember && user.access) {
@@ -82,7 +93,10 @@ export class ShareAnnotator {
         .map(([k, ]) => normalizeEmail(k)));
     for (const email of tweaks) {
       const annotation = annotations.users.get(email) || makeAnnotation({
-        email, isMember: false, access: '<set>',
+        email,
+        isMember: false,
+        isSupport: Boolean(email.trim() !== '' && email === this._supportEmail),
+        access: '<set>',
       });
       annotations.users.set(email, annotation);
     }

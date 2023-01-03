@@ -7,14 +7,13 @@ import {AppModel, reportError} from 'app/client/models/AppModel';
 import {reportMessage, UserError} from 'app/client/models/errors';
 import {urlState} from 'app/client/models/gristUrlState';
 import {ownerName} from 'app/client/models/WorkspaceInfo';
-import {OrgUsageSummary} from 'app/common/DocUsage';
 import {IHomePage} from 'app/common/gristUrls';
 import {isLongerThan} from 'app/common/gutil';
 import {SortPref, UserOrgPrefs, ViewPref} from 'app/common/Prefs';
 import * as roles from 'app/common/roles';
 import {Document, Organization, Workspace} from 'app/common/UserAPI';
 import {bundleChanges, Computed, Disposable, Observable, subscribe} from 'grainjs';
-import * as moment from 'moment';
+import moment from 'moment';
 import flatten = require('lodash/flatten');
 import sortBy = require('lodash/sortBy');
 
@@ -75,8 +74,6 @@ export interface HomeModel {
   // The workspace for new docs, or "unsaved" to only allow unsaved-doc creation, or null if the
   // user isn't allowed to create a doc.
   newDocWorkspace: Observable<Workspace|null|"unsaved">;
-
-  currentOrgUsage: Observable<OrgUsageSummary|null>;
 
   createWorkspace(name: string): Promise<void>;
   renameWorkspace(id: number, name: string): Promise<void>;
@@ -153,12 +150,9 @@ export class HomeModelImpl extends Disposable implements HomeModel, ViewSettings
     return destWS && roles.canEdit(destWS.access) ? destWS : null;
   });
 
-  // Whether to show intro: no docs (other than examples) and user may create docs.
+  // Whether to show intro: no docs (other than examples).
   public readonly showIntro = Computed.create(this, this.workspaces, (use, wss) => (
-    wss.every((ws) => ws.isSupportWorkspace || ws.docs.length === 0) &&
-    Boolean(use(this.newDocWorkspace))));
-
-  public readonly currentOrgUsage: Observable<OrgUsageSummary|null> = Observable.create(this, null);
+    wss.every((ws) => ws.isSupportWorkspace || ws.docs.length === 0)));
 
   private _userOrgPrefs = Observable.create<UserOrgPrefs|undefined>(this, this._app.currentOrg?.userOrgPrefs);
 
@@ -193,7 +187,7 @@ export class HomeModelImpl extends Disposable implements HomeModel, ViewSettings
     const importSources = ImportSourceElement.fromArray(pluginManager.pluginsList);
     this.importSources.set(importSources);
 
-    this._updateCurrentOrgUsage().catch(reportError);
+    this._app.refreshOrgUsage().catch(reportError);
   }
 
   // Accessor for the AppModel containing this HomeModel.
@@ -270,6 +264,9 @@ export class HomeModelImpl extends Disposable implements HomeModel, ViewSettings
 
   // Fetches and updates workspaces, which include contained docs as well.
   private async _updateWorkspaces() {
+    if (this.isDisposed()) {
+      return;
+    }
     const org = this._app.currentOrg;
     if (!org) {
       this.workspaces.set([]);
@@ -291,7 +288,9 @@ export class HomeModelImpl extends Disposable implements HomeModel, ViewSettings
       this.loading.set("slow");
     }
     const [wss, trashWss, templateWss] = await promise;
-
+    if (this.isDisposed()) {
+      return;
+    }
     // bundleChanges defers computeds' evaluations until all changes have been applied.
     bundleChanges(() => {
       this.workspaces.set(wss || []);
@@ -385,14 +384,6 @@ export class HomeModelImpl extends Disposable implements HomeModel, ViewSettings
       this._userOrgPrefs.set(org.userOrgPrefs);
       await this._app.api.updateOrg('current', {userOrgPrefs: org.userOrgPrefs});
     }
-  }
-
-  private async _updateCurrentOrgUsage() {
-    const currentOrg = this.app.currentOrg;
-    if (!roles.isOwner(currentOrg)) { return; }
-
-    const api = this.app.api;
-    this.currentOrgUsage.set(await api.getOrgUsageSummary(currentOrg.id));
   }
 }
 

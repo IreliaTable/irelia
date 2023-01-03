@@ -14,38 +14,38 @@
  *    )
  */
 import {beaconOpenMessage} from 'app/client/lib/helpScout';
+import {makeT} from 'app/client/lib/localization';
 import {AppModel} from 'app/client/models/AppModel';
-import {colors, testId, vars} from 'app/client/ui2018/cssVars';
+import {testId, theme, vars} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {commonUrls, shouldHideUiElement} from 'app/common/gristUrls';
 import {dom, DomContents, Observable, styled} from 'grainjs';
+
+const t = makeT('LeftPanelCommon');
 
 /**
  * Creates the "help tools", a button/link to open HelpScout beacon, and one to open the
  * HelpCenter in a new tab.
  */
-export function createHelpTools(appModel: AppModel, spacer = true): DomContents {
+export function createHelpTools(appModel: AppModel): DomContents {
   if (shouldHideUiElement("helpCenter")) {
     return [];
   }
-  return [
-    spacer ? cssSpacer() : null,
-    cssSplitPageEntry(
-      cssPageEntryMain(
-        cssPageLink(cssPageIcon('Help'),
-          cssLinkText('Help Center'),
-          dom.cls('tour-help-center'),
-          dom.on('click', (ev) => beaconOpenMessage({appModel})),
-          testId('left-feedback'),
-        ),
+  return cssSplitPageEntry(
+    cssPageEntryMain(
+      cssPageLink(cssPageIcon('Help'),
+        cssLinkText(t('HelpCenter')),
+        dom.cls('tour-help-center'),
+        dom.on('click', (ev) => beaconOpenMessage({appModel})),
+        testId('left-feedback'),
       ),
-      cssPageEntrySmall(
-        cssPageLink(cssPageIcon('FieldLink'),
-          {href: commonUrls.help, target: '_blank'},
-        ),
-      )
     ),
-  ];
+    cssPageEntrySmall(
+      cssPageLink(cssPageIcon('FieldLink'),
+        {href: commonUrls.help, target: '_blank'},
+      ),
+    ),
+  );
 }
 
 /**
@@ -56,6 +56,7 @@ export function leftPanelBasic(appModel: AppModel, panelOpen: Observable<boolean
     cssScrollPane(
       cssTools(
         cssTools.cls('-collapsed', (use) => !use(panelOpen)),
+        cssSpacer(),
         createHelpTools(appModel),
       )
     )
@@ -68,7 +69,6 @@ export const cssLeftPanel = styled('div', `
   font-size: ${vars.mediumFontSize};
   display: flex;
   flex-direction: column;
-  // background-color: ${colors.light};
 `);
 
 export const cssScrollPane = styled('div', `
@@ -86,7 +86,7 @@ export const cssTools = styled('div', `
 
 export const cssSectionHeader = styled('div', `
   margin: 24px 0 8px 24px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
   text-transform: uppercase;
   font-weight: 500;
   font-size: ${vars.xsmallFontSize};
@@ -99,22 +99,22 @@ export const cssSectionHeader = styled('div', `
 export const cssPageEntry = styled('div', `
   margin: 0px 16px 0px 0px;
   border-radius: 0 3px 3px 0;
-  color: ${colors.dark};
-  --icon-color: ${colors.slate};
+  color: ${theme.text};
+  --icon-color: ${theme.lightText};
   cursor: default;
 
   &:hover, &.weasel-popup-open, &-renaming {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.pageHoverBg};
   }
   &-selected, &-selected:hover, &-selected.weasel-popup-open {
-    background-color: ${colors.darkBg};
-    color: ${colors.light};
-    --icon-color: ${colors.light};
+    background-color: ${theme.activePageBg};
+    color: ${theme.activePageFg};
+    --icon-color: ${theme.activePageFg};
   }
   &-disabled, &-disabled:hover, &-disabled.weasel-popup-open {
     background-color: initial;
-    color: ${colors.darkGrey};
-    --icon-color: ${colors.darkGrey};
+    color: ${theme.disabledPageFg};
+    --icon-color: ${theme.disabledPageFg};
   }
   .${cssTools.className}-collapsed > & {
     margin-right: 0;
@@ -174,12 +174,12 @@ export const cssPageEntryMain = styled(cssPageEntry, `
 export const cssPageEntrySmall = styled(cssPageEntry, `
   flex: none;
   border-radius: 3px;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${theme.controlFg};
   & > .${cssPageLink.className} {
     padding: 0 8px 0 16px;
   }
   &:hover {
-    --icon-color: ${colors.darkGreen};
+    --icon-color: ${theme.controlHoverFg};
   }
   .${cssTools.className}-collapsed & {
     display: none;

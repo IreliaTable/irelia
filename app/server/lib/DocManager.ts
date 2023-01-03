@@ -1,4 +1,4 @@
-import * as pidusage from '@gristlabs/pidusage';
+import pidusage from '@gristlabs/pidusage';
 import {Document} from 'app/gen-server/entity/Document';
 import {getScope} from 'app/server/lib/requestUtils';
 import * as bluebird from 'bluebird';
@@ -27,7 +27,7 @@ import {GristServer} from 'app/server/lib/GristServer';
 import {IDocStorageManager} from 'app/server/lib/IDocStorageManager';
 import {makeForkIds, makeId} from 'app/server/lib/idUtils';
 import {checkAllegedGristDoc} from 'app/server/lib/serverUtils';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {ActiveDoc} from './ActiveDoc';
 import {PluginManager} from './PluginManager';
 import {getFileUploadInfo, globalUploadSet, makeAccessId, UploadInfo} from './uploads';
@@ -54,7 +54,7 @@ export class DocManager extends EventEmitter {
 
   constructor(
     public readonly storageManager: IDocStorageManager,
-    public readonly pluginManager: PluginManager,
+    public readonly pluginManager: PluginManager|null,
     private _homeDbManager: HomeDBManager|null,
     public gristServer: GristServer
   ) {
@@ -261,7 +261,7 @@ export class DocManager extends EventEmitter {
    *      `doc` - the object with metadata tables.
    */
   public async openDoc(client: Client, docId: string,
-                       mode: OpenDocMode = 'default',
+                       openMode: OpenDocMode = 'default',
                        linkParameters: Record<string, string> = {}): Promise<OpenLocalDocResult> {
     let auth: Authorizer;
     const dbManager = this._homeDbManager;
@@ -271,6 +271,7 @@ export class DocManager extends EventEmitter {
       const org = client.getOrg();
       if (!org) { throw new Error('Documents can only be opened in the context of a specific organization'); }
       const userId = await client.getUserId(dbManager) || dbManager.getAnonymousUserId();
+      const userRef = await client.getUserRef(dbManager);
 
       // We use docId in the key, and disallow urlId, so we can be sure that we are looking at the
       // right doc when we re-query the DB over the life of the websocket.
@@ -284,9 +285,17 @@ export class DocManager extends EventEmitter {
         // than a docId.
         throw new Error(`openDoc expected docId ${docAuth.docId} not urlId ${docId}`);
       }
-      auth = new DocAuthorizer(dbManager, key, mode, linkParameters, docAuth, client.getProfile() || undefined);
+      auth = new DocAuthorizer({
+        dbManager,
+        key,
+        openMode,
+        linkParameters,
+        userRef,
+        docAuth,
+        profile: client.getProfile() || undefined
+      });
     } else {
-      log.debug(`DocManager.openDoc not using authorization for ${docId} because IRELIA_SINGLE_USER`);
+      log.debug(`DocManager.openDoc not using authorization for ${docId} because GRIST_SINGLE_USER`);
       auth = new DummyAuthorizer('owners', docId);
     }
 
@@ -302,7 +311,7 @@ export class DocManager extends EventEmitter {
 
       // If opening in (pre-)fork mode, check if it is appropriate to treat the user as
       // an owner for granular access purposes.
-      if (mode === 'fork') {
+      if (openMode === 'fork') {
         if (await activeDoc.canForkAsOwner(docSession)) {
           // Mark the session specially and flush any cached access
           // information.  It is easier to make this a property of the
@@ -511,9 +520,12 @@ export class DocManager extends EventEmitter {
     return await db.getRawDocById(docName);
   }
 
-  private async _getDocUrl(doc: Document) {
+  private async _getDocUrls(doc: Document) {
     try {
-      return await this.gristServer.getResourceUrl(doc);
+      return {
+        docUrl: await this.gristServer.getResourceUrl(doc),
+        docApiUrl: await this.gristServer.getResourceUrl(doc, 'api'),
+      };
     } catch (e) {
       // If there is no home url, we cannot construct links.  Accept this, for the benefit
       // of legacy tests.
@@ -526,8 +538,8 @@ export class DocManager extends EventEmitter {
   private async _createActiveDoc(docSession: OptDocSession, docName: string, safeMode?: boolean) {
     const doc = await this._getDoc(docSession, docName);
     // Get URL for document for use with SELF_HYPERLINK().
-    const docUrl = doc && await this._getDocUrl(doc);
-    return new ActiveDoc(this, docName, {docUrl, safeMode, doc});
+    const docUrls = doc && await this._getDocUrls(doc);
+    return new ActiveDoc(this, docName, {...docUrls, safeMode, doc});
   }
 
   /**
@@ -542,7 +554,7 @@ export class DocManager extends EventEmitter {
                              }): Promise<DocCreationInfo> {
     try {
       const fileCount = uploadInfo.files.length;
-      const hasGristDoc = Boolean(uploadInfo.files.find(f => extname(f.origName) === '.irelia'));
+      const hasGristDoc = Boolean(uploadInfo.files.find(f => extname(f.origName) === '.grist'));
       if (hasGristDoc && fileCount > 1) {
         throw new Error('Grist docs must be uploaded individually');
       }
@@ -570,7 +582,7 @@ export class DocManager extends EventEmitter {
           throw new Error('naming mode not recognized');
       }
       await options.register?.(id, basename);
-      if (ext === '.irelia') {
+      if (ext === '.grist') {
         // If the import is a grist file, copy it to the docs directory.
         // TODO: We should be skeptical of the upload file to close a possible
         // security vulnerability. See https://phab.getgrist.com/T457.
@@ -610,7 +622,7 @@ export class DocManager extends EventEmitter {
       return docUtils.createExclusive(this.storageManager.getPath(name));
     });
     log.debug('DocManager._createNewDoc picked name', docName);
-    await this.pluginManager.pluginsLoaded;
+    await this.pluginManager?.pluginsLoaded;
     return docName;
   }
 }

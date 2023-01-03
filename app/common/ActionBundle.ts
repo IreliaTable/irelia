@@ -3,7 +3,9 @@
  * See also EncActionBundle for how these are packaged for encryption.
  */
 
+import {ApplyUAOptions} from 'app/common/ActiveDocAPI';
 import {DocAction, UserAction} from 'app/common/DocActions';
+import {RowCounts} from 'app/common/DocUsage';
 
 // Metadata about the action.
 export interface ActionInfo {
@@ -49,6 +51,7 @@ export function getEnvContent<Content>(items: Array<EnvContent<Content>>): Conte
 export interface UserActionBundle {
   info: ActionInfo;
   userActions: UserAction[];
+  options?: ApplyUAOptions;
 }
 
 // ActionBundle as received from the sandbox. It does not have some action metadata, but does have
@@ -61,7 +64,17 @@ export interface SandboxActionBundle {
   calc: Array<EnvContent<DocAction>>;
   undo: Array<EnvContent<DocAction>>;   // Inverse actions for all 'stored' actions.
   retValues: any[];                     // Contains retValue for each of userActions.
-  rowCount: number;
+  rowCount: RowCounts;
+  // Mapping of keys (hashes of request args) to all unique requests made in a round of calculation
+  requests?: Record<string, SandboxRequest>;
+}
+
+// Represents a unique call to the Python REQUEST function
+export interface SandboxRequest {
+  url: string;
+  params: Record<string, string> | null;
+  headers: Record<string, string> | null;
+  deps: unknown;  // pass back to the sandbox unchanged in the response
 }
 
 // Local action that's been applied. It now has an actionNum, and includes doc actions packaged

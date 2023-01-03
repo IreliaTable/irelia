@@ -3,7 +3,7 @@ import {UserAPI} from 'app/common/UserAPI';
 import {assert, driver, Key} from 'mocha-webdriver';
 import * as gu from 'test/nbrowser/gristUtils';
 import {server, setupTestSuite} from 'test/nbrowser/testUtils';
-import * as uuidv4 from "uuid/v4";
+import uuidv4 from "uuid/v4";
 
 describe("Fork", function() {
 
@@ -210,7 +210,7 @@ describe("Fork", function() {
         assert.match(await driver.find('.test-treeview-itemHeader.selected').getText(), /Table1/);
 
         // Add a new page; this immediately triggers a fork, AND selects the new page in it.
-        await gu.addNewPage(/Table/, /New Table/);
+        await gu.addNewPage(/Table/, /New Table/, {dismissTips: true});
         const urlId1 = await gu.getCurrentUrlId();
         assert.match(urlId1!, /~/);
         assert.match(await driver.find('.test-treeview-itemHeader.selected').getText(), /Table2/);
@@ -330,12 +330,12 @@ describe("Fork", function() {
         await altSession.loadDoc(`/doc/${doc.id}~${forkId}~${userId}`, false);
 
         assert.equal(await driver.findWait('.test-modal-dialog', 2000).isDisplayed(), true);
-        assert.match(await driver.find('.test-modal-dialog').getText(), /Cannot create fork/);
+        assert.match(await driver.find('.test-modal-dialog').getText(), /Document fork not found/);
 
         // Ensure the user has a way to report the problem (although including the report button in
         // the modal might be better).
         assert.match(await driver.find('.test-notifier-toast-wrapper').getText(),
-                     /Cannot create fork.*Report a problem/s);
+                     /Document fork not found.*Report a problem/s);
 
         // A new doc cannot be created either (because of access
         // mismatch - for forks of the doc used in these tests, user2
@@ -350,7 +350,7 @@ describe("Fork", function() {
         const anonSession = await altSession.anon.login();
         await anonSession.loadDoc(`/doc/${doc.id}~${forkId}~${userId}`, false);
         assert.equal(await driver.findWait('.test-modal-dialog', 2000).isDisplayed(), true);
-        assert.match(await driver.find('.test-modal-dialog').getText(), /Cannot create fork/);
+        assert.match(await driver.find('.test-modal-dialog').getText(), /Document fork not found/);
 
         // A new doc cannot be created either (because of access mismatch).
         await altSession.loadDoc(`/doc/new~${forkId}~${userId}`, false);
@@ -362,12 +362,12 @@ describe("Fork", function() {
         await team.login();
         await team.loadDoc(`/doc/${doc.id}~${forkId}~${userId}`, false);
         assert.equal(await driver.findWait('.test-modal-dialog', 2000).isDisplayed(), true);
-        assert.match(await driver.find('.test-modal-dialog').getText(), /Cannot create fork/);
+        assert.match(await driver.find('.test-modal-dialog').getText(), /Document fork not found/);
 
         // New document can no longer be casually created this way anymore either.
         await team.loadDoc(`/doc/new~${forkId}~${userId}`, false);
         assert.equal(await driver.findWait('.test-modal-dialog', 2000).isDisplayed(), true);
-        assert.match(await driver.find('.test-modal-dialog').getText(), /Cannot create fork/);
+        assert.match(await driver.find('.test-modal-dialog').getText(), /Document fork not found/);
         await gu.wipeToasts();
       });
 

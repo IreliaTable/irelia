@@ -1,19 +1,22 @@
 import {createGroup} from 'app/client/components/commands';
 import {duplicatePage} from 'app/client/components/duplicatePage';
 import {GristDoc} from 'app/client/components/GristDoc';
+import {makeT} from 'app/client/lib/localization';
 import {PageRec} from 'app/client/models/DocModel';
 import {urlState} from 'app/client/models/gristUrlState';
-import * as MetaTableModel from 'app/client/models/MetaTableModel';
+import MetaTableModel from 'app/client/models/MetaTableModel';
 import {find as findInTree, fromTableData, TreeItemRecord, TreeRecord,
         TreeTableData} from 'app/client/models/TreeModel';
 import {TreeViewComponent} from 'app/client/ui/TreeViewComponent';
 import {labeledCircleCheckbox} from 'app/client/ui2018/checkbox';
-import {colors} from 'app/client/ui2018/cssVars';
+import {theme} from 'app/client/ui2018/cssVars';
 import {cssLink} from 'app/client/ui2018/links';
 import {ISaveModalOptions, saveModal} from 'app/client/ui2018/modals';
-import {buildPageDom, PageActions} from 'app/client/ui2018/pages';
+import {buildCensoredPage, buildPageDom, PageActions} from 'app/client/ui2018/pages';
 import {mod} from 'app/common/gutil';
 import {Computed, Disposable, dom, DomContents, fromKo, makeTestId, observable, Observable, styled} from 'grainjs';
+
+const t = makeT('Pages');
 
 // build dom for the tree view of pages
 export function buildPagesDom(owner: Disposable, activeDoc: GristDoc, isOpen: Observable<boolean>) {
@@ -21,11 +24,12 @@ export function buildPagesDom(owner: Disposable, activeDoc: GristDoc, isOpen: Ob
   const buildDom = buildDomFromTable.bind(null, pagesTable, activeDoc);
 
   const records = Computed.create<TreeRecord[]>(owner, (use) =>
-    use(activeDoc.docModel.visibleDocPages).map(page => ({
+    use(activeDoc.docModel.menuPages).map(page => ({
       id: page.getRowId(),
       indentation: use(page.indentation),
       pagePos: use(page.pagePos),
       viewRef: use(page.viewRef),
+      hidden: use(page.isCensored),
     }))
   );
   const getTreeTableData = (): TreeTableData => ({
@@ -55,7 +59,12 @@ export function buildPagesDom(owner: Disposable, activeDoc: GristDoc, isOpen: Ob
 
 const testId = makeTestId('test-removepage-');
 
-function buildDomFromTable(pagesTable: MetaTableModel<PageRec>, activeDoc: GristDoc, pageId: number) {
+function buildDomFromTable(pagesTable: MetaTableModel<PageRec>, activeDoc: GristDoc, pageId: number, hidden: boolean) {
+
+  if (hidden) {
+    return buildCensoredPage();
+  }
+
   const {isReadonly} = activeDoc;
   const pageName = pagesTable.rowModels[pageId].view.peek().name;
   const viewId = pagesTable.rowModels[pageId].view.peek().id.peek();
@@ -128,15 +137,15 @@ function buildPrompt(tableNames: string[], onSave: (option: RemoveOption) => Pro
     const saveDisabled = Computed.create(owner, use => use(selected) === '');
     const saveFunc = () => onSave(selected.get());
     return {
-      title: `The following table${tableNames.length > 1 ? 's' : ''} will no longer be visible`,
+      title: t('TableWillNoLongerBeVisible', { count: tableNames.length }),
       body: dom('div',
         testId('popup'),
         buildWarning(tableNames),
         cssOptions(
-          buildOption(selected, 'data', `Delete data and this page.`),
+          buildOption(selected, 'data', t('DeleteDataAndPage')),
           buildOption(selected, 'page',
-            [
-              `Delete this page, but do not delete data. `,
+            [ // TODO i18n
+              `Keep data and delete page. `,
               `Table will remain available in `,
               cssLink(urlState().setHref({docPage: 'data'}), 'raw data page', { target: '_blank'}),
               `.`
@@ -144,7 +153,7 @@ function buildPrompt(tableNames: string[], onSave: (option: RemoveOption) => Pro
         )
       ),
       saveDisabled,
-      saveLabel: 'Delete',
+      saveLabel: t('Delete'),
       saveFunc,
       width: 'fixed-wide',
       extraButtons: [],
@@ -182,7 +191,7 @@ const cssOptions = styled('div', `
 const cssBlockCheckbox = styled('div', `
   display: flex;
   padding: 10px 8px;
-  border: 1px solid ${colors.mediumGrey};
+  border: 1px solid ${theme.modalBorder};
   border-radius: 3px;
   cursor: pointer;
   & input::before, & input::after  {
@@ -190,7 +199,7 @@ const cssBlockCheckbox = styled('div', `
     left: unset;
   }
   &:hover {
-    border-color: ${colors.lightGreen};
+    border-color: ${theme.accentBorder};
   }
   &-block {
     pointer-events: none;
@@ -208,7 +217,8 @@ const cssWarning = styled('div', `
 `);
 
 const cssTableName = styled('div', `
-  background: #eee;
+  color: black;
+  background-color: #eee;
   padding: 3px 6px;
   border-radius: 4px;
 `);

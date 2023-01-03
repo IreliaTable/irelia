@@ -1,20 +1,32 @@
 import {get as getBrowserGlobals} from 'app/client/lib/browserGlobals';
+import {makeT} from 'app/client/lib/localization';
 import {error} from 'app/client/lib/log';
 import {reportError, setErrorNotifier} from 'app/client/models/errors';
 import {urlState} from 'app/client/models/gristUrlState';
 import {Notifier} from 'app/client/models/NotifyModel';
 import {getFlavor, ProductFlavor} from 'app/client/ui/CustomThemes';
-import {Features} from 'app/common/Features';
+import {buildNewSiteModal, buildUpgradeModal} from 'app/client/ui/ProductUpgrades';
+import {attachCssThemeVars, prefersDarkModeObs} from 'app/client/ui2018/cssVars';
+import {OrgUsageSummary} from 'app/common/DocUsage';
+import {Features, isLegacyPlan, Product} from 'app/common/Features';
 import {GristLoadConfig} from 'app/common/gristUrls';
 import {FullUser} from 'app/common/LoginSessionAPI';
 import {LocalPlugin} from 'app/common/plugin';
-import {UserPrefs} from 'app/common/Prefs';
+import {BehavioralPromptPrefs, DeprecationWarning, DismissedPopup, DismissedReminder,
+        UserPrefs} from 'app/common/Prefs';
+import {isOwner} from 'app/common/roles';
 import {getTagManagerScript} from 'app/common/tagManager';
+import {getDefaultThemePrefs, Theme, ThemeAppearance, ThemeColors, ThemePrefs,
+        ThemePrefsChecker} from 'app/common/ThemePrefs';
+import {getThemeColors} from 'app/common/Themes';
 import {getGristConfig} from 'app/common/urlUtils';
 import {getOrgName, Organization, OrgError, UserAPI, UserAPIImpl} from 'app/common/UserAPI';
 import {getUserPrefObs, getUserPrefsObs} from 'app/client/models/UserPrefs';
 import {bundleChanges, Computed, Disposable, Observable, subscribe} from 'grainjs';
 
+const t = makeT('models.AppModel');
+
+// Reexported for convenience.
 export {reportError} from 'app/client/models/errors';
 
 export type PageType = "doc" | "home" | "billing" | "welcome";
@@ -47,10 +59,16 @@ export interface TopAppModel {
    * Returns the UntrustedContentOrigin use settings. Throws if not defined.
    */
   getUntrustedContentOrigin(): string;
+  /**
+   * Reloads orgs and accounts for current user.
+   */
+  fetchUsersAndOrgs(): Promise<void>;
 }
 
-// AppModel is specific to the currently loaded organization and active user. It gets rebuilt when
-// we switch the current organization or the current user.
+/**
+ * AppModel is specific to the currently loaded organization and active user. It gets rebuilt when
+ * we switch the current organization or the current user.
+ */
 export interface AppModel {
   topAppModel: TopAppModel;
   api: UserAPI;
@@ -60,16 +78,40 @@ export interface AppModel {
 
   currentOrg: Organization|null;        // null if no access to currentSubdomain
   currentOrgName: string;               // Our best guess for human-friendly name.
+  currentOrgUsage: Observable<OrgUsageSummary|null>;
   isPersonal: boolean;                  // Is it a personal site?
   isTeamSite: boolean;                  // Is it a team site?
+  isLegacySite: boolean;                // Is it a legacy site?
   orgError?: OrgError;                  // If currentOrg is null, the error that caused it.
 
-  currentFeatures: Features;            // features of the current org's product.
+  currentProduct: Product|null;         // The current org's product.
+  currentFeatures: Features;            // Features of the current org's product.
+
   userPrefsObs: Observable<UserPrefs>;
+  themePrefs: Observable<ThemePrefs>;
+  currentTheme: Computed<Theme>;
+  /**
+   * Popups that user has seen.
+   */
+  dismissedPopups: Observable<DismissedPopup[]>;
+  /**
+   * Deprecation messages that user has seen.
+   */
+  deprecatedWarnings: Observable<DeprecationWarning[]>;
+  dismissedWelcomePopups: Observable<DismissedReminder[]>;
+  behavioralPrompts: Observable<BehavioralPromptPrefs>;
 
   pageType: Observable<PageType>;
 
   notifier: Notifier;
+  planName: string|null;
+
+  refreshOrgUsage(): Promise<void>;
+  showUpgradeModal(): void;
+  showNewSiteModal(): void;
+  isBillingManager(): boolean;          // If user is a billing manager for this org
+  isSupport(): boolean;                 // If user is a Support user
+  isOwner(): boolean;                   // If user is an owner of this org
 }
 
 export class TopAppModelImpl extends Disposable implements TopAppModel {
@@ -99,7 +141,7 @@ export class TopAppModelImpl extends Disposable implements TopAppModel {
     this.autoDispose(subscribe(this.currentSubdomain, (use) => this.initialize()));
     this.plugins = this._gristConfig?.plugins || [];
 
-    this._fetchUsersAndOrgs().catch(reportError);
+    this.fetchUsersAndOrgs().catch(reportError);
   }
 
   public initialize(): void {
@@ -132,6 +174,15 @@ export class TopAppModelImpl extends Disposable implements TopAppModel {
     return origin + ":" + G.window.location.port;
   }
 
+  public async fetchUsersAndOrgs() {
+    const data = await this.api.getSessionAll();
+    if (this.isDisposed()) { return; }
+    bundleChanges(() => {
+      this.users.set(data.users);
+      this.orgs.set(data.orgs);
+    });
+  }
+
   private async _doInitialize() {
     this.appObs.set(null);
     try {
@@ -148,7 +199,7 @@ export class TopAppModelImpl extends Disposable implements TopAppModel {
         if (org.billingAccount && org.billingAccount.product &&
             org.billingAccount.product.name === 'suspended') {
           this.notifier.createUserMessage(
-            'This team site is suspended. Documents can be read, but not modified.',
+            t('TeamSiteSuspended'),
             {actions: ['renew', 'personal']}
           );
         }
@@ -160,15 +211,6 @@ export class TopAppModelImpl extends Disposable implements TopAppModel {
       if (this.isDisposed()) { return; }
       AppModelImpl.create(this.appObs, this, null, null, {error: err.message, status: err.status || 500});
     }
-  }
-
-  private async _fetchUsersAndOrgs() {
-    const data = await this.api.getSessionAll();
-    if (this.isDisposed()) { return; }
-    bundleChanges(() => {
-      this.users.set(data.users);
-      this.orgs.set(data.orgs);
-    });
   }
 }
 
@@ -182,13 +224,30 @@ export class AppModelImpl extends Disposable implements AppModel {
   // Figure out the org name, or blank if details are unavailable.
   public readonly currentOrgName = getOrgNameOrGuest(this.currentOrg, this.currentUser);
 
+  public readonly currentOrgUsage: Observable<OrgUsageSummary|null> = Observable.create(this, null);
+
+  public readonly currentProduct = this.currentOrg?.billingAccount?.product ?? null;
+  public readonly currentFeatures = this.currentProduct?.features ?? {};
+
   public readonly isPersonal = Boolean(this.currentOrg?.owner);
   public readonly isTeamSite = Boolean(this.currentOrg) && !this.isPersonal;
-
-  public readonly currentFeatures = (this.currentOrg && this.currentOrg.billingAccount) ?
-    this.currentOrg.billingAccount.product.features : {};
+  public readonly isLegacySite = Boolean(this.currentProduct && isLegacyPlan(this.currentProduct.name));
 
   public readonly userPrefsObs = getUserPrefsObs(this);
+  public readonly themePrefs = getUserPrefObs(this.userPrefsObs, 'theme', {
+    defaultValue: getDefaultThemePrefs(),
+    checker: ThemePrefsChecker,
+  }) as Observable<ThemePrefs>;
+  public readonly currentTheme = this._getCurrentThemeObs();
+
+  public readonly dismissedPopups = getUserPrefObs(this.userPrefsObs, 'dismissedPopups',
+    { defaultValue: [] }) as Observable<DismissedPopup[]>;
+  public readonly deprecatedWarnings = getUserPrefObs(this.userPrefsObs, 'seenDeprecatedWarnings',
+    { defaultValue: [] }) as Observable<DeprecationWarning[]>;
+  public readonly dismissedWelcomePopups = getUserPrefObs(this.userPrefsObs, 'dismissedWelcomePopups',
+    { defaultValue: [] }) as Observable<DismissedReminder[]>;
+  public readonly behavioralPrompts = getUserPrefObs(this.userPrefsObs, 'behavioralPrompts',
+    { defaultValue: { dontShowTips: false, dismissedTips: [] } }) as Observable<BehavioralPromptPrefs>;
 
   // Get the current PageType from the URL.
   public readonly pageType: Observable<PageType> = Computed.create(this, urlState().state,
@@ -203,7 +262,72 @@ export class AppModelImpl extends Disposable implements AppModel {
     public readonly orgError?: OrgError,
   ) {
     super();
+
+    this._applyTheme();
+    this.autoDispose(this.currentTheme.addListener(() => this._applyTheme()));
+
     this._recordSignUpIfIsNewUser();
+
+    const state = urlState().state.get();
+    if (state.createTeam) {
+      // Remove params from the URL.
+      urlState().pushUrl({createTeam: false, params: {}}, {avoidReload: true, replace: true}).catch(() => {});
+      this.showNewSiteModal(state.params?.planType);
+    }
+  }
+
+  public get planName() {
+    return this.currentProduct?.name ?? null;
+  }
+
+  public async showUpgradeModal() {
+    if (this.planName && this.currentOrg) {
+      if (this.isPersonal) {
+        this.showNewSiteModal();
+      } else if (this.isTeamSite) {
+        buildUpgradeModal(this, this.planName);
+      } else {
+        throw new Error("Unexpected state");
+      }
+    }
+  }
+
+  public showNewSiteModal(selectedPlan?: string) {
+    if (this.planName) {
+      buildNewSiteModal(this, {
+        planName: this.planName,
+        selectedPlan,
+        onCreate: () => this.topAppModel.fetchUsersAndOrgs().catch(reportError)
+      });
+    }
+  }
+
+  public isSupport() {
+    return Boolean(this.currentValidUser?.isSupport);
+  }
+
+  public isBillingManager() {
+    return Boolean(this.currentOrg?.billingAccount?.isManager);
+  }
+
+  public isOwner() {
+    return Boolean(this.currentOrg && isOwner(this.currentOrg));
+  }
+
+  /**
+   * Fetch and update the current org's usage.
+   */
+  public async refreshOrgUsage() {
+    if (!this.isOwner()) {
+      // Note: getOrgUsageSummary already checks for owner access; we do an early return
+      // here to skip making unnecessary API calls.
+      return;
+    }
+
+    const usage = await this.api.getOrgUsageSummary(this.currentOrg!.id);
+    if (!this.isDisposed()) {
+      this.currentOrgUsage.set(usage);
+    }
   }
 
   /**
@@ -232,6 +356,39 @@ export class AppModelImpl extends Disposable implements AppModel {
     // Send the sign-up event, and remove the recordSignUpEvent flag from preferences.
     dataLayer.push({event: 'new-sign-up'});
     getUserPrefObs(this.userPrefsObs, 'recordSignUpEvent').set(undefined);
+  }
+
+  private _getCurrentThemeObs() {
+    return Computed.create(this, this.themePrefs, prefersDarkModeObs(),
+      (_use, themePrefs, prefersDarkMode) => {
+        let appearance: ThemeAppearance;
+        if (!themePrefs.syncWithOS) {
+          appearance = themePrefs.appearance;
+        } else {
+          appearance = prefersDarkMode ? 'dark' : 'light';
+        }
+
+        const nameOrColors = themePrefs.colors[appearance];
+        let colors: ThemeColors;
+        if (typeof nameOrColors === 'string') {
+          colors = getThemeColors(nameOrColors);
+        } else {
+          colors = nameOrColors;
+        }
+
+        return {appearance, colors};
+      },
+    );
+  }
+
+  /**
+   * Applies a theme based on the user's current theme preferences.
+   */
+  private _applyTheme() {
+    // Custom CSS is incompatible with custom themes.
+    if (getGristConfig().enableCustomCss) { return; }
+
+    attachCssThemeVars(this.currentTheme.get());
   }
 }
 

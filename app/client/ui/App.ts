@@ -15,11 +15,15 @@ import {createAppUI} from 'app/client/ui/AppUI';
 import {addViewportTag} from 'app/client/ui/viewport';
 import {attachCssRootVars} from 'app/client/ui2018/cssVars';
 import {BaseAPI} from 'app/common/BaseAPI';
+import {CommDocError} from 'app/common/CommTypes';
 import {DisposableWithEvents} from 'app/common/DisposableWithEvents';
 import {fetchFromHome} from 'app/common/urlUtils';
 import {ISupportedFeatures} from 'app/common/UserConfig';
 import {dom} from 'grainjs';
 import * as ko from 'knockout';
+import {makeT} from 'app/client/lib/localization';
+
+const t = makeT('App');
 
 // tslint:disable:no-console
 
@@ -89,12 +93,12 @@ export class App extends DisposableWithEvents {
         dom('table.g-help-table',
           dom('thead',
             dom('tr',
-              dom('th', 'Key'),
-              dom('th', 'Description')
+              dom('th', t('Key')),
+              dom('th', t('Description'))
             )
           ),
           dom.forEach(commandList.groups, (group: any) => {
-            const cmds = group.commands.filter((cmd: any) => Boolean(cmd.desc && cmd.keys.length));
+            const cmds = group.commands.filter((cmd: any) => Boolean(cmd.desc && cmd.keys.length && !cmd.deprecated));
             return cmds.length > 0 ?
               dom('tbody',
                 dom('tr',
@@ -133,7 +137,7 @@ export class App extends DisposableWithEvents {
     }, this, isHelpPaneVisible));
 
     this.listenTo(this.comm, 'clientConnect', (message) => {
-      console.log(`App clientConnect event: resetClientId ${message.resetClientId} version ${message.serverVersion}`);
+      console.log(`App clientConnect event: needReload ${message.needReload} version ${message.serverVersion}`);
       this._settings(message.settings);
       if (message.serverVersion === 'dead' || (this._serverVersion && this._serverVersion !== message.serverVersion)) {
         console.log("Upgrading...");
@@ -141,9 +145,9 @@ export class App extends DisposableWithEvents {
         return this.reload();
       }
       this._serverVersion = message.serverVersion;
-      // If the clientId changed, then we need to reload any open documents. We'll simply reload the
-      // active component of the App regardless of what it is.
-      if (message.resetClientId) {
+      // Reload any open documents if needed (if clientId changed, or client can't get all missed
+      // messages). We'll simply reload the active component of the App regardless of what it is.
+      if (message.needReload) {
         this.reloadPane();
       }
     });
@@ -158,7 +162,7 @@ export class App extends DisposableWithEvents {
       setTimeout(() => this.reloadPane(), 0);
     });
 
-    this.listenTo(this.comm, 'docError', (msg) => {
+    this.listenTo(this.comm, 'docError', (msg: CommDocError) => {
       this._checkError(new Error(msg.data.message));
     });
 
@@ -230,7 +234,7 @@ export class App extends DisposableWithEvents {
     if (message.match(/MemoryError|unmarshallable object/)) {
       if (err.message.length > 30) {
         // TLDR
-        err.message = 'Memory Error';
+        err.message = t('MemoryError');
       }
       this._mostRecentDocPageModel?.offerRecovery(err);
     }

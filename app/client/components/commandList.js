@@ -1,3 +1,6 @@
+const { DeprecationWarning } = require('app/common/Prefs');
+
+
 // The top-level groups, and the ordering within them are for user-facing documentation.
 exports.groups = [{
   group: 'General',
@@ -64,11 +67,6 @@ exports.groups = [{
       desc: null, // Shortcut to close active menu
     },
     {
-      name: 'filterMenuOpen',
-      keys: [],
-      desc: 'Shortcut to open filter menu'
-    },
-    {
       name: 'docTabOpen',
       keys: [],
       desc: 'Shortcut to open document tab'
@@ -89,6 +87,11 @@ exports.groups = [{
       desc: 'Shortcut to sort & filter tab'
     },
     {
+      name: 'sortFilterMenuOpen',
+      keys: [],
+      desc: 'Shortcut to open sort & filter menu'
+    },
+    {
       name: 'dataSelectionTabOpen',
       keys: [],
       desc: 'Shortcut to data selection tab'
@@ -99,10 +102,30 @@ exports.groups = [{
       desc: 'Print currently selected page widget',
     },
     {
+      name: 'showRawData',
+      keys: [],
+      desc: 'Show raw data widget for table of currently selected page widget',
+    },
+    {
       name: 'openWidgetConfiguration',
       keys: [],
       desc: 'Open Custom widget configuration screen',
-    }
+    },
+    {
+      name: 'leftPanelOpen',
+      keys: [],
+      desc: 'Shortcut to open the left panel',
+    },
+    {
+      name: 'rightPanelOpen',
+      keys: [],
+      desc: 'Shortcut to open the right panel',
+    },
+    {
+      name: 'videoTourToolsOpen',
+      keys: [],
+      desc: 'Shortcut to open video tour from home left panel',
+    },
   ]
 }, {
   group: 'Navigation',
@@ -303,6 +326,10 @@ exports.groups = [{
       name: 'datepickerFocus',
       keys: ['Up', 'Down'],
       desc: null, // While editing a date cell, switch keyboard focus to the datepicker
+    }, {
+      name: 'openDiscussion',
+      keys: ['Mod+Alt+M'],
+      desc: 'Comment',
     }
   ],
 }, {
@@ -310,15 +337,15 @@ exports.groups = [{
   commands: [
     {
       name: 'insertRecordBefore',
-      keys: ['Mod+Shift+='],
+      keys: ['Mod+Shift+Enter'],
       desc: 'Insert a new record, before the currently selected one in an unsorted table'
     }, {
       name: 'insertRecordAfter',
-      keys: ['Mod+='],
+      keys: ['Mod+Enter'],
       desc: 'Insert a new record, after the currently selected one in an unsorted table',
     }, {
       name: 'deleteRecords',
-      keys: ['Mod+-'],
+      keys: ['Mod+Del', 'Mod+Backspace'],
       desc: 'Delete the currently selected record'
     }, {
       name: 'insertFieldBefore',
@@ -333,9 +360,9 @@ exports.groups = [{
       keys: ['Ctrl+m'],
       desc: 'Rename the currently selected column'
     }, {
-      name: 'hideField',
+      name: 'hideFields',
       keys: ['Alt+Shift+-'],
-      desc: 'Hide the currently selected column'
+      desc: 'Hide currently selected columns'
     }, {
       name: 'toggleFreeze',
       keys: [],
@@ -364,7 +391,22 @@ exports.groups = [{
       name: 'duplicateRows',
       keys: ['Mod+Shift+d'],
       desc: 'Duplicate selected rows'
-    }
+    }, {
+      name: DeprecationWarning.parse('deprecatedInsertRowBefore'),
+      keys: ['Mod+Shift+='],
+      desc: 'Shortcuts to remove or insert a record have changed, to avoid interfering with page zoom. In the future, to delete a record use {deleteRecords}, and to insert a record use {insertRecordAfter}.',
+      deprecated: true,
+    }, {
+      name: DeprecationWarning.parse('deprecatedInsertRecordAfter'),
+      keys: ['Mod+='],
+      desc: 'Shortcuts to remove or insert a record have changed, to avoid interfering with page zoom. In the future, to delete a record use {deleteRecords}, and to insert a record use {insertRecordAfter}.',
+      deprecated: true,
+    }, {
+      name: DeprecationWarning.parse('deprecatedDeleteRecords'),
+      keys: ['Mod+-'],
+      desc: 'Shortcuts to remove or insert a record have changed, to avoid interfering with page zoom. In the future, to delete a record use {deleteRecords}, and to insert a record use {insertRecordAfter}.',
+      deprecated: true,
+    },
   ],
 }, {
   group: 'Sorting',

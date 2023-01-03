@@ -8,6 +8,7 @@ from six.moves import xrange
 import column
 import depend
 import docmodel
+import functions
 import logger
 import lookup
 import records
@@ -16,22 +17,6 @@ import usertypes
 
 log = logger.Logger(__name__, logger.INFO)
 
-
-def _make_sample_record(table_id, col_objs):
-  """
-  Helper to create a sample record for a table, used for auto-completions.
-  """
-  # This type gets created with a property for each column. We use property-methods rather than
-  # plain properties because this sample record is created before all tables have initialized, so
-  # reference values (using .sample_record for other tables) are not yet available.
-  RecType = type(table_id, (), {
-    # Note col=col to bind col at lambda-creation time; see
-    # https://stackoverflow.com/questions/10452770/python-lambdas-binding-to-local-values
-    col.col_id: property(lambda self, col=col: col.sample_value())
-    for col in col_objs
-    if column.is_user_column(col.col_id) or col.col_id == 'id'
-  })
-  return RecType()
 
 def get_default_func_name(col_id):
   return "_default_" + col_id
@@ -148,6 +133,20 @@ class UserTable(object):
     # the constructor.
     return []
 
+  def __getattr__(self, item):
+    if self.table.has_column(item):
+      raise AttributeError(
+        "To retrieve all values in a column, use `{table_id}.all.{item}`. "
+        "Tables have no attribute '{item}'".format(table_id=self.table.table_id, item=item)
+      )
+    super(UserTable, self).__getattribute__(item)
+
+  def __iter__(self):
+    raise TypeError(
+      "To iterate (loop) over all records in a table, use `{table_id}.all`. "
+      "Tables are not directly iterable.".format(table_id=self.table.table_id)
+    )
+
 
 class Table(object):
   """
@@ -251,10 +250,33 @@ class Table(object):
     """
     Used for auto-completion as a record with correct properties of correct types.
     """
-    return _make_sample_record(
-      self.table_id,
-      [col for col_id, col in self.all_columns.items() if col_id not in self._special_cols],
-    )
+    # Create a type with a property for each column. We use property-methods rather than
+    # plain attributes because this sample record is created before all tables have initialized, so
+    # reference values (using .sample_record for other tables) are not yet available.
+    props = {}
+    for col in self.all_columns.values():
+      if not (column.is_visible_column(col.col_id) or col.col_id == 'id'):
+        continue
+      # Note c=col to bind at lambda-creation time; see
+      # https://stackoverflow.com/questions/10452770/python-lambdas-binding-to-local-values
+      props[col.col_id] = property(lambda _self, c=col: c.sample_value())
+      if col.col_id == 'id':
+        # The column lookup below doesn't work for the id column
+        continue
+      # For columns with a visible column (i.e. most Reference/ReferenceList columns),
+      # we also want to show how to get that visible column instead of the 'raw' record
+      # returned by the reference column itself.
+      col_rec = self._engine.docmodel.get_column_rec(self.table_id, col.col_id)
+      visible_col_id = col_rec.visibleCol.colId
+      if visible_col_id:
+        # This creates a fake attribute like `RefCol.VisibleCol` which isn't valid syntax normally,
+        # to show the `.VisibleCol` part before the user has typed the `.`
+        props[col.col_id + "." + visible_col_id] = property(
+          lambda _self, c=col, v=visible_col_id: getattr(c.sample_value(), v)
+        )
+
+    RecType = type(self.table_id, (), props)
+    return RecType()
 
   def _rebuild_model(self, user_table):
     """
@@ -336,8 +358,8 @@ class Table(object):
         lookup_values = []
         for group_col in groupby_cols:
           lookup_value = getattr(rec, group_col)
-          if isinstance(self.all_columns[group_col],
-                        (column.ChoiceListColumn, column.ReferenceListColumn)):
+          group_col_obj = self.all_columns[group_col]
+          if isinstance(group_col_obj, (column.ChoiceListColumn, column.ReferenceListColumn)):
             # Check that ChoiceList/ReferenceList cells have appropriate types.
             # Don't iterate over characters of a string.
             if isinstance(lookup_value, (six.binary_type, six.text_type)):
@@ -347,6 +369,13 @@ class Table(object):
               lookup_value = set(lookup_value)
             except TypeError:
               return []
+
+            if not lookup_value:
+              if isinstance(group_col_obj, column.ChoiceListColumn):
+                lookup_value = {""}
+              else:
+                lookup_value = {0}
+
           else:
             lookup_value = [lookup_value]
           lookup_values.append(lookup_value)
@@ -459,11 +488,11 @@ class Table(object):
     for col_id in sorted(kwargs):
       value = kwargs[col_id]
       if isinstance(value, lookup._Contains):
-        value = value.value
         # While users should use CONTAINS on lookup values,
         # the marker is moved to col_id so that the LookupMapColumn knows how to
         # update its index correctly for that column.
-        col_id = lookup._Contains(col_id)
+        col_id = value._replace(value=col_id)
+        value = value.value
       else:
         col = self.get_column(col_id)
         # Convert `value` to the correct type of rich value for that column
@@ -476,8 +505,15 @@ class Table(object):
     lookup_map = self._get_lookup_map(col_ids)
     row_id_set, rel = lookup_map.do_lookup(key)
     if sort_by:
-      row_ids = sorted(row_id_set,
-                       key=lambda r: column.SafeSortKey(self._get_col_value(sort_by, r, rel)))
+      if not isinstance(sort_by, six.string_types):
+        raise TypeError("sort_by must be a column ID (string)")
+      reverse = sort_by.startswith("-")
+      sort_col = sort_by.lstrip("-")
+      row_ids = sorted(
+        row_id_set,
+        key=lambda r: column.SafeSortKey(self._get_col_value(sort_col, r, rel)),
+        reverse=reverse,
+      )
     else:
       row_ids = sorted(row_id_set)
     return self.RecordSet(row_ids, rel, group_by=kwargs, sort_by=sort_by)
@@ -527,10 +563,14 @@ class Table(object):
       # _summary_source_table._summary_simple determines whether
       # the column named self._summary_helper_col_id is a single reference
       # or a reference list.
-      lookup_value = rec if self._summary_simple else lookup._Contains(rec)
-      return self._summary_source_table.lookup_records(**{
+      lookup_value = rec if self._summary_simple else functions.CONTAINS(rec)
+      result = self._summary_source_table.lookup_records(**{
         self._summary_helper_col_id: lookup_value
       })
+
+      # Remove rows with empty groups
+      self._engine.docmodel.setAutoRemove(rec, not result)
+      return result
     else:
       return None
 

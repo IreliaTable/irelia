@@ -1,18 +1,26 @@
 import {CellValue} from "app/common/DocActions";
-import {FilterState, isRangeFilter, makeFilterState} from "app/common/FilterState";
+import {
+  FilterState, IRangeBoundType, isRangeFilter, isRelativeBound, makeFilterState
+} from "app/common/FilterState";
 import {decodeObject} from "app/plugin/objtypes";
-import {isList, isListType, isNumberType} from "./gristTypes";
+import moment from "moment-timezone";
+import {isDateLikeType, isList, isListType, isNumberType} from "./gristTypes";
+import {toUnixTimestamp} from "app/common/RelativeDates";
 
 export type ColumnFilterFunc = (value: CellValue) => boolean;
 
 // Returns a filter function for a particular column: the function takes a cell value and returns
 // whether it's accepted according to the given FilterState.
 export function makeFilterFunc(state: FilterState,
-                               columnType?: string): ColumnFilterFunc {
+                               columnType: string = ''): ColumnFilterFunc {
 
   if (isRangeFilter(state)) {
-    const {min, max} = state;
-    if (isNumberType(columnType)) {
+    let {min, max} = state;
+    if (isNumberType(columnType) || isDateLikeType(columnType)) {
+
+      min = getBoundsValue(state, 'min');
+      max = getBoundsValue(state, 'max');
+
       return (val) => {
         if (typeof val !== 'number') { return false; }
         return (
@@ -35,7 +43,11 @@ export function makeFilterFunc(state: FilterState,
   return (val: CellValue) => {
     if (isList(val) && columnType && isListType(columnType)) {
       const list = decodeObject(val) as unknown[];
-      return list.some(item => values.has(item as any) === include);
+      if (list.length) {
+        return list.some(item => values.has(item as any) === include);
+      }
+      // If the list is empty, filter instead by an empty value for the whole list
+      val = columnType === "ChoiceList" ? "" : null;
     }
     return (values.has(Array.isArray(val) ? JSON.stringify(val) : val) === include);
   };
@@ -45,4 +57,20 @@ export function makeFilterFunc(state: FilterState,
 export function buildColFilter(filterJson: string | undefined,
                                columnType?: string): ColumnFilterFunc | null {
   return filterJson ? makeFilterFunc(makeFilterState(filterJson), columnType) : null;
+}
+
+
+function getBoundsValue(state: {min?: IRangeBoundType, max?: IRangeBoundType}, minMax: 'min'|'max') {
+  const value = state[minMax];
+  if (isRelativeBound(value)) {
+    const val = toUnixTimestamp(value);
+    const m = moment.utc(val * 1000);
+    if (minMax === 'min') {
+      m.startOf('day');
+    } else {
+      m.endOf('day');
+    }
+    return Math.floor(m.valueOf() / 1000);
+  }
+  return value;
 }

@@ -1,14 +1,14 @@
 import { createGroup } from 'app/client/components/commands';
-import { ACItem, ACResults, HighlightFunc } from 'app/client/lib/ACIndex';
+import { ACItem, ACResults, normalizeText, HighlightFunc } from 'app/client/lib/ACIndex';
 import { IAutocompleteOptions } from 'app/client/lib/autocomplete';
 import { IToken, TokenField, tokenFieldStyles } from 'app/client/lib/TokenField';
 import { reportError } from 'app/client/models/errors';
-import { colors, testId } from 'app/client/ui2018/cssVars';
+import { colors, testId, theme } from 'app/client/ui2018/cssVars';
 import { menuCssClass } from 'app/client/ui2018/menus';
-import { cssInvalidToken } from 'app/client/widgets/ChoiceListCell';
+import { cssChoiceToken } from 'app/client/widgets/ChoiceToken';
 import { createMobileButtons, getButtonMargins } from 'app/client/widgets/EditorButtons';
 import { EditorPlacement } from 'app/client/widgets/EditorPlacement';
-import { NewBaseEditor, Options } from 'app/client/widgets/NewBaseEditor';
+import { FieldOptions, NewBaseEditor } from 'app/client/widgets/NewBaseEditor';
 import { cssRefList, renderACItem } from 'app/client/widgets/ReferenceEditor';
 import { ReferenceUtils } from 'app/client/lib/ReferenceUtils';
 import { csvEncodeRow } from 'app/common/csvFormat';
@@ -26,7 +26,7 @@ class ReferenceItem implements IToken, ACItem {
    * similar to getItemText() from IAutocompleteOptions.
    */
   public label: string = typeof this.rowId === 'number' ? String(this.rowId) : this.text;
-  public cleanText: string = this.text.trim().toLowerCase();
+  public cleanText: string = normalizeText(this.text);
 
   constructor(
     public text: string,
@@ -46,13 +46,13 @@ export class ReferenceListEditor extends NewBaseEditor {
   private _tokenField: TokenField<ReferenceItem>;
   private _textInput: HTMLInputElement;
   private _dom: HTMLElement;
-  private _editorPlacement: EditorPlacement;
+  private _editorPlacement!: EditorPlacement;
   private _contentSizer: HTMLElement;   // Invisible element to size the editor with all the tokens
-  private _inputSizer: HTMLElement;     // Part of _contentSizer to size the text input
+  private _inputSizer!: HTMLElement;     // Part of _contentSizer to size the text input
   private _alignment: string;
   private _utils: ReferenceUtils;
 
-  constructor(options: Options) {
+  constructor(protected options: FieldOptions) {
     super(options);
 
     const docData = options.gristDoc.docData;
@@ -87,7 +87,7 @@ export class ReferenceListEditor extends NewBaseEditor {
         return [
           isBlankReference ? '[Blank]' : item.text,
           cssToken.cls('-blank', isBlankReference),
-          cssInvalidToken.cls('-invalid', item.rowId === 'invalid')
+          cssChoiceToken.cls('-invalid', item.rowId === 'invalid')
         ];
       },
       createToken: text => new ReferenceItem(text, 'invalid'),
@@ -264,7 +264,7 @@ export class ReferenceListEditor extends NewBaseEditor {
     this._showAddNew = false;
     if (!this._enableAddNew || !text) { return result; }
 
-    const cleanText = text.trim().toLowerCase();
+    const cleanText = normalizeText(text);
     if (result.items.find((item) => item.cleanText === cleanText)) {
       return result;
     }
@@ -286,7 +286,7 @@ export class ReferenceListEditor extends NewBaseEditor {
 }
 
 const cssCellEditor = styled('div', `
-  background-color: white;
+  background-color: ${theme.cellEditorBg};
   font-family: var(--grist-font-family-data);
   font-size: var(--grist-medium-font-size);
 `);

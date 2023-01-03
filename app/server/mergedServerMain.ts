@@ -6,9 +6,9 @@
  */
 
 import {FlexServer, FlexServerOptions} from 'app/server/lib/FlexServer';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 
-// Allowed server types. We'll start one or a combination based on the value of IRELIA_SERVERS
+// Allowed server types. We'll start one or a combination based on the value of GRIST_SERVERS
 // environment variable.
 export type ServerType = "home" | "docs" | "static" | "app";
 const allServerTypes: ServerType[] = ["home", "docs", "static", "app"];
@@ -53,7 +53,7 @@ export async function main(port: number, serverTypes: ServerType[],
   server.addCleanup();
   server.setDirectory();
 
-  if (process.env.IRELIA_TEST_ROUTER) {
+  if (process.env.GRIST_TEST_ROUTER) {
     // Add a mock api for adding/removing doc workers from load balancer.
     server.testAddRouter();
   }
@@ -88,7 +88,7 @@ export async function main(port: number, serverTypes: ServerType[],
     await server.addAssetsForPlugins();
   }
 
-  if (includeHome && !includeApp) {
+  if (includeHome) {
     server.addEarlyWebhooks();
   }
 
@@ -103,21 +103,17 @@ export async function main(port: number, serverTypes: ServerType[],
   await server.start();
 
   if (includeHome) {
-    if (!includeApp) {
-      server.addUsage();
-    }
+    server.addUsage();
     if (!includeDocs) {
       server.addDocApiForwarder();
     }
     server.addJsonSupport();
     await server.addLandingPages();
     // todo: add support for home api to standalone app
-    if (!includeApp) {
-      server.addHomeApi();
-      server.addBillingApi();
-      server.addNotifier();
-      await server.addHousekeeper();
-    }
+    server.addHomeApi();
+    server.addBillingApi();
+    server.addNotifier();
+    await server.addHousekeeper();
     await server.addLoginRoutes();
     server.addAccountPage();
     server.addBillingPages();
@@ -144,13 +140,13 @@ export async function main(port: number, serverTypes: ServerType[],
 
 export async function startMain() {
   try {
-    const serverTypes = parseServerTypes(process.env.IRELIA_SERVERS);
+    const serverTypes = parseServerTypes(process.env.GRIST_SERVERS);
 
     // No defaults for a port, since this server can serve very different purposes.
-    if (!process.env.IRELIA_PORT) {
-      throw new Error("IRELIA_PORT must be specified");
+    if (!process.env.GRIST_PORT) {
+      throw new Error("GRIST_PORT must be specified");
     }
-    const port = parseInt(process.env.IRELIA_PORT, 10);
+    const port = parseInt(process.env.GRIST_PORT, 10);
 
     const server = await main(port, serverTypes);
 

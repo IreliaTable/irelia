@@ -13,9 +13,9 @@
  * https://meta.discourse.org/t/discourseconnect-official-single-sign-on-for-discourse-sso/13045
  * The recommended Discourse configuration includes:
  *  - enable discourse connect: true
- *  - discourse connect url: IRELIA_SITE/discourse-connect
+ *  - discourse connect url: GRIST_SITE/discourse-connect
  *  - discourse connect secret: DISCOURSE_CONNECT_SECRET
- *  - logout redirect (in Users): IRELIA_SITE/logout?next=DISCOURSE_SITE
+ *  - logout redirect (in Users): GRIST_SITE/logout?next=DISCOURSE_SITE
  */
 
 import type {Express, NextFunction, Request, RequestHandler, Response} from 'express';

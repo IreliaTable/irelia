@@ -126,7 +126,7 @@ class BaseLookupMapColumn(column.BaseColumn):
     """
     key = tuple(_extract(val) for val in key)
     engine = self._engine
-    if engine._current_node:
+    if engine._is_current_node_formula:
       rel = self._get_relation(engine._current_node)
       rel._add_lookup(engine._current_row_id, key)
     else:
@@ -198,6 +198,8 @@ class ContainsLookupMapColumn(BaseLookupMapColumn):
         # group = [] essentially means there are no new keys in this call
         if isinstance(group, (six.binary_type, six.text_type)):
           group = []
+        elif not group and col_id.match_empty != _Contains.no_match_empty:
+          group = [col_id.match_empty]
       else:
         group = [group]
 

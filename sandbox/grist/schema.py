@@ -15,7 +15,7 @@ import six
 
 import actions
 
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 35
 
 def make_column(col_id, col_type, formula='', isFormula=False):
   return {
@@ -194,6 +194,8 @@ def schema_create_actions():
       make_column("linkTargetColRef",   "Ref:_grist_Tables_column"),
       # embedId is deprecated as of version 12. Do not remove or reuse.
       make_column("embedId",            "Text"),
+      # Points to formula columns that hold conditional formatting rules for this view section.
+      make_column("rules",              "RefList:_grist_Tables_column"),
     ]),
     # The fields of a view section.
     actions.AddTable("_grist_Views_section_field", [
@@ -278,6 +280,10 @@ def schema_create_actions():
       # becomes available to matchFunc. These rules are processed in order of rulePos,
       # which should list them before regular rules.
       make_column('userAttributes', 'Text'),
+
+      # Text of memo associated with this rule, if any. Prior to version 35, this was
+      # stored within aclFormula.
+      make_column('memo',           'Text'),
     ]),
 
     # Note that the special resource with tableId of '' and colIds of '' should be ignored. It is
@@ -313,7 +319,25 @@ def schema_create_actions():
       # `excluded` string to an array of column values:
       # Ex1: { included: ['foo', 'bar'] }
       # Ex2: { excluded: ['apple', 'orange'] }
-      make_column("filter",         "Text")
+      make_column("filter",         "Text"),
+      # Filters can be pinned to the filter bar, which causes a button to be displayed
+      # that opens the filter menu when clicked.
+      make_column("pinned",         "Bool"),
+    ]),
+
+    # Additional metadata for cells
+    actions.AddTable('_grist_Cells', [
+      make_column("tableRef",       "Ref:_grist_Tables"),
+      make_column("colRef",         "Ref:_grist_Tables_column"),
+      make_column("rowId",          "Int"),
+      # Cell metadata is stored as in hierarchical structure.
+      make_column("root",           "Bool"),
+      make_column("parentId",       "Ref:_grist_Cells"),
+      # Type of information, currently we have only one type Comments (with value 1).
+      make_column("type",           "Int"),
+      # JSON representation of the metadata.
+      make_column("content",        "Text"),
+      make_column("userRef",        "Text"),
     ]),
   ]
 

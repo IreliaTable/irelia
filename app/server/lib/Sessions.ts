@@ -3,6 +3,7 @@ import {cookieName, SessionStore} from 'app/server/lib/gristSessions';
 import * as cookie from 'cookie';
 import * as cookieParser from 'cookie-parser';
 import {Request} from 'express';
+import {IncomingMessage} from 'http';
 
 /**
  *
@@ -66,7 +67,7 @@ export class Sessions {
     org?: string|null,
     sessionID?: string,
   }) {
-    if (!(process.env.IRELIA_HOST || process.env.IRELIA_HOSTED)) {
+    if (!(process.env.GRIST_HOST || process.env.GRIST_HOSTED)) {
       this._sessions.clear();
     }
   }
@@ -74,14 +75,14 @@ export class Sessions {
   /**
    * Returns the sessionId from the signed grist cookie.
    */
-  public getSessionIdFromCookie(gristCookie: string) {
+  public getSessionIdFromCookie(gristCookie: string): string|false {
     return cookieParser.signedCookie(gristCookie, this._sessionSecret);
   }
 
   /**
    * Get the session id from the grist cookie.  Returns null if no cookie found.
    */
-  public getSessionIdFromRequest(req: Request): string|null {
+  public getSessionIdFromRequest(req: Request|IncomingMessage): string|null {
     if (req.headers.cookie) {
       const cookies = cookie.parse(req.headers.cookie);
       const sessionId = this.getSessionIdFromCookie(cookies[cookieName]);

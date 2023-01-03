@@ -4,11 +4,12 @@ import * as kf from 'app/client/lib/koForm';
 import {ColumnToMapImpl} from 'app/client/models/ColumnToMap';
 import {ColumnRec, ViewSectionRec} from 'app/client/models/DocModel';
 import {reportError} from 'app/client/models/errors';
-import {cssLabel, cssRow, cssSeparator, cssSubLabel, cssTextInput} from 'app/client/ui/RightPanel';
+import {cssHelp, cssLabel, cssRow, cssSeparator} from 'app/client/ui/RightPanelStyles';
 import {cssDragRow, cssFieldEntry, cssFieldLabel} from 'app/client/ui/VisibleFieldsConfig';
 import {basicButton, primaryButton, textButton} from 'app/client/ui2018/buttons';
-import {colors} from 'app/client/ui2018/cssVars';
+import {colors, vars} from 'app/client/ui2018/cssVars';
 import {cssDragger} from 'app/client/ui2018/draggableList';
+import {textInput} from 'app/client/ui2018/editableLabel';
 import {IconName} from 'app/client/ui2018/IconList';
 import {icon} from 'app/client/ui2018/icons';
 import {cssLink} from 'app/client/ui2018/links';
@@ -18,6 +19,9 @@ import {GristLoadConfig} from 'app/common/gristUrls';
 import {nativeCompare, unwrap} from 'app/common/gutil';
 import {bundleChanges, Computed, Disposable, dom, fromKo, makeTestId,
         MultiHolder, Observable, styled, UseCBOwner} from 'grainjs';
+import {makeT} from 'app/client/lib/localization';
+
+const t = makeT('CustomSectionConfig');
 
 // Custom URL widget id - used as mock id for selectbox.
 const CUSTOM_ID = 'custom';
@@ -57,15 +61,19 @@ class ColumnPicker extends Disposable {
     return [
       cssLabel(
         this._column.title,
-        this._column.optional ? cssSubLabel(" (optional)") : null,
+        this._column.optional ? cssSubLabel(t('Optional')) : null,
         testId('label-for-' + this._column.name),
       ),
+      this._column.description ? cssHelp(
+        this._column.description,
+        testId('help-for-' + this._column.name),
+      ) : null,
       cssRow(
         select(
           properValue,
           options,
           {
-            defaultLabel: this._column.typeDesc != "any" ? `Pick a ${this._column.typeDesc} column` : 'Pick a column'
+            defaultLabel: this._column.typeDesc != "any" ? t('PickAColumnWithType', {"columnType": this._column.typeDesc}) : t('PickAColumn')
           }
         ),
         testId('mapping-for-' + this._column.name),
@@ -97,7 +105,7 @@ class ColumnListPicker extends Disposable {
     return [
       cssRow(
         cssAddMapping(
-          cssAddIcon('Plus'), 'Add ' + this._column.title,
+          cssAddIcon('Plus'), t('Add') + ' ' + this._column.title,
           menu(() => {
             const otherColumns = this._getNotMappedColumns();
             const typedColumns = otherColumns.filter(this._typeFilter());
@@ -109,7 +117,7 @@ class ColumnListPicker extends Disposable {
                 col.label.peek(),
               )),
               wrongTypeCount > 0 ? menuText(
-`${wrongTypeCount} non-${this._column.type.toLowerCase()} column${wrongTypeCount > 1 ? 's are' : ' is'} not shown`,
+                t("WrongTypesMenuText", {wrongTypeCount, columnType: this._column.type.toLowerCase(), count: wrongTypeCount}),
                 testId('map-message-' + this._column.name)
               ) : null
             ];
@@ -362,17 +370,17 @@ export class CustomSectionConfig extends Disposable {
         return null;
       }
       switch(level) {
-        case AccessLevel.none: return cssConfirmLine("Widget does not require any permissions.");
-        case AccessLevel.read_table: return cssConfirmLine("Widget needs to ", dom("b", "read"), " the current table.");
-        case AccessLevel.full: return cssConfirmLine("Widget needs ", dom("b", "full access"), " to this document.");
+        case AccessLevel.none: return cssConfirmLine(t("WidgetNoPermissison"));
+        case AccessLevel.read_table: return cssConfirmLine(t("WidgetNeedRead", {read: dom("b", "read")})); // TODO i18next
+        case AccessLevel.full: return cssConfirmLine(t("WidgetNeedFullAccess", {fullAccess: dom("b", "full access")})); // TODO i18next
         default: throw new Error(`Unsupported ${level} access level`);
       }
     }
     // Options for access level.
     const levels: IOptionFull<string>[] = [
-      {label: 'No document access', value: AccessLevel.none},
-      {label: 'Read selected table', value: AccessLevel.read_table},
-      {label: 'Full document access', value: AccessLevel.full},
+      {label: t('NoDocumentAccess'), value: AccessLevel.none},
+      {label: t('ReadSelectedTable'), value: AccessLevel.read_table},
+      {label: t('FullDocumentAccess'), value: AccessLevel.full},
     ];
     return dom(
       'div',
@@ -380,7 +388,7 @@ export class CustomSectionConfig extends Disposable {
       this._canSelect
         ? cssRow(
             select(this._selectedId, options, {
-              defaultLabel: 'Select Custom Widget',
+              defaultLabel: t('SelectCustomWidget'),
               menuCssClass: cssMenu.className,
             }),
             testId('select')
@@ -391,7 +399,7 @@ export class CustomSectionConfig extends Disposable {
           cssTextInput(
             this._url,
             async value => this._url.set(value),
-            dom.attr('placeholder', 'Enter Custom URL'),
+            dom.attr('placeholder', t('EnterCustomURL')),
             testId('url')
           )
         ),
@@ -432,7 +440,7 @@ export class CustomSectionConfig extends Disposable {
       dom.maybe(this._hasConfiguration, () =>
         cssSection(
           textButton(
-            'Open configuration',
+            t('OpenConfiguration'),
             dom.on('click', () => this._openConfiguration()),
             testId('open-configuration')
           )
@@ -442,7 +450,7 @@ export class CustomSectionConfig extends Disposable {
         cssLink(
           dom.attr('href', 'https://support.getgrist.com/widget-custom'),
           dom.attr('target', '_blank'),
-          'Learn more about custom widgets'
+          t('LearnMore')
         )
       ),
       dom.maybeOwned(use => use(this._section.columnsToMap), (owner, columns) => {
@@ -534,6 +542,13 @@ const cssRemoveIcon = styled(icon, `
   }
 `);
 
+// Additional text in label (greyed out)
+const cssSubLabel = styled('span', `
+  text-transform: none;
+  font-size: ${vars.xsmallFontSize};
+  color: ${colors.slate};
+`);
+
 const cssAddMapping = styled('div', `
   display: flex;
   cursor: pointer;
@@ -546,5 +561,15 @@ const cssAddMapping = styled('div', `
   &:hover, &:focus, &:active {
     color: ${colors.darkGreen};
     --icon-color: ${colors.darkGreen};
+  }
+`);
+
+const cssTextInput = styled(textInput, `
+  flex: 1 0 auto;
+
+  &:disabled {
+    color: ${colors.slate};
+    background-color: ${colors.lightGrey};
+    pointer-events: none;
   }
 `);

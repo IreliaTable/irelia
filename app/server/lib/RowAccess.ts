@@ -1,5 +1,6 @@
-import { AddRecord, BulkAddRecord, BulkRemoveRecord, BulkUpdateRecord, DocAction, getTableId,
-         RemoveRecord, ReplaceTableData, TableDataAction, UpdateRecord } from "app/common/DocActions";
+import { AddRecord, BulkAddRecord, BulkRemoveRecord, BulkUpdateRecord,
+         DocAction, getTableId, RemoveRecord, ReplaceTableData,
+         TableDataAction, UpdateRecord } from "app/common/DocActions";
 import { getSetMapValue } from "app/common/gutil";
 
 /**

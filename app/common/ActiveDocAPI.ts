@@ -1,17 +1,28 @@
 import {ActionGroup} from 'app/common/ActionGroup';
-import {CellValue, TableDataAction, UserAction} from 'app/common/DocActions';
+import {BulkAddRecord, CellValue, TableDataAction, UserAction} from 'app/common/DocActions';
 import {FormulaProperties} from 'app/common/GranularAccessClause';
+import {UIRowId} from 'app/common/UIRowId';
 import {FetchUrlOptions, UploadResult} from 'app/common/uploads';
 import {DocStateComparison, PermissionData, UserAccessData} from 'app/common/UserAPI';
 import {ParseOptions} from 'app/plugin/FileParserAPI';
+import {AccessTokenOptions, AccessTokenResult} from 'app/plugin/GristAPI';
 import {IMessage} from 'grain-rpc';
 
 export interface ApplyUAOptions {
   desc?: string;      // Overrides the description of the action.
   otherId?: number;   // For undo/redo; the actionNum of the original action to which it applies.
   linkId?: number;    // For bundled actions, actionNum of the previous action in the bundle.
-  bestEffort?: boolean; // If set, action may be applied in part if it cannot be applied completely.
   parseStrings?: boolean;  // If true, parses string values in some actions based on the column
+}
+
+export interface ApplyUAExtendedOptions extends ApplyUAOptions {
+  bestEffort?: boolean; // If set, action may be applied in part if it cannot be applied completely.
+  fromOwnHistory?: boolean; // If set, action is confirmed to be a redo/undo taken from history, from
+                            // an action marked as being by the current user.
+  oldestSource?: number;  // If set, gives the timestamp of the oldest source the undo/redo
+                          // action was built from, expressed as number of milliseconds
+                          // elapsed since January 1, 1970 00:00:00 UTC
+  attachment?: boolean;   // If set, allow actions on attachments.
 }
 
 export interface ApplyUAResult {
@@ -127,13 +138,29 @@ export interface QueryFilters {
 export type QueryOperation = "in" | "intersects" | "empty";
 
 /**
+ * Results of fetching a table. Includes the table data you would
+ * expect. May now also include attachment metadata referred to in the table
+ * data. Attachment data is expressed as a BulkAddRecord, since it is
+ * not a complete table, just selected rows. Attachment data is
+ * currently included in fetches when (1) granular access control is
+ * in effect, and (2) the user is neither an owner nor someone with
+ * read access to the entire document, and (3) there is an attachment
+ * column in the fetched table. This is exactly what the standard
+ * Grist client needs, but in future it might be desirable to give
+ * more control over this behavior.
+ */
+export interface TableFetchResult {
+  tableData: TableDataAction;
+  attachments?: BulkAddRecord;
+}
+
+/**
  * Response from useQuerySet(). A query returns data AND creates a subscription to receive
  * DocActions that affect this data. The querySubId field identifies this subscription, and must
  * be used in a disposeQuerySet() call to unsubscribe.
  */
-export interface QueryResult {
+export interface QueryResult extends TableFetchResult {
   querySubId: number;     // ID of the subscription, to use with disposeQuerySet.
-  tableData: TableDataAction;
 }
 
 /**
@@ -156,6 +183,59 @@ export interface PermissionDataWithExtraUsers extends PermissionData {
   exampleUsers: UserAccessData[];
 }
 
+/**
+ * Basic metadata about a table returned by `getAclResources()`.
+ */
+export interface AclTableDescription {
+  title: string;  // Raw data widget title
+  colIds: string[];  // IDs of all columns in table
+  groupByColLabels: string[] | null;  // Labels of groupby columns for summary tables, or null.
+}
+
+export interface AclResources {
+  tables: {[tableId: string]: AclTableDescription};
+  problems: AclRuleProblem[];
+}
+
+export interface AclRuleProblem {
+  tables?: {
+    tableIds: string[],
+  };
+  columns?: {
+    tableId: string,
+    colIds: string[],
+  };
+  userAttributes?: {
+    invalidUAColumns: string[],
+    names: string[],
+  }
+  comment: string;
+}
+
+export function getTableTitle(table: AclTableDescription): string {
+  let {title} = table;
+  if (table.groupByColLabels) {
+    title += ' ' + summaryGroupByDescription(table.groupByColLabels);
+  }
+  return title;
+}
+
+export function summaryGroupByDescription(groupByColumnLabels: string[]): string {
+  return `[${groupByColumnLabels.length ? 'by ' + groupByColumnLabels.join(", ") : "Totals"}]`;
+}
+
+//// Types for autocomplete suggestions
+
+// Suggestion may be a string, or a tuple [funcname, argSpec, isGrist], where:
+//  - funcname (e.g. "DATEADD") will be auto-completed with "(", AND linked to Grist
+//    documentation.
+//  - argSpec (e.g. "(start_date, days=0, ...)") is to be shown as autocomplete caption.
+//  - isGrist is no longer used
+type ISuggestion = string | [string, string, boolean];
+
+// Suggestion paired with an optional example value to show on the right
+export type ISuggestionWithValue = [ISuggestion, string | null];
+
 export interface ActiveDocAPI {
   /**
    * Closes a document, and unsubscribes from its userAction events.
@@ -165,7 +245,7 @@ export interface ActiveDocAPI {
   /**
    * Fetches a particular table from the data engine to return to the client.
    */
-  fetchTable(tableId: string): Promise<TableDataAction>;
+  fetchTable(tableId: string): Promise<TableFetchResult>;
 
   /**
    * Fetches the generated Python code for this document. (TODO rename this misnomer.)
@@ -247,7 +327,7 @@ export interface ActiveDocAPI {
    * Find and return a list of auto-complete suggestions that start with `txt`, when editing a
    * formula in table `tableId` and column `columnId`.
    */
-  autocomplete(txt: string, tableId: string, columnId: string): Promise<string[]>;
+  autocomplete(txt: string, tableId: string, columnId: string, rowId: UIRowId): Promise<ISuggestionWithValue[]>;
 
   /**
    * Removes the current instance from the doc.
@@ -296,11 +376,16 @@ export interface ActiveDocAPI {
   checkAclFormula(text: string): Promise<FormulaProperties>;
 
   /**
+   * Get a token for out-of-band access to the document.
+   */
+  getAccessToken(options: AccessTokenOptions): Promise<AccessTokenResult>;
+
+  /**
    * Returns the full set of tableIds, with the list of colIds for each table. This is intended
    * for editing ACLs. It is only available to users who can edit ACLs, and lists all resources
    * regardless of rules that may block access to them.
    */
-  getAclResources(): Promise<{[tableId: string]: string[]}>;
+  getAclResources(): Promise<AclResources>;
 
   /**
    * Wait for document to finish initializing.

@@ -1,20 +1,20 @@
 import * as bluebird from 'bluebird';
 import * as chokidar from 'chokidar';
 import * as fse from 'fs-extra';
-import * as moment from 'moment';
+import moment from 'moment';
 import * as path from 'path';
 
 import {DocEntry, DocEntryTag} from 'app/common/DocListAPI';
 import {DocSnapshots} from 'app/common/DocSnapshot';
 import {DocumentUsage} from 'app/common/DocUsage';
 import * as gutil from 'app/common/gutil';
-import * as Comm from 'app/server/lib/Comm';
+import {Comm} from 'app/server/lib/Comm';
 import * as docUtils from 'app/server/lib/docUtils';
 import {GristServer} from 'app/server/lib/GristServer';
 import {IDocStorageManager} from 'app/server/lib/IDocStorageManager';
 import {IShell} from 'app/server/lib/IShell';
-import * as log from 'app/server/lib/log';
-import * as uuidv4 from "uuid/v4";
+import log from 'app/server/lib/log';
+import uuidv4 from "uuid/v4";
 
 
 /**
@@ -43,7 +43,7 @@ export class DocStorageManager implements IDocStorageManager {
     // If we have a way to communicate with clients, watch the docsRoot for changes.
     this._watcher = null;
     this._shell = gristServer?.create.Shell?.() || {
-      moveItemToTrash()  { throw new Error('Unable to move document to trash'); },
+      trashItem() { throw new Error('Unable to move document to trash'); },
       showItemInFolder() { throw new Error('Unable to show item in folder'); }
     };
     if (_comm) {
@@ -58,7 +58,7 @@ export class DocStorageManager implements IDocStorageManager {
    * @returns {String} path: Filesystem path.
    */
   public getPath(docName: string): string {
-    docName += (path.extname(docName) === '.irelia' ? '' : '.irelia');
+    docName += (path.extname(docName) === '.grist' ? '' : '.grist');
     return path.resolve(this._docsRoot, docName);
   }
 
@@ -78,7 +78,7 @@ export class DocStorageManager implements IDocStorageManager {
    */
   public async getCanonicalDocName(altDocName: string): Promise<string> {
     const p = await docUtils.realPath(this.getPath(altDocName));
-    return path.dirname(p) === this._docsRoot ? path.basename(p, '.irelia') : p;
+    return path.dirname(p) === this._docsRoot ? path.basename(p, '.grist') : p;
   }
 
   /**
@@ -118,16 +118,15 @@ export class DocStorageManager implements IDocStorageManager {
    * @param {String} docName: docName of the document to delete.
    * @returns {Promise} Resolved on success.
    */
-  public deleteDoc(docName: string, deletePermanently?: boolean): Promise<void> {
+  public async deleteDoc(docName: string, deletePermanently?: boolean): Promise<void> {
     const docPath = this.getPath(docName);
     // Keep this check, to protect against wiping out the whole disk or the user's home.
-    if (path.extname(docPath) !== '.irelia') {
+    if (path.extname(docPath) !== '.grist') {
       return Promise.reject(new Error("Refusing to delete path which does not end in .grist"));
     } else if (deletePermanently) {
-      return fse.remove(docPath);
+      await fse.remove(docPath);
     } else {
-      this._shell.moveItemToTrash(docPath);  // this is a synchronous action
-      return Promise.resolve();
+      await this._shell.trashItem(docPath);
     }
   }
 
@@ -271,7 +270,7 @@ export class DocStorageManager implements IDocStorageManager {
     return fse.readdir(dirPath)
     // Filter out for .grist files, and strip the .grist extension.
     .then(entries => Promise.all(
-      entries.filter(e => (path.extname(e) === '.irelia'))
+      entries.filter(e => (path.extname(e) === '.grist'))
       .map(e => {
         const docPath = path.resolve(dirPath, e);
         return fse.stat(docPath)
@@ -336,13 +335,13 @@ export class DocStorageManager implements IDocStorageManager {
 
   /**
    * Helper to broadcast a docListAction for a single doc to clients. If the action is not on a
-   *  '.irelia' file, it is not sent.
+   *  '.grist' file, it is not sent.
    * @param {String} actionType - DocListAction type to send, 'addDocs' | 'removeDocs' | 'changeDocs'.
    * @param {String} docPath - System path to the doc including the filename.
    * @param {Any} data - Data to send as the message.
    */
   private _sendDocListAction(actionType: string, docPath: string, data: any): void {
-    if (this._comm && gutil.endsWith(docPath, '.irelia')) {
+    if (this._comm && gutil.endsWith(docPath, '.grist')) {
       log.debug(`Sending ${actionType} action for doc ${getDocName(docPath)}`);
       this._comm.broadcastMessage('docListAction', { [actionType]: [data] });
     }
@@ -353,7 +352,7 @@ export class DocStorageManager implements IDocStorageManager {
  * Helper to return the docname (without .grist) given the path to the .grist file.
  */
 function getDocName(docPath: string): string {
-  return path.basename(docPath, '.irelia');
+  return path.basename(docPath, '.grist');
 }
 
 /**

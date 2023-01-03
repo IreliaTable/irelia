@@ -270,7 +270,7 @@ class EngineTestCase(unittest.TestCase):
   def assertFormulaError(self, exc, type_, message, tracebackRegexp=None):
     self.assertIsInstance(exc, objtypes.RaisedException)
     self.assertIsInstance(exc.error, type_)
-    self.assertEqual(str(exc.error), message)
+    self.assertEqual(exc._message, message)
     if tracebackRegexp:
       self.assertRegex(exc.details, tracebackRegexp)
 
@@ -387,6 +387,8 @@ def test_undo(test_method):
       self.apply_undo_actions(undo_actions)
       self.assertEqualDocData(self.getFullEngineData(), expected_engine_data)
   return wrapped
+
+test_undo.__test__ = False  # tells pytest that this isn't a test
 
 
 class TestEngine(EngineTestCase):

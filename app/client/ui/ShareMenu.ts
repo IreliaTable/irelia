@@ -2,11 +2,13 @@ import {loadUserManager} from 'app/client/lib/imports';
 import {AppModel, reportError} from 'app/client/models/AppModel';
 import {DocInfo, DocPageModel} from 'app/client/models/DocPageModel';
 import {docUrl, urlState} from 'app/client/models/gristUrlState';
+import {GristTooltips} from 'app/client/ui/GristTooltips';
 import {makeCopy, replaceTrunkWithFork} from 'app/client/ui/MakeCopyMenu';
 import {sendToDrive} from 'app/client/ui/sendToDrive';
+import {hoverTooltip, withInfoTooltip} from 'app/client/ui/tooltips';
 import {cssHoverCircle, cssTopBarBtn} from 'app/client/ui/TopBarCss';
 import {primaryButton} from 'app/client/ui2018/buttons';
-import {colors, mediaXSmall, testId} from 'app/client/ui2018/cssVars';
+import {mediaXSmall, testId, theme} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {menu, menuAnnotate, menuDivider, menuIcon, menuItem, menuItemLink, menuText} from 'app/client/ui2018/menus';
 import {buildUrlId, parseUrlId} from 'app/common/gristUrls';
@@ -14,6 +16,9 @@ import * as roles from 'app/common/roles';
 import {Document} from 'app/common/UserAPI';
 import {dom, DomContents, styled} from 'grainjs';
 import {MenuCreateFunc} from 'popweasel';
+import {makeT} from 'app/client/lib/localization';
+
+const t = makeT('ShareMenu');
 
 function buildOriginalUrlId(urlId: string, isSnapshot: boolean): string {
   const parts = parseUrlId(urlId);
@@ -30,18 +35,18 @@ export function buildShareMenuButton(pageModel: DocPageModel): DomContents {
   // available (a user quick enough to open the menu in this state would have to re-open it).
   return dom.maybe(pageModel.currentDoc, (doc) => {
     const appModel = pageModel.appModel;
-    const saveCopy = () => makeCopy(doc, appModel, 'Save Document').catch(reportError);
+    const saveCopy = () => makeCopy(doc, appModel, t('SaveDocument')).catch(reportError);
     if (doc.idParts.snapshotId) {
       const backToCurrent = () => urlState().pushUrl({doc: buildOriginalUrlId(doc.id, true)});
-      return shareButton('Back to Current', () => [
+      return shareButton(t('BackToCurrent'), () => [
         menuManageUsers(doc, pageModel),
-        menuSaveCopy('Save Copy', doc, appModel),
+        menuSaveCopy(t('SaveCopy'), doc, appModel),
         menuOriginal(doc, appModel, true),
         menuExports(doc, pageModel),
       ], {buttonAction: backToCurrent});
     } else if (doc.isPreFork || doc.isBareFork) {
       // A new unsaved document, or a fiddle, or a public example.
-      const saveActionTitle = doc.isBareFork ? 'Save Document' : 'Save Copy';
+      const saveActionTitle = doc.isBareFork ? t('SaveDocument') : t('SaveCopy');
       return shareButton(saveActionTitle, () => [
         menuManageUsers(doc, pageModel),
         menuSaveCopy(saveActionTitle, doc, appModel),
@@ -53,16 +58,16 @@ export function buildShareMenuButton(pageModel: DocPageModel): DomContents {
       // Copy" primary and keep it as an action button on top. Otherwise, show a tag without a
       // default action; click opens the menu where the user can choose.
       if (!roles.canEdit(doc.trunkAccess || null)) {
-        return shareButton('Save Copy', () => [
+        return shareButton(t('SaveCopy'), () => [
           menuManageUsers(doc, pageModel),
-          menuSaveCopy('Save Copy', doc, appModel),
+          menuSaveCopy(t('SaveCopy'), doc, appModel),
           menuOriginal(doc, appModel, false),
           menuExports(doc, pageModel),
         ], {buttonAction: saveCopy});
       } else {
-        return shareButton('Unsaved', () => [
+        return shareButton(t('Unsaved'), () => [
           menuManageUsers(doc, pageModel),
-          menuSaveCopy('Save Copy', doc, appModel),
+          menuSaveCopy(t('SaveCopy'), doc, appModel),
           menuOriginal(doc, appModel, false),
           menuExports(doc, pageModel),
         ]);
@@ -70,7 +75,7 @@ export function buildShareMenuButton(pageModel: DocPageModel): DomContents {
     } else {
       return shareButton(null, () => [
         menuManageUsers(doc, pageModel),
-        menuSaveCopy('Duplicate Document', doc, appModel),
+        menuSaveCopy(t('DuplicateDocument'), doc, appModel),
         menuWorkOnCopy(pageModel),
         menuExports(doc, pageModel),
       ]);
@@ -91,6 +96,7 @@ function shareButton(buttonText: string|null, menuCreateFunc: MenuCreateFunc,
     return cssHoverCircle({ style: `margin: 5px;` },
       cssTopBarBtn('Share', dom.cls('tour-share-icon')),
       menu(menuCreateFunc, {placement: 'bottom-end'}),
+      hoverTooltip('Share', {key: 'topBarBtnTooltip'}),
       testId('tb-share'),
     );
   } else if (options.buttonAction) {
@@ -103,6 +109,7 @@ function shareButton(buttonText: string|null, menuCreateFunc: MenuCreateFunc,
       cssShareCircle(
         cssShareIcon('Share'),
         menu(menuCreateFunc, {placement: 'bottom-end'}),
+        hoverTooltip('Share', {key: 'topBarBtnTooltip'}),
         testId('tb-share'),
       ),
     );
@@ -115,6 +122,7 @@ function shareButton(buttonText: string|null, menuCreateFunc: MenuCreateFunc,
         cssShareIcon('Share')
       ),
       menu(menuCreateFunc, {placement: 'bottom-end'}),
+      hoverTooltip('Share', {key: 'topBarBtnTooltip'}),
       testId('tb-share'),
     );
   }
@@ -124,7 +132,7 @@ function shareButton(buttonText: string|null, menuCreateFunc: MenuCreateFunc,
 function menuManageUsers(doc: DocInfo, pageModel: DocPageModel) {
   return [
     menuItem(() => manageUsers(doc, pageModel),
-      roles.canEditAccess(doc.access) ? 'Manage Users' : 'Access Details',
+      roles.canEditAccess(doc.access) ? t('ManageUsers') : t('AccessDetails'),
       dom.cls('disabled', doc.isFork),
       testId('tb-share-option')
     ),
@@ -135,7 +143,7 @@ function menuManageUsers(doc: DocInfo, pageModel: DocPageModel) {
 // Renders "Return to Original" and "Replace Original" menu items. When used with snapshots, we
 // say "Current Version" in place of the word "Original".
 function menuOriginal(doc: Document, appModel: AppModel, isSnapshot: boolean) {
-  const termToUse = isSnapshot ? "Current Version" : "Original";
+  const termToUse = isSnapshot ? t("CurrentVersion") : t("Original");
   const origUrlId = buildOriginalUrlId(doc.id, isSnapshot);
   const originalUrl = urlState().makeUrl({doc: origUrlId});
 
@@ -158,18 +166,18 @@ function menuOriginal(doc: Document, appModel: AppModel, isSnapshot: boolean) {
   }
   return [
     cssMenuSplitLink({href: originalUrl},
-      cssMenuSplitLinkText(`Return to ${termToUse}`), testId('return-to-original'),
+      cssMenuSplitLinkText(t('ReturnToTermToUse', {termToUse})), testId('return-to-original'),
       cssMenuIconLink({href: originalUrl, target: '_blank'}, testId('open-original'),
         cssMenuIcon('FieldLink'),
       )
     ),
-    menuItem(replaceOriginal, `Replace ${termToUse}...`,
+    menuItem(replaceOriginal, t('ReplaceTermToUse', {termToUse}),
       // Disable if original is not writable, and also when comparing snapshots (since it's
       // unclear which of the versions to use).
       dom.cls('disabled', !roles.canEdit(doc.trunkAccess || null) || comparingSnapshots),
       testId('replace-original'),
     ),
-    menuItemLink(compareHref, {target: '_blank'}, `Compare to ${termToUse}`,
+    menuItemLink(compareHref, {target: '_blank'}, t('CompareTermToUse', {termToUse}),
       menuAnnotate('Beta'),
       testId('compare-original'),
     ),
@@ -197,8 +205,14 @@ function menuWorkOnCopy(pageModel: DocPageModel) {
   };
 
   return [
-    menuItem(makeUnsavedCopy, 'Work on a Copy', testId('work-on-copy')),
-    menuText('Edit without affecting the original'),
+    menuItem(makeUnsavedCopy, t('WorkOnCopy'), testId('work-on-copy')),
+    menuText(
+      withInfoTooltip(
+        t('EditWithoutAffecting'),
+        GristTooltips.workOnACopy(),
+        {tooltipMenuOptions: {attach: null}}
+      )
+    ),
   ];
 }
 
@@ -215,21 +229,21 @@ function menuExports(doc: Document, pageModel: DocPageModel) {
     menuDivider(),
     (isElectron ?
       menuItem(() => gristDoc.app.comm.showItemInFolder(doc.name),
-        'Show in folder', testId('tb-share-option')) :
+        t('ShowInFolder'), testId('tb-share-option')) :
         menuItemLink({
           href: pageModel.appModel.api.getDocAPI(doc.id).getDownloadUrl(),
           target: '_blank', download: ''
         },
-        menuIcon('Download'), 'Download', testId('tb-share-option'))
+        menuIcon('Download'), t('Download'), testId('tb-share-option'))
     ),
     menuItemLink({ href: gristDoc.getCsvLink(), target: '_blank', download: ''},
-      menuIcon('Download'), 'Export CSV', testId('tb-share-option')),
+      menuIcon('Download'), t('ExportCSV'), testId('tb-share-option')),
     menuItemLink({
       href: pageModel.appModel.api.getDocAPI(doc.id).getDownloadXlsxUrl(),
       target: '_blank', download: ''
-    }, menuIcon('Download'), 'Export XLSX', testId('tb-share-option')),
+    }, menuIcon('Download'), t('ExportXLSX'), testId('tb-share-option')),
     menuItem(() => sendToDrive(doc, pageModel),
-      menuIcon('Download'), 'Send to Google Drive', testId('tb-share-option')),
+      menuIcon('Download'), t('SendToGoogleDrive'), testId('tb-share-option')),
   ];
 }
 
@@ -265,9 +279,9 @@ const cssShareButton = styled('div', `
   margin: 5px;
   white-space: nowrap;
 
-  --share-btn-bg: ${colors.lightGreen};
+  --share-btn-bg: ${theme.controlPrimaryBg};
   &-combined:hover, &-combined.weasel-popup-open {
-    --share-btn-bg: ${colors.darkGreen};
+    --share-btn-bg: ${theme.controlPrimaryHoverBg};
   }
 `);
 
@@ -289,14 +303,14 @@ const cssShareAction = styled(primaryButton, `
 const cssShareCircle = styled(cssHoverCircle, `
   z-index: 1;
   background-color: var(--share-btn-bg);
-  border: 1px solid white;
+  border: 1px solid ${theme.topHeaderBg};
   &:hover, &.weasel-popup-open {
-    background-color: ${colors.darkGreen};
+    background-color: ${theme.controlPrimaryHoverBg};
   }
 `);
 
 const cssShareIcon = styled(cssTopBarBtn, `
-  background-color: white;
+  background-color: ${theme.controlPrimaryFg};
   height: 30px;
   width: 30px;
 `);
@@ -310,8 +324,8 @@ const cssMenuSplitLinkText = styled('div', `
   flex: auto;
   padding: var(--weaseljs-menu-item-padding, 8px 24px);
   &:not(:hover) {
-    background-color: white;
-    color: black;
+    background-color: ${theme.menuBg};
+    color: ${theme.menuItemFg};
   }
 `);
 
@@ -320,11 +334,11 @@ const cssMenuIconLink = styled('a', `
   flex: none;
   padding: 8px 24px;
 
-  background-color: white;
-  --icon-color: ${colors.lightGreen};
+  background-color: ${theme.menuBg};
+  --icon-color: ${theme.menuItemLinkFg};
   &:hover {
-    background-color: ${colors.mediumGreyOpaque};
-    --icon-color: ${colors.darkGreen};
+    background-color: ${theme.menuItemLinkselectedBg};
+    --icon-color: ${theme.menuItemLinkSelectedFg};
   }
 `);
 

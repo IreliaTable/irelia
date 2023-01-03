@@ -1,33 +1,32 @@
 import {ActionSummary} from 'app/common/ActionSummary';
 import {BulkColValues, UserAction} from 'app/common/DocActions';
 import {arrayRepeat} from 'app/common/gutil';
-import {DocState, UserAPIImpl} from 'app/common/UserAPI';
+import {DocAPI, DocState, UserAPIImpl} from 'app/common/UserAPI';
 import {testDailyApiLimitFeatures} from 'app/gen-server/entity/Product';
 import {AddOrUpdateRecord, Record as ApiRecord} from 'app/plugin/DocApiTypes';
 import {CellValue, GristObjCode} from 'app/plugin/GristData';
-import {
-  applyQueryParameters,
-  docApiUsagePeriods,
-  docPeriodicApiUsageKey,
-  getDocApiUsageKeysToIncr
-} from 'app/server/lib/DocApi';
-import * as log from 'app/server/lib/log';
-import {exitPromise} from 'app/server/lib/serverUtils';
+import {applyQueryParameters, docApiUsagePeriods, docPeriodicApiUsageKey,
+  getDocApiUsageKeysToIncr, WebhookSubscription} from 'app/server/lib/DocApi';
+import log from 'app/server/lib/log';
+import {WebhookSummary} from 'app/server/lib/Triggers';
+import {waitForIt} from 'test/server/wait';
+import {delayAbort, exitPromise} from 'app/server/lib/serverUtils';
 import {connectTestingHooks, TestingHooksClient} from 'app/server/lib/TestingHooks';
-import axios, {AxiosResponse} from 'axios';
+import axios, {AxiosRequestConfig, AxiosResponse} from 'axios';
 import {delay} from 'bluebird';
 import * as bodyParser from 'body-parser';
 import {assert} from 'chai';
 import {ChildProcess, execFileSync, spawn} from 'child_process';
-import * as FormData from 'form-data';
+import FormData from 'form-data';
 import * as fse from 'fs-extra';
 import * as _ from 'lodash';
-import * as LRUCache from 'lru-cache';
+import LRUCache from 'lru-cache';
 import * as moment from 'moment';
 import fetch from 'node-fetch';
 import {tmpdir} from 'os';
 import * as path from 'path';
 import {createClient, RedisClient} from 'redis';
+import {AbortController} from 'node-abort-controller';
 import {configForUser} from 'test/gen-server/testUtils';
 import {serveSomething, Serving} from 'test/server/customUtil';
 import * as testUtils from 'test/server/testUtils';
@@ -62,7 +61,7 @@ let docs: TestServer;
 let userApi: UserAPIImpl;
 
 describe('DocApi', function() {
-  this.timeout(20000);
+  this.timeout(30000);
   testUtils.setTmpLogLevel('error');
   const oldEnv = clone(process.env);
 
@@ -198,6 +197,35 @@ describe('DocApi', function() {
 
 // Contains the tests. This is where you want to add more test.
 function testDocApi() {
+  it("should allow only owners to remove a document", async () => {
+    const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
+    const doc1 = await userApi.newDoc({name: 'testdeleteme1'}, ws1);
+    const kiwiApi = makeUserApi(ORG_NAME, 'kiwi');
+
+    // Kiwi is editor of the document, so he can't delete it.
+    await userApi.updateDocPermissions(doc1, {users: {'kiwi@getgrist.com': 'editors'}});
+    await assert.isRejected(kiwiApi.softDeleteDoc(doc1), /Forbidden/);
+    await assert.isRejected(kiwiApi.deleteDoc(doc1), /Forbidden/);
+
+    // Kiwi is owner of the document - now he can delete it.
+    await userApi.updateDocPermissions(doc1, {users: {'kiwi@getgrist.com': 'owners'}});
+    await assert.isFulfilled(kiwiApi.softDeleteDoc(doc1));
+    await assert.isFulfilled(kiwiApi.deleteDoc(doc1));
+  });
+
+  it("should allow only owners to rename a document", async () => {
+    const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
+    const doc1 = await userApi.newDoc({name: 'testrenameme1'}, ws1);
+    const kiwiApi = makeUserApi(ORG_NAME, 'kiwi');
+
+    // Kiwi is editor of the document, so he can't rename it.
+    await userApi.updateDocPermissions(doc1, {users: {'kiwi@getgrist.com': 'editors'}});
+    await assert.isRejected(kiwiApi.renameDoc(doc1, "testrenameme2"), /Forbidden/);
+
+    // Kiwi is owner of the document - now he can rename it.
+    await userApi.updateDocPermissions(doc1, {users: {'kiwi@getgrist.com': 'owners'}});
+    await assert.isFulfilled(kiwiApi.renameDoc(doc1, "testrenameme2"));
+  });
 
   it("guesses types of new columns", async () => {
     const userActions = [
@@ -516,6 +544,238 @@ function testDocApi() {
         ]
       }
     );
+  });
+
+  it("GET/POST/PATCH /docs/{did}/tables and /columns", async function() {
+    // POST /tables: Create new tables
+    let resp = await axios.post(`${serverUrl}/api/docs/${docIds.Timesheets}/tables`, {
+      tables: [
+        {columns: [{}]},  // The minimal allowed request
+        {id: "", columns: [{id: ""}]},
+        {id: "NewTable1", columns: [{id: "NewCol1", fields: {}}]},
+        {
+          id: "NewTable2",
+          columns: [
+            {id: "NewCol2", fields: {label: "Label2"}},
+            {id: "NewCol3", fields: {label: "Label3"}},
+            {id: "NewCol3", fields: {label: "Label3"}},  // Duplicate column id
+          ]
+        },
+        {
+          id: "NewTable2",   // Create a table with duplicate tableId
+          columns: [
+            {id: "NewCol2", fields: {label: "Label2"}},
+            {id: "NewCol3", fields: {label: "Label3"}},
+          ]
+        },
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 200);
+    assert.deepEqual(resp.data, {
+      tables: [
+        {id: "Table2"},
+        {id: "Table3"},
+        {id: "NewTable1"},
+        {id: "NewTable2"},
+        {id: "NewTable2_2"},  // duplicated tableId ends with _2
+      ]
+    });
+
+    // POST /columns: Create new columns
+    resp = await axios.post(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/NewTable2/columns`, {
+      columns: [
+        {},
+        {id: ""},
+        {id: "NewCol4", fields: {}},
+        {id: "NewCol4", fields: {}},  // Create a column with duplicate colId
+        {id: "NewCol5", fields: {label: "Label5"}},
+      ],
+    }, chimpy);
+    assert.equal(resp.status, 200);
+    assert.deepEqual(resp.data, {
+      columns: [
+        {id: "A"},
+        {id: "B"},
+        {id: "NewCol4"},
+        {id: "NewCol4_2"},  // duplicated colId ends with _2
+        {id: "NewCol5"},
+      ]
+    });
+
+    // POST /columns to invalid table ID
+    resp = await axios.post(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/NoSuchTable/columns`,
+      {columns: [{}]}, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, {error: 'Table not found "NoSuchTable"'});
+
+    // PATCH /tables: Modify a table. This is pretty much only good for renaming tables.
+    resp = await axios.patch(`${serverUrl}/api/docs/${docIds.Timesheets}/tables`, {
+      tables: [
+        {id: "Table3", fields: {tableId: "Table3_Renamed"}},
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 200);
+
+    // Repeat the same operation to check that it gives 404 if the table doesn't exist.
+    resp = await axios.patch(`${serverUrl}/api/docs/${docIds.Timesheets}/tables`, {
+      tables: [
+        {id: "Table3", fields: {tableId: "Table3_Renamed"}},
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, {error: 'Table not found "Table3"'});
+
+    // PATCH /columns: Modify a column.
+    resp = await axios.patch(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table2/columns`, {
+      columns: [
+        {id: "A", fields: {colId: "A_Renamed"}},
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 200);
+
+    // Repeat the same operation to check that it gives 404 if the column doesn't exist.
+    resp = await axios.patch(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table2/columns`, {
+      columns: [
+        {id: "A", fields: {colId: "A_Renamed"}},
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, {error: 'Column not found "A"'});
+
+    // Repeat the same operation to check that it gives 404 if the table doesn't exist.
+    resp = await axios.patch(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table222/columns`, {
+      columns: [
+        {id: "A", fields: {colId: "A_Renamed"}},
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, {error: 'Table not found "Table222"'});
+
+    // Rename NewTable2.A -> B to test the name conflict resolution.
+    resp = await axios.patch(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/NewTable2/columns`, {
+      columns: [
+        {id: "A", fields: {colId: "B"}},
+      ]
+    }, chimpy);
+    assert.equal(resp.status, 200);
+
+    // Hide NewTable2.NewCol5 and NewTable2_2 with ACL
+    resp = await axios.post(`${serverUrl}/api/docs/${docIds.Timesheets}/apply`, [
+      ['AddRecord', '_grist_ACLResources', -1, {tableId: 'NewTable2', colIds: 'NewCol5'}],
+      ['AddRecord', '_grist_ACLResources', -2, {tableId: 'NewTable2_2', colIds: '*'}],
+      ['AddRecord', '_grist_ACLRules', null, {
+        resource: -1, aclFormula: '', permissionsText: '-R',
+      }],
+      ['AddRecord', '_grist_ACLRules', null, {
+        // Don't use permissionsText: 'none' here because we need S permission to delete the table at the end.
+        resource: -2, aclFormula: '', permissionsText: '-R',
+      }],
+    ], chimpy);
+    assert.equal(resp.status, 200);
+
+    // GET /tables: Check that the tables were created and renamed.
+    resp = await axios.get(`${serverUrl}/api/docs/${docIds.Timesheets}/tables`, chimpy);
+    assert.equal(resp.status, 200);
+    assert.deepEqual(resp.data,
+      {
+        "tables": [
+          {
+            "id": "Table1",
+            "fields": {
+              "rawViewSectionRef": 2,
+              "primaryViewId": 1,
+              "onDemand": false,
+              "summarySourceTable": 0,
+              "tableRef": 1
+            }
+          },
+          // New tables start here
+          {
+            "id": "Table2",
+            "fields": {
+              "rawViewSectionRef": 4,
+              "primaryViewId": 2,
+              "onDemand": false,
+              "summarySourceTable": 0,
+              "tableRef": 2
+            }
+          },
+          {
+            "id": "Table3_Renamed",
+            "fields": {
+              "rawViewSectionRef": 6,
+              "primaryViewId": 3,
+              "onDemand": false,
+              "summarySourceTable": 0,
+              "tableRef": 3
+            }
+          },
+          {
+            "id": "NewTable1",
+            "fields": {
+              "rawViewSectionRef": 8,
+              "primaryViewId": 4,
+              "onDemand": false,
+              "summarySourceTable": 0,
+              "tableRef": 4
+            }
+          },
+          {
+            "id": "NewTable2",
+            "fields": {
+              "rawViewSectionRef": 10,
+              "primaryViewId": 5,
+              "onDemand": false,
+              "summarySourceTable": 0,
+              "tableRef": 5
+            }
+          },
+          // NewTable2_2 is hidden by ACL
+        ]
+      }
+    );
+
+    // Check the created columns.
+    // TODO these columns should probably be included in the GET /tables response.
+    async function checkColumns(tableId: string, expected: { colId: string, label: string }[]) {
+      const colsResp = await axios.get(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/${tableId}/columns`, chimpy);
+      assert.equal(colsResp.status, 200);
+      const actual = colsResp.data.columns.map((c: any) => ({
+        colId: c.id,
+        label: c.fields.label,
+      }));
+      assert.deepEqual(actual, expected);
+    }
+
+    await checkColumns("Table2", [
+      {colId: "A_Renamed", label: 'A'},
+    ]);
+    await checkColumns("Table3_Renamed", [
+      {colId: "A", label: 'A'},
+    ]);
+    await checkColumns("NewTable1", [
+      {colId: "NewCol1", label: 'NewCol1'},
+    ]);
+    await checkColumns("NewTable2", [
+      {colId: "NewCol2", label: 'Label2'},
+      {colId: "NewCol3", label: 'Label3'},
+      {colId: "NewCol3_2", label: 'Label3'},
+      {colId: "B2", label: 'A'},  // Result of renaming A -> B
+      {colId: "B", label: 'B'},
+      {colId: "NewCol4", label: 'NewCol4'},
+      {colId: "NewCol4_2", label: 'NewCol4_2'},
+      // NewCol5 is hidden by ACL
+    ]);
+
+    resp = await axios.get(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/NewTable2_2/columns`, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, {error: 'Table not found "NewTable2_2"'});  // hidden by ACL
+
+    // Clean up the created tables for other tests
+    // TODO add a DELETE endpoint for /tables and /columns. Probably best to do alongside DELETE /records.
+    resp = await axios.post(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/_grist_Tables/data/delete`,
+      [2, 3, 4, 5, 6], chimpy);
+    assert.equal(resp.status, 200);
   });
 
   it("GET /docs/{did}/tables/{tid}/data returns 404 for non-existent doc", async function() {
@@ -1029,6 +1289,24 @@ function testDocApi() {
         {id: [1, 2, 3, 4], A: [1, 33, 66, "$33"], B: [2, 1, 6, 0]},
       );
 
+      // Test bulk case with a mixture of record shapes
+      await check([
+          {
+            require: {A: 1},
+            fields: {A: 111},
+          },
+          {
+            require: {A: 33},
+            fields: {A: 222, B: 444},
+          },
+          {
+            require: {id: 3},
+            fields: {A: 555, B: 666},
+          },
+        ],
+        {id: [1, 2, 3, 4], A: [111, 222, 555, "$33"], B: [2, 444, 666, 0]},
+      );
+
       // allow_empty_require option with empty `require` updates all records
       await check([
           {
@@ -1511,11 +1789,11 @@ function testDocApi() {
       let resp = await axios.get(`${serverUrl}/api/docs/${docIds.TestDoc}/attachments/22`, chimpy);
       checkError(404, /Attachment not found: 22/, resp);
       resp = await axios.get(`${serverUrl}/api/docs/${docIds.TestDoc}/attachments/moo`, chimpy);
-      checkError(404, /Attachment not found: moo/, resp);
+      checkError(400, /parameter cannot be understood as an integer: moo/, resp);
       resp = await axios.get(`${serverUrl}/api/docs/${docIds.TestDoc}/attachments/22/download`, chimpy);
       checkError(404, /Attachment not found: 22/, resp);
       resp = await axios.get(`${serverUrl}/api/docs/${docIds.TestDoc}/attachments/moo/download`, chimpy);
-      checkError(404, /Attachment not found: moo/, resp);
+      checkError(400, /parameter cannot be understood as an integer: moo/, resp);
     });
 
     it("POST /docs/{did}/attachments produces reasonable errors", async function() {
@@ -1767,6 +2045,13 @@ function testDocApi() {
     assert.notMatch(resp.data, /grist_Tables_column/);
   });
 
+  // A tiny test that /copy doesn't throw.
+  it("POST /docs/{did}/copy succeeds", async function() {
+    const docId = docIds.TestDoc;
+    const worker1 = await userApi.getWorkerAPI(docId);
+    await worker1.copyDoc(docId, undefined, 'copy');
+  });
+
   it("GET /docs/{did}/download/csv serves CSV-encoded document", async function() {
     const resp = await axios.get(`${serverUrl}/api/docs/${docIds.Timesheets}/download/csv?tableId=Table1`, chimpy);
     assert.equal(resp.status, 200);
@@ -1802,6 +2087,39 @@ function testDocApi() {
       `${serverUrl}/api/docs/${docIds.TestDoc}/download/csv`, chimpy);
     assert.equal(resp.status, 400);
     assert.deepEqual(resp.data, { error: 'tableId parameter should be a string: undefined' });
+  });
+
+  it("GET /docs/{did}/download/xlsx serves XLSX-encoded document", async function() {
+    const resp = await axios.get(`${serverUrl}/api/docs/${docIds.Timesheets}/download/xlsx?tableId=Table1`, chimpy);
+    assert.equal(resp.status, 200);
+    assert.notEqual(resp.data, null);
+  });
+
+  it("GET /docs/{did}/download/xlsx respects permissions", async function() {
+    // kiwi has no access to TestDoc
+    const resp = await axios.get(`${serverUrl}/api/docs/${docIds.TestDoc}/download/xlsx?tableId=Table1`, kiwi);
+    assert.equal(resp.status, 403);
+    assert.deepEqual(resp.data, { error: 'No view access' });
+  });
+
+  it("GET /docs/{did}/download/xlsx returns 404 if tableId is invalid", async function() {
+    const resp = await axios.get(`${serverUrl}/api/docs/${docIds.TestDoc}/download/xlsx?tableId=MissingTableId`, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, { error: 'Table MissingTableId not found.' });
+  });
+
+  it("GET /docs/{did}/download/xlsx returns 404 if viewSectionId is invalid", async function() {
+    const resp = await axios.get(
+      `${serverUrl}/api/docs/${docIds.TestDoc}/download/xlsx?tableId=Table1&viewSection=9999`, chimpy);
+    assert.equal(resp.status, 404);
+    assert.deepEqual(resp.data, { error: 'No record 9999 in table _grist_Views_section' });
+  });
+
+  it("GET /docs/{did}/download/xlsx returns 200 if tableId is missing", async function() {
+    const resp = await axios.get(
+      `${serverUrl}/api/docs/${docIds.TestDoc}/download/xlsx`, chimpy);
+    assert.equal(resp.status, 200);
+    assert.notEqual(resp.data, null);
   });
 
   it('POST /workspaces/{wid}/import handles empty filenames', async function() {
@@ -1995,9 +2313,11 @@ function testDocApi() {
     const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
     const doc1 = await userApi.newDoc({name: 'testdoc1'}, ws1);
     const doc2 = await userApi.newDoc({name: 'testdoc2'}, ws1);
-    const doc3 = await userApi.newDoc({name: 'testdoc2'}, ws1);
+    const doc3 = await userApi.newDoc({name: 'testdoc3'}, ws1);
+    const doc4 = await userApi.newDoc({name: 'testdoc4'}, ws1);
     await userApi.updateDocPermissions(doc2, {users: {'kiwi@getgrist.com': 'editors'}});
     await userApi.updateDocPermissions(doc3, {users: {'kiwi@getgrist.com': 'viewers'}});
+    await userApi.updateDocPermissions(doc4, {users: {'kiwi@getgrist.com': 'owners'}});
     try {
       // Put some material in doc3
       let resp = await axios.post(`${serverUrl}/o/docs/api/docs/${doc3}/tables/Table1/data`, {
@@ -2005,28 +2325,52 @@ function testDocApi() {
       }, chimpy);
       assert.equal(resp.status, 200);
 
-      // Kiwi can replace doc2 with doc3
+      // Kiwi cannot replace doc2 with doc3, not an owner
       resp = await axios.post(`${serverUrl}/o/docs/api/docs/${doc2}/replace`, {
         sourceDocId: doc3
       }, kiwi);
-      assert.equal(resp.status, 200);
-      resp = await axios.get(`${serverUrl}/api/docs/${doc2}/tables/Table1/data`, chimpy);
-      assert.equal(resp.data.A[0], 'Orange');
+      assert.equal(resp.status, 403);
+      assert.match(resp.data.error, /Only owners can replace a document/);
 
-      // Kiwi can't replace doc1 with doc3, no write access to doc1
+      // Kiwi can't replace doc1 with doc3, no access to doc1
       resp = await axios.post(`${serverUrl}/o/docs/api/docs/${doc1}/replace`, {
         sourceDocId: doc3
       }, kiwi);
       assert.equal(resp.status, 403);
+      assert.match(resp.data.error, /No view access/);
 
       // Kiwi can't replace doc2 with doc1, no read access to doc1
       resp = await axios.post(`${serverUrl}/o/docs/api/docs/${doc2}/replace`, {
         sourceDocId: doc1
       }, kiwi);
       assert.equal(resp.status, 403);
+      assert.match(resp.data.error, /access denied/);
+
+      // Kiwi cannot replace a doc with material they have only partial read access to.
+      resp = await axios.post(`${serverUrl}/api/docs/${doc3}/apply`, [
+        ['AddRecord', '_grist_ACLResources', -1, {tableId: 'Table1', colIds: 'A'}],
+        ['AddRecord', '_grist_ACLRules', null, {
+          resource: -1, aclFormula: 'user.Access not in [OWNER]', permissionsText: '-R',
+        }]
+      ], chimpy);
+      assert.equal(resp.status, 200);
+      resp = await axios.post(`${serverUrl}/o/docs/api/docs/${doc4}/replace`, {
+        sourceDocId: doc3
+      }, kiwi);
+      assert.equal(resp.status, 403);
+      assert.match(resp.data.error, /not authorized/);
+      resp = await axios.post(`${serverUrl}/api/docs/${doc3}/tables/_grist_ACLRules/data/delete`,
+                              [2], chimpy);
+      assert.equal(resp.status, 200);
+      resp = await axios.post(`${serverUrl}/o/docs/api/docs/${doc4}/replace`, {
+        sourceDocId: doc3
+      }, kiwi);
+      assert.equal(resp.status, 200);
     } finally {
       await userApi.deleteDoc(doc1);
       await userApi.deleteDoc(doc2);
+      await userApi.deleteDoc(doc3);
+      await userApi.deleteDoc(doc4);
     }
   });
 
@@ -2299,36 +2643,70 @@ function testDocApi() {
     await check({eventTypes: ["add"], url: "https://example.com", isReadyColumn: "bar"}, 404, `Column not found "bar"`);
   });
 
-  it("POST /docs/{did}/tables/{tid}/_unsubscribe validates inputs", async function() {
+  async function userCheck(user: AxiosRequestConfig, requestBody: any, status: number, responseBody: any) {
+    const resp = await axios.post(
+      `${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table1/_unsubscribe`,
+      requestBody, user
+    );
+    assert.equal(resp.status, status);
+    if (status !== 200) {
+      responseBody = {error: responseBody};
+    }
+    assert.deepEqual(resp.data, responseBody);
+  }
+
+  it("POST /docs/{did}/tables/{tid}/_unsubscribe validates inputs for owners", async function() {
     const subscribeResponse = await axios.post(
       `${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table1/_subscribe`,
       {eventTypes: ["add"], url: "https://example.com"}, chimpy
     );
     assert.equal(subscribeResponse.status, 200);
-    const {triggerId, unsubscribeKey, webhookId} = subscribeResponse.data;
+    // Owner doesn't need unsubscribeKey.
+    const {webhookId} = subscribeResponse.data;
 
-    async function check(requestBody: any, status: number, responseBody: any) {
-      const resp = await axios.post(
-        `${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table1/_unsubscribe`,
-        requestBody, chimpy
-      );
-      assert.equal(resp.status, status);
-      if (status !== 200) {
-        responseBody = {error: responseBody};
-      }
-      assert.deepEqual(resp.data, responseBody);
-    }
+    const check = userCheck.bind(null, chimpy);
 
-    await check({triggerId: 999}, 404, `Trigger not found "999"`);
-    await check({triggerId, webhookId: "foo"}, 404, `Webhook not found "foo"`);
-    await check({triggerId, webhookId}, 400, 'Bad request: id and unsubscribeKey both required');
-    await check({triggerId, webhookId, unsubscribeKey: "foo"}, 401, 'Wrong unsubscribeKey');
+    await check({webhookId: "foo"}, 404, `Webhook not found "foo"`);
+    await check({}, 404, `Webhook not found ""`);
 
     // Actually unsubscribe
-    await check({triggerId, webhookId, unsubscribeKey}, 200, {success: true});
+    await check({webhookId}, 200, {success: true});
 
     // Trigger is now deleted!
-    await check({triggerId, webhookId, unsubscribeKey}, 404, `Trigger not found "${triggerId}"`);
+    await check({webhookId}, 404, `Webhook not found "${webhookId}"`);
+  });
+
+  it("POST /docs/{did}/tables/{tid}/_unsubscribe validates inputs for editors", async function() {
+    const subscribeResponse = await axios.post(
+      `${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table1/_subscribe`,
+      {eventTypes: ["add"], url: "https://example.com"}, chimpy
+    );
+    assert.equal(subscribeResponse.status, 200);
+    // Editor needs unsubscribeKey.
+    const {unsubscribeKey, webhookId} = subscribeResponse.data;
+
+    const delta = {
+      users: {"kiwi@getgrist.com": 'editors' as string|null}
+    };
+    let accessResp = await axios.patch(`${homeUrl}/api/docs/${docIds.Timesheets}/access`, {delta}, chimpy);
+    assert.equal(accessResp.status, 200);
+
+    const check = userCheck.bind(null, kiwi);
+
+    await check({webhookId: "foo"}, 404, `Webhook not found "foo"`);
+    await check({webhookId}, 400, 'Bad request: unsubscribeKey required');
+    await check({webhookId, unsubscribeKey: "foo"}, 401, 'Wrong unsubscribeKey');
+
+    // Actually unsubscribe
+    await check({webhookId, unsubscribeKey}, 200, {success: true});
+
+    // Trigger is now deleted!
+    await check({webhookId, unsubscribeKey}, 404, `Webhook not found "${webhookId}"`);
+
+    // Remove editor access
+    delta.users['kiwi@getgrist.com'] = null;
+    accessResp = await axios.patch(`${homeUrl}/api/docs/${docIds.Timesheets}/access`, {delta}, chimpy);
+    assert.equal(accessResp.status, 200);
   });
 
   describe("Daily API Limit", () => {
@@ -2367,6 +2745,7 @@ function testDocApi() {
     });
 
     it("limits daily API usage and sets the correct keys in redis", async function() {
+      this.retries(3);
       // Make a new document in a free team site, currently the only real product which limits daily API usage.
       const freeTeamApi = makeUserApi('freeteam');
       const workspaceId = await getWorkspaceId(freeTeamApi, 'FreeTeamWs');
@@ -2558,8 +2937,73 @@ function testDocApi() {
     let redisMonitor: any;
     let redisCalls: any[];
 
+    // Create couple of promises that can be used to monitor
+    // if the endpoint was called.
+    const successCalled = signal();
+    const notFoundCalled = signal();
+    const longStarted = signal();
+    const longFinished = signal();
+    // /probe endpoint will return this status when aborted.
+    let probeStatus = 200;
+    let probeMessage: string|null = "OK";
+
+    // Create an abort controller for the latest request. We will
+    // use it to abort the delay on the longEndpoint.
+    let controller = new AbortController();
+
+    async function autoSubscribe(
+      endpoint: string, docId: string, options?: {
+        tableId?: string,
+        isReadyColumn?: string|null,
+        eventTypes?: string[]
+      }) {
+      // Subscribe helper that returns a method to unsubscribe.
+      const data = await subscribe(endpoint, docId, options);
+      return () => unsubscribe(docId, data, options?.tableId ?? 'Table1');
+    }
+
+    function unsubscribe(docId: string, data: any, tableId = 'Table1') {
+      return axios.post(
+        `${serverUrl}/api/docs/${docId}/tables/${tableId}/_unsubscribe`,
+        data, chimpy
+      );
+    }
+
+    async function subscribe(endpoint: string, docId: string, options?: {
+      tableId?: string,
+      isReadyColumn?: string|null,
+      eventTypes?: string[]
+    }) {
+      // Subscribe helper that returns a method to unsubscribe.
+      const {data, status} = await axios.post(
+        `${serverUrl}/api/docs/${docId}/tables/${options?.tableId ?? 'Table1'}/_subscribe`,
+        {
+          eventTypes: options?.eventTypes ?? ['add', 'update'],
+          url: `${serving.url}/${endpoint}`,
+          isReadyColumn: options?.isReadyColumn === undefined ? 'B' : options?.isReadyColumn
+        }, chimpy
+      );
+      assert.equal(status, 200);
+      return data as WebhookSubscription;
+    }
+
+    async function clearQueue(docId: string) {
+      const deleteResult = await axios.delete(
+        `${serverUrl}/api/docs/${docId}/webhooks/queue`, chimpy
+      );
+      assert.equal(deleteResult.status, 200);
+    }
+
+    async function readStats(docId: string): Promise<WebhookSummary[]> {
+      const result = await axios.get(
+        `${serverUrl}/api/docs/${docId}/webhooks`, chimpy
+      );
+      assert.equal(result.status, 200);
+      return result.data;
+    }
+
     before(async function() {
-      if (!process.env.TEST_REDIS_URL) { this.skip(); }
+      this.timeout(30000);
       requests = {
         "add,update": [],
         "add": [],
@@ -2574,6 +3018,49 @@ function testDocApi() {
       // TODO test retries on failure and slowness in a new test
       serving = await serveSomething(app => {
         app.use(bodyParser.json());
+        app.post('/200', ({body}, res) => {
+          successCalled.emit(body[0].A);
+          res.sendStatus(200);
+          res.end();
+        });
+        app.post('/404', ({body}, res) => {
+          notFoundCalled.emit(body[0].A);
+          res.sendStatus(404); // Webhooks treats it as an error and will retry. Probably it shouldn't work this way.
+          res.end();
+        });
+        app.post('/probe', async ({body}, res) => {
+          longStarted.emit(body.map((r: any) => r.A));
+          // We are scoping the controller to this call, so any subsequent
+          // call will have a new controller. Caller can save this value to abort the previous calls.
+          const scoped = new AbortController();
+          controller = scoped;
+          try {
+            await delayAbort(20000, scoped.signal); // We don't expect to wait for this, we should be aborted
+            assert.fail('Should have been aborted');
+          } catch(exc) {
+            res.status(probeStatus);
+            res.send(probeMessage);
+            res.end();
+            longFinished.emit(body.map((r: any) => r.A));
+          }
+        });
+        app.post('/long', async ({body}, res) => {
+          longStarted.emit(body[0].A);
+          // We are scoping the controller to this call, so any subsequent
+          // call will have a new controller. Caller can save this value to abort the previous calls.
+          const scoped = new AbortController();
+          controller = scoped;
+          try {
+            await delayAbort(20000, scoped.signal); // We don't expect to wait for this.
+            res.sendStatus(200);
+            res.end();
+            longFinished.emit(body[0].A);
+          } catch(exc) {
+            res.sendStatus(200); // Send ok, so that it won't be seen as an error.
+            res.end();
+            longFinished.emit([408, body[0].A]); // We will signal that this is success but after aborting timeout.
+          }
+        });
         app.post('/:eventTypes', async ({body, params: {eventTypes}}, res) => {
           requests[eventTypes as keyof WebhookRequests].push(body);
           res.sendStatus(200);
@@ -2585,151 +3072,812 @@ function testDocApi() {
           }
         });
       }, webhooksTestPort);
-
-      redisCalls = [];
-      redisMonitor = createClient(process.env.TEST_REDIS_URL);
-      redisMonitor.monitor();
-      redisMonitor.on("monitor", (_time: any, args: any, _rawReply: any) => {
-        redisCalls.push(args);
-      });
     });
 
     after(async function() {
-      if (!process.env.TEST_REDIS_URL) { this.skip(); }
-      serving.shutdown();
-      await redisMonitor.quitAsync();
+      await serving.shutdown();
     });
 
-    it("delivers expected payloads from combinations of changes, with retrying and batching", async function() {
-      // Create a test document.
-      const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
-      const docId = await userApi.newDoc({name: 'testdoc'}, ws1);
-      const doc = userApi.getDocAPI(docId);
+    describe('table endpoints', function() {
+      before(async function() {
+        this.timeout(30000);
+        // We rely on the REDIS server in this test.
+        if (!process.env.TEST_REDIS_URL) { this.skip(); }
+        requests = {
+          "add,update": [],
+          "add": [],
+          "update": [],
+        };
 
-      // For some reason B is turned into Numeric even when given bools
-      await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
-        ['ModifyColumn', 'Table1', 'B', {type: 'Bool'}],
-      ], chimpy);
+        redisCalls = [];
+        redisMonitor = createClient(process.env.TEST_REDIS_URL);
+        redisMonitor.monitor();
+        redisMonitor.on("monitor", (_time: any, args: any, _rawReply: any) => {
+          redisCalls.push(args);
+        });
+      });
 
-      // Make a webhook for every combination of event types
-      const subscribeResponses = [];
-      const webhookIds: Record<string, string> = {};
-      for (const eventTypes of [
-        ["add"],
-        ["update"],
-        ["add", "update"],
-      ]) {
-        const {data, status} = await axios.post(
-          `${serverUrl}/api/docs/${docId}/tables/Table1/_subscribe`,
-          {eventTypes, url: `${serving.url}/${eventTypes}`, isReadyColumn: "B"}, chimpy
+      after(async function() {
+        if (!process.env.TEST_REDIS_URL) { this.skip(); }
+        await redisMonitor.quitAsync();
+      });
+
+      it("delivers expected payloads from combinations of changes, with retrying and batching", async function() {
+        // Create a test document.
+        const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
+        const docId = await userApi.newDoc({name: 'testdoc'}, ws1);
+        const doc = userApi.getDocAPI(docId);
+
+        // For some reason B is turned into Numeric even when given bools
+        await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
+          ['ModifyColumn', 'Table1', 'B', {type: 'Bool'}],
+        ], chimpy);
+
+        // Make a webhook for every combination of event types
+        const subscribeResponses = [];
+        const webhookIds: Record<string, string> = {};
+        for (const eventTypes of [
+          ["add"],
+          ["update"],
+          ["add", "update"],
+        ]) {
+          const {data, status} = await axios.post(
+            `${serverUrl}/api/docs/${docId}/tables/Table1/_subscribe`,
+            {eventTypes, url: `${serving.url}/${eventTypes}`, isReadyColumn: "B"}, chimpy
+          );
+          assert.equal(status, 200);
+          subscribeResponses.push(data);
+          webhookIds[data.webhookId] = String(eventTypes);
+        }
+
+        // Add and update some rows, trigger some events
+        // Values of A where B is true and thus the record is ready are [1, 4, 7, 8]
+        // So those are the values seen in expectedEvents
+        await doc.addRows("Table1", {
+          A: [1, 2],
+          B: [true, false], // 1  is ready, 2 is not ready yet
+        });
+        await doc.updateRows("Table1", {id: [2], A: [3]});  // still not ready
+        await doc.updateRows("Table1", {id: [2], A: [4], B: [true]});  // ready!
+        await doc.updateRows("Table1", {id: [2], A: [5], B: [false]});  // not ready again
+        await doc.updateRows("Table1", {id: [2], A: [6]});  // still not ready
+        await doc.updateRows("Table1", {id: [2], A: [7], B: [true]});  // ready!
+        await doc.updateRows("Table1", {id: [2], A: [8]});  // still ready!
+
+        // The end result here is additions for column A (now A3) with values [13, 15, 18]
+        // and an update for 101
+        await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
+          ['BulkAddRecord', 'Table1', [3, 4, 5, 6], {A: [9, 10, 11, 12], B: [true, true, false, false]}],
+          ['BulkUpdateRecord', 'Table1', [1, 2, 3, 4, 5, 6], {
+            A: [101, 102, 13, 14, 15, 16],
+            B: [true, false, true, false, true, false],
+          }],
+
+          ['RenameColumn', 'Table1', 'A', 'A3'],
+          ['RenameColumn', 'Table1', 'B', 'B3'],
+
+          ['RenameTable', 'Table1', 'Table12'],
+
+          // FIXME a double rename A->A2->A3 doesn't seem to get summarised correctly
+          // ['RenameColumn', 'Table12', 'A2', 'A3'],
+          // ['RenameColumn', 'Table12', 'B2', 'B3'],
+
+          ['RemoveColumn', 'Table12', 'C'],
+        ], chimpy);
+
+        // FIXME record changes after a RenameTable in the same bundle
+        //  don't appear in the action summary
+        await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
+          ['AddRecord', 'Table12', 7, {A3: 17, B3: false}],
+          ['UpdateRecord', 'Table12', 7, {A3: 18, B3: true}],
+
+          ['AddRecord', 'Table12', 8, {A3: 19, B3: true}],
+          ['UpdateRecord', 'Table12', 8, {A3: 20, B3: false}],
+
+          ['AddRecord', 'Table12', 9, {A3: 20, B3: true}],
+          ['RemoveRecord', 'Table12', 9],
+        ], chimpy);
+
+        // Add 200 rows. These become the `expected200AddEvents`
+        await doc.addRows("Table12", {
+          A3: _.range(200, 400),
+          B3: arrayRepeat(200, true),
+        });
+
+        await receivedLastEvent;
+
+        // Unsubscribe
+        await Promise.all(subscribeResponses.map(async subscribeResponse => {
+          const unsubscribeResponse = await axios.post(
+            `${serverUrl}/api/docs/${docId}/tables/Table12/_unsubscribe`,
+            subscribeResponse, chimpy
+          );
+          assert.equal(unsubscribeResponse.status, 200);
+          assert.deepEqual(unsubscribeResponse.data, {success: true});
+        }));
+
+        // Further changes should generate no events because the triggers are gone
+        await doc.addRows("Table12", {
+          A3: [88, 99],
+          B3: [true, false],
+        });
+
+        assert.deepEqual(requests, expectedRequests);
+
+        // Check that the events were all pushed to the redis queue
+        const queueRedisCalls = redisCalls.filter(args => args[1] === "webhook-queue-" + docId);
+        const redisPushes = _.chain(queueRedisCalls)
+          .filter(args => args[0] === "rpush")          // Array<["rpush", key, ...events: string[]]>
+          .flatMap(args => args.slice(2))               // events: string[]
+          .map(JSON.parse)                              // events: WebhookEvent[]
+          .groupBy('id')                                // {[webHookId: string]: WebhookEvent[]}
+          .mapKeys((_value, key) => webhookIds[key])    // {[eventTypes: 'add'|'update'|'add,update']: WebhookEvent[]}
+          .mapValues(group => _.map(group, 'payload'))  // {[eventTypes: 'add'|'update'|'add,update']: RowRecord[]}
+          .value();
+        const expectedPushes = _.mapValues(expectedRequests, value => _.flatten(value));
+        assert.deepEqual(redisPushes, expectedPushes);
+
+        // Check that the events were all removed from the redis queue
+        const redisTrims = queueRedisCalls.filter(args => args[0] === "ltrim")
+          .map(([,, start, end]) => {
+            assert.equal(end, '-1');
+            start = Number(start);
+            assert.isTrue(start > 0);
+            return start;
+        });
+        const expectedTrims = Object.values(redisPushes).map(value => value.length);
+        assert.equal(
+          _.sum(redisTrims),
+          _.sum(expectedTrims),
         );
-        assert.equal(status, 200);
-        subscribeResponses.push(data);
-        webhookIds[data.webhookId] = String(eventTypes);
+
+      });
+    });
+
+    describe("/webhooks endpoint", function() {
+      let docId: string;
+      let doc: DocAPI;
+      let stats: WebhookSummary[];
+      before(async function() {
+        // Create a test document.
+        const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
+        docId = await userApi.newDoc({name: 'testdoc2'}, ws1);
+        doc = userApi.getDocAPI(docId);
+        await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
+          ['ModifyColumn', 'Table1', 'B', {type: 'Bool'}],
+        ], chimpy);
+      });
+
+      const waitForQueue = async (length: number) => {
+        await waitForIt(async () => {
+          stats = await readStats(docId);
+          assert.equal(length, _.sum(stats.map(x => x.usage?.numWaiting ?? 0)));
+        }, 1000, 200);
+      };
+
+      it("should clear the outgoing queue", async() => {
+        // Create a test document.
+        const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
+        const docId = await userApi.newDoc({name: 'testdoc2'}, ws1);
+        const doc = userApi.getDocAPI(docId);
+        await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
+          ['ModifyColumn', 'Table1', 'B', {type: 'Bool'}],
+        ], chimpy);
+
+        // Try to clear the queue, even if it is empty.
+        await clearQueue(docId);
+
+        const cleanup: (() => Promise<any>)[] = [];
+
+        // Subscribe a valid webhook endpoint.
+        cleanup.push(await autoSubscribe('200', docId));
+        // Subscribe an invalid webhook endpoint.
+        cleanup.push(await autoSubscribe('404', docId));
+
+        // Prepare signals, we will be waiting for those two to be called.
+        successCalled.reset();
+        notFoundCalled.reset();
+        // Trigger both events.
+        await doc.addRows("Table1", {
+          A: [1],
+          B: [true],
+        });
+
+        // Wait for both of them to be called (this is correct order)
+        await successCalled.waitAndReset();
+        await notFoundCalled.waitAndReset();
+
+        // Broken endpoint will be called multiple times here, and any subsequent triggers for working
+        // endpoint won't be called.
+        await notFoundCalled.waitAndReset();
+
+        // But the working endpoint won't be called more then once.
+        assert.isFalse(successCalled.called());
+
+        // Trigger second event.
+        await doc.addRows("Table1", {
+          A: [2],
+          B: [true],
+        });
+        // Error endpoint will be called with the first row (still).
+        const firstRow = await notFoundCalled.waitAndReset();
+        assert.deepEqual(firstRow, 1);
+
+        // But the working endpoint won't be called till we reset the queue.
+        assert.isFalse(successCalled.called());
+
+        // Now reset the queue.
+        await clearQueue(docId);
+
+        assert.isFalse(successCalled.called());
+        assert.isFalse(notFoundCalled.called());
+
+        // Prepare for new calls.
+        successCalled.reset();
+        notFoundCalled.reset();
+        // Trigger them.
+        await doc.addRows("Table1", {
+          A: [3],
+          B: [true],
+        });
+        // We will receive data from the 3rd row only (the second one was omitted).
+        let thirdRow = await successCalled.waitAndReset();
+        assert.deepEqual(thirdRow, 3);
+        thirdRow = await notFoundCalled.waitAndReset();
+        assert.deepEqual(thirdRow, 3);
+        // And the situation will be the same, the working endpoint won't be called till we reset the queue, but
+        // the error endpoint will be called with the third row multiple times.
+        await notFoundCalled.waitAndReset();
+        assert.isFalse(successCalled.called());
+
+        // Cleanup everything, we will now test request timeouts.
+        await Promise.all(cleanup.map(fn => fn())).finally(() => cleanup.length = 0);
+        await clearQueue(docId);
+
+        // Create 2 webhooks, one that is very long.
+        cleanup.push(await autoSubscribe('200', docId));
+        cleanup.push(await autoSubscribe('long', docId));
+        successCalled.reset();
+        longFinished.reset();
+        longStarted.reset();
+        // Trigger them.
+        await doc.addRows("Table1", {
+          A: [4],
+          B: [true],
+        });
+        // 200 will be called immediately.
+        await successCalled.waitAndReset();
+        // Long will be started immediately.
+        await longStarted.waitAndReset();
+        // But it won't be finished.
+        assert.isFalse(longFinished.called());
+        // It will be aborted.
+        controller.abort();
+        assert.deepEqual(await longFinished.waitAndReset(),  [408, 4]);
+
+        // Trigger another event.
+        await doc.addRows("Table1", {
+          A: [5],
+          B: [true],
+        });
+        // We are stuck once again on the long call. But this time we won't
+        // abort it till the end of this test.
+        assert.deepEqual(await successCalled.waitAndReset(),  5);
+        assert.deepEqual(await longStarted.waitAndReset(),  5);
+        assert.isFalse(longFinished.called());
+
+        // Remember this controller for cleanup.
+        const controller5 = controller;
+        // Trigger another event.
+        await doc.addRows("Table1", {
+          A: [6],
+          B: [true],
+        });
+        // We are now completely stuck on the 5th row webhook.
+        assert.isFalse(successCalled.called());
+        assert.isFalse(longFinished.called());
+        // Clear the queue, it will free webhooks requests, but it won't cancel long handler on the external server
+        // so it is still waiting.
+        assert.isTrue((await axios.delete(
+          `${serverUrl}/api/docs/${docId}/webhooks/queue`, chimpy
+        )).status === 200);
+        // Now we can release the stuck request.
+        controller5.abort();
+        // We will be cancelled from the 5th row.
+        assert.deepEqual(await longFinished.waitAndReset(), [408, 5]);
+
+        // We won't be called for the 6th row at all, as it was stuck and the queue was purged.
+        assert.isFalse(successCalled.called());
+        assert.isFalse(longStarted.called());
+
+        // Trigger next event.
+        await doc.addRows("Table1", {
+          A: [7],
+          B: [true],
+        });
+        // We will be called once again with a new 7th row.
+        assert.deepEqual(await successCalled.waitAndReset(), 7);
+        assert.deepEqual(await longStarted.waitAndReset(), 7);
+        // But we are stuck again.
+        assert.isFalse(longFinished.called());
+        // And we can abort current request from 7th row (6th row was skipped).
+        controller.abort();
+        assert.deepEqual(await longFinished.waitAndReset(), [408, 7]);
+
+        // Cleanup all
+        await Promise.all(cleanup.map(fn => fn())).finally(() => cleanup.length = 0);
+        await clearQueue(docId);
+      });
+
+      it("should not call to a deleted webhook", async() => {
+        // Create a test document.
+        const ws1 = (await userApi.getOrgWorkspaces('current'))[0].id;
+        const docId = await userApi.newDoc({name: 'testdoc4'}, ws1);
+        const doc = userApi.getDocAPI(docId);
+        await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
+          ['ModifyColumn', 'Table1', 'B', {type: 'Bool'}],
+        ], chimpy);
+
+        // Subscribe to 2 webhooks, we will remove the second one.
+        const webhook1 = await autoSubscribe('probe', docId);
+        const webhook2 = await autoSubscribe('200', docId);
+
+        probeStatus = 200;
+        successCalled.reset();
+        longFinished.reset();
+        // Trigger them.
+        await doc.addRows("Table1", {
+          A: [1],
+          B: [true],
+        });
+
+        // Wait for the first one to be called.
+        await longStarted.waitAndReset();
+        // Now why we are on the call remove the second one.
+        // Check that it is queued.
+        const stats = await readStats(docId);
+        assert.equal(2, _.sum(stats.map(x => x.usage?.numWaiting ?? 0)));
+        await webhook2();
+        // Let the first one finish.
+        controller.abort();
+        await longFinished.waitAndReset();
+        // The second one is not called.
+        assert.isFalse(successCalled.called());
+        // Triggering next event, we will get only calls to the probe (first webhook).
+        await doc.addRows("Table1", {
+          A: [2],
+          B: [true],
+        });
+        await longStarted.waitAndReset();
+        controller.abort();
+        await longFinished.waitAndReset();
+
+        // Unsubscribe.
+        await webhook1();
+      });
+
+      it("should return statistics", async() => {
+        await clearQueue(docId);
+        // Read stats, it should be empty.
+        assert.deepEqual(await readStats(docId), []);
+        // Now subscribe couple of webhooks.
+        const first = await subscribe('200', docId);
+        const second = await subscribe('404', docId);
+        // And compare stats.
+        assert.deepEqual(await readStats(docId), [
+          {
+            id: first.webhookId,
+            fields : {
+              url: `${serving.url}/200`,
+              unsubscribeKey: first.unsubscribeKey,
+              eventTypes: ['add', 'update'],
+              enabled: true,
+              isReadyColumn: 'B',
+              tableId: 'Table1'
+            }, usage : {
+              status: 'idle',
+              numWaiting: 0,
+              lastEventBatch: null
+            }
+          },
+          {
+            id: second.webhookId,
+            fields : {
+              url: `${serving.url}/404`,
+              unsubscribeKey: second.unsubscribeKey,
+              eventTypes: ['add', 'update'],
+              enabled: true,
+              isReadyColumn: 'B',
+              tableId: 'Table1'
+            }, usage : {
+              status: 'idle',
+              numWaiting: 0,
+              lastEventBatch: null
+            }
+          },
+        ]);
+
+        // We should be able to unsubscribe using info that we got.
+        await unsubscribe(docId, first);
+        await unsubscribe(docId, second);
+        assert.deepEqual(await readStats(docId), []);
+
+        // Test that stats work when there is no ready column.
+        let unsubscribe1 = await autoSubscribe('200', docId, { isReadyColumn: null });
+        assert.isNull((await readStats(docId))[0].fields.isReadyColumn);
+        await unsubscribe1();
+
+        // Now test that we receive some useful information and the state transition works.
+        unsubscribe1 = await autoSubscribe('probe', docId);
+        // Test also dates update.
+        let now = Date.now();
+        // Webhook starts as idle (tested already). Now we will trigger it.
+        longStarted.reset();
+        longFinished.reset();
+        await doc.addRows("Table1", {
+          A: [1],
+          B: [true],
+        });
+        // It will call our probe endpoint, so we will be able to see changes as they happen.
+        await longStarted.waitAndReset();
+        stats = await readStats(docId);
+        assert.isNotNull(stats[0].usage);
+        assert.equal(stats[0].usage?.numWaiting, 1);
+        assert.equal(stats[0].usage?.status, 'sending');
+        assert.isNotNull(stats[0].usage?.updatedTime);
+        assert.isAbove(stats[0].usage?.updatedTime ?? 0, now);
+        assert.isNull(stats[0].usage?.lastErrorMessage);
+        assert.isNull(stats[0].usage?.lastSuccessTime);
+        assert.isNull(stats[0].usage?.lastFailureTime);
+        assert.isNull(stats[0].usage?.lastHttpStatus);
+        assert.isNull(stats[0].usage?.lastEventBatch);
+        // Ok, we can return success now.
+        probeStatus = 200;
+        controller.abort();
+        await longFinished.waitAndReset();
+        // After releasing the hook, we are not 100% sure stats are updated, so we will wait a bit.
+        // If we are checking stats while we are holding the hook (in the probe endpoint) it is safe
+        // to assume that stats are up to date.
+        await waitForIt(async () => {
+          stats = await readStats(docId);
+          assert.equal(stats[0].usage?.numWaiting, 0);
+        }, 1000, 200);
+        assert.equal(stats[0].usage?.numWaiting, 0);
+        assert.equal(stats[0].usage?.status, 'idle');
+        assert.isAtLeast(stats[0].usage?.updatedTime ?? 0, now);
+        assert.isNull(stats[0].usage?.lastErrorMessage);
+        assert.isNull(stats[0].usage?.lastFailureTime);
+        assert.isAtLeast(stats[0].usage?.lastSuccessTime ?? 0, now);
+        assert.equal(stats[0].usage?.lastHttpStatus, 200);
+        assert.deepEqual(stats[0].usage?.lastEventBatch, {
+          status: 'success',
+          attempts: 1,
+          size: 1,
+          errorMessage: null,
+          httpStatus: 200,
+        });
+
+        // Now trigger the endpoint once again.
+        now = Date.now();
+        await doc.addRows("Table1", {
+          A: [2],
+          B: [true],
+        });
+        await longStarted.waitAndReset();
+        // This time, return an error, so we will have another attempt.
+        probeStatus = 404;
+        probeMessage = null;
+        controller.abort();
+        await longFinished.waitAndReset();
+        // Wait for the second attempt.
+        await longStarted.waitAndReset();
+        stats = await readStats(docId);
+        assert.equal(stats[0].usage?.numWaiting, 1);
+        assert.equal(stats[0].usage?.status, 'retrying');
+        assert.isAtLeast(stats[0].usage?.updatedTime ?? 0, now);
+        // There was no body in the response yet.
+        assert.isNull(stats[0].usage?.lastErrorMessage);
+        // Now we have a failure, and the success was before.
+        assert.isAtLeast(stats[0].usage?.lastFailureTime ?? 0, now);
+        assert.isBelow(stats[0].usage?.lastSuccessTime ?? 0, now);
+        assert.equal(stats[0].usage?.lastHttpStatus, 404);
+        // Batch contains info about last attempt.
+        assert.deepEqual(stats[0].usage?.lastEventBatch, {
+          status: 'failure',
+          attempts: 1,
+          size: 1,
+          errorMessage: null,
+          httpStatus: 404,
+        });
+        // Now make an error with some message.
+        probeStatus = 500;
+        probeMessage = 'Some error';
+        controller.abort();
+        await longFinished.waitAndReset();
+        await longStarted.waitAndReset();
+        // We have 3rd attempt, with an error message.
+        stats = await readStats(docId);
+        assert.equal(stats[0].usage?.numWaiting, 1);
+        assert.equal(stats[0].usage?.status, 'retrying');
+        assert.equal(stats[0].usage?.lastHttpStatus, 500);
+        assert.equal(stats[0].usage?.lastErrorMessage, probeMessage);
+        assert.deepEqual(stats[0].usage?.lastEventBatch, {
+          status: 'failure',
+          attempts: 2,
+          size: 1,
+          errorMessage: probeMessage,
+          httpStatus: 500,
+        });
+        // Now we will succeed.
+        probeStatus = 200;
+        controller.abort();
+        await longFinished.waitAndReset();
+        // Give it some time to update stats.
+        await waitForIt(async () => {
+          stats = await readStats(docId);
+          assert.equal(stats[0].usage?.numWaiting, 0);
+        }, 1000, 200);
+        stats = await readStats(docId);
+        assert.equal(stats[0].usage?.numWaiting, 0);
+        assert.equal(stats[0].usage?.status, 'idle');
+        assert.equal(stats[0].usage?.lastHttpStatus, 200);
+        assert.equal(stats[0].usage?.lastErrorMessage, probeMessage);
+        assert.isAtLeast(stats[0].usage?.lastFailureTime ?? 0, now);
+        assert.isAtLeast(stats[0].usage?.lastSuccessTime ?? 0, now);
+        assert.deepEqual(stats[0].usage?.lastEventBatch, {
+          status: 'success',
+          attempts: 3,
+          size: 1,
+          // Errors are cleared.
+          errorMessage: null,
+          httpStatus: 200,
+        });
+        // Clear everything.
+        await clearQueue(docId);
+        stats = await readStats(docId);
+        assert.isNotNull(stats[0].usage);
+        assert.equal(stats[0].usage?.numWaiting, 0);
+        assert.equal(stats[0].usage?.status, 'idle');
+        // Now pile some events with two webhooks to the probe.
+        const unsubscribe2 = await autoSubscribe('probe', docId);
+        await doc.addRows("Table1", {
+          A: [3],
+          B: [true],
+        });
+        await doc.addRows("Table1", {
+          A: [4],
+          B: [true],
+        });
+        await doc.addRows("Table1", {
+          A: [5],
+          B: [true],
+        });
+        assert.deepEqual(await longStarted.waitAndReset(), [3]);
+        stats = await readStats(docId);
+        assert.lengthOf(stats, 2);
+        // First one is pending and second one didn't have a chance to be executed yet.
+        assert.equal(stats[0].usage?.status, 'sending');
+        assert.equal(stats[1].usage?.status, 'idle');
+        assert.isNull(stats[0].usage?.lastEventBatch);
+        assert.isNull(stats[1].usage?.lastEventBatch);
+        assert.equal(6, _.sum(stats.map(x => x.usage?.numWaiting ?? 0)));
+        // Now let them finish in deterministic order.
+        controller.abort();
+        assert.deepEqual(await longFinished.waitAndReset(), [3]);
+        // We had 6 events to go, we've just finished the first one.
+        const nextPass = async (length: number, A: number) => {
+          assert.deepEqual(await longStarted.waitAndReset(), [A]);
+          stats = await readStats(docId);
+          assert.equal(length, _.sum(stats.map(x => x.usage?.numWaiting ?? 0)));
+          controller.abort();
+          assert.deepEqual(await longFinished.waitAndReset(), [A]);
+        };
+        // Now we have 5 events to go.
+        await nextPass(5, 3);
+        await nextPass(4, 4);
+        await nextPass(3, 4);
+        await nextPass(2, 5);
+        await nextPass(1, 5);
+
+        await waitForQueue(0);
+        await unsubscribe2();
+        await unsubscribe1();
+      });
+
+      it("should monitor failures", async() => {
+        const webhook3 = await subscribe('probe', docId);
+        const webhook4 = await subscribe('probe', docId);
+        // Now we have two webhooks, both will fail, but the first one will
+        // be put in the idle state and server will start to send the second one.
+        probeStatus = 509;
+        probeMessage = "fail";
+        await doc.addRows("Table1", {
+          A: [5],
+          B: [true],
+        });
+
+        const pass = async () => {
+          await longStarted.waitAndReset();
+          controller.abort();
+          await longFinished.waitAndReset();
+        };
+        // Server will retry this 4 times (GRIST_TRIGGER_MAX_ATTEMPTS = 4)
+        await pass();
+        await pass();
+        await pass();
+        await pass();
+        // And will fail, next it will call the second webhook.
+        await longStarted.waitAndReset();
+        // Hold it a bit (by not aborting).
+
+        // Read stats, first one is idle and has an error message, second one is active.
+        // (We don't need to wait - stats are up to date since triggers are waiting for us).
+        stats = await readStats(docId);
+        assert.equal(stats.length, 2);
+        assert.equal(stats[0].id, webhook3.webhookId);
+        assert.equal(stats[1].id, webhook4.webhookId);
+        assert.equal(stats[0].usage?.status, 'postponed');
+        assert.equal(stats[1].usage?.status, 'sending');
+        assert.equal(stats[0].usage?.numWaiting, 1);
+        assert.equal(stats[1].usage?.numWaiting, 1);
+        assert.equal(stats[0].usage?.lastErrorMessage, probeMessage);
+        assert.equal(stats[0].usage?.lastHttpStatus, 509);
+        assert.equal(stats[0].usage?.lastEventBatch?.status, "failure");
+        assert.isNull(stats[1].usage?.lastErrorMessage);
+
+        // We will now drain the queue, using the second webhook.
+        // First webhook is postponed, and the second is waiting for us. We have 2 events in total.
+        // To drain the queue, and cause this webhook to fail we will need to generate 10 more events,
+        // max queue since is 10, but if we generate exactly 10 events it will not work
+        // as the queue size will be 9 when the triggers decide to reject them.
+        await waitForQueue(2);
+        const addRowProm = doc.addRows("Table1", {
+          A: arrayRepeat(5, 100), // there are 2 webhooks, so 5 events per webhook.
+          B: arrayRepeat(5, true)
+        }).catch(() => {});
+        // WARNING: we can't wait for it, as the Webhooks will literally stop the document, and wait
+        // for the queue to drain. So we will carefully go further, and wait for the queue to drain.
+
+        // It will try 4 times before giving up (the first call is in progress)
+        probeStatus = 429;
+        // First.
+        controller.abort();
+        await longFinished.waitAndReset();
+        // Second and third.
+        await pass();
+        await pass();
+
+        // Before the last one, we will wait for the add rows operation but in a different way.
+        // We will count how many webhook events were added so far, we should have 10 in total.
+        await waitForQueue(12);
+        // We are good to go, after trying for the 4th time it will gave up and remove this
+        // event from the queue.
+        await pass();
+
+        // Wait for the first webhook to start.
+        await longStarted.waitAndReset();
+
+        // And make sure we have info about rejected batch.
+        stats = await readStats(docId);
+        assert.equal(stats.length, 2);
+        assert.equal(stats[0].id, webhook3.webhookId);
+        assert.equal(stats[0].usage?.status, 'sending');
+        assert.equal(stats[0].usage?.numWaiting, 6);
+        assert.equal(stats[0].usage?.lastErrorMessage, probeMessage);
+        assert.equal(stats[0].usage?.lastHttpStatus, 509);
+
+        assert.equal(stats[1].id, webhook4.webhookId);
+        assert.equal(stats[1].usage?.status, 'error'); // webhook is in error state, some events were lost.
+        assert.equal(stats[1].usage?.lastEventBatch?.status, "rejected");
+        assert.equal(stats[1].usage?.numWaiting, 5); // We skipped one event.
+
+        // Now unfreeze document by handling all events (they are aligned so will be handled in just 2 batches, first
+        // one is already waiting in our /probe endpoint).
+        probeStatus = 200;
+        controller.abort();
+        await longFinished.waitAndReset();
+        await pass();
+        await waitForQueue(0);
+
+        // Now can wait for the rows to process.
+        await addRowProm;
+        await unsubscribe(docId, webhook3);
+        await unsubscribe(docId, webhook4);
+      });
+    });
+  });
+
+  describe("Allowed Origin", () => {
+    it('should allow only example.com',  async () => {
+      async function checkOrigin(origin: string, allowed: boolean) {
+        const resp = await axios.get(`${serverUrl}/api/docs/${docIds.Timesheets}/tables/Table1/data`,
+        {...chimpy, headers: {...chimpy.headers, "Origin": origin}}
+        );
+        assert.equal(resp.headers['access-control-allow-credentials'], allowed ? 'true' : undefined);
+        assert.equal(resp.status, allowed ? 200 : 403);
       }
 
-      // Add and update some rows, trigger some events
-      // Values of A where B is true and thus the record is ready are [1, 4, 7, 8]
-      // So those are the values seen in expectedEvents
-      await doc.addRows("Table1", {
-        A: [1, 2],
-        B: [true, false], // 1  is ready, 2 is not ready yet
-      });
-      await doc.updateRows("Table1", {id: [2], A: [3]});  // still not ready
-      await doc.updateRows("Table1", {id: [2], A: [4], B: [true]});  // ready!
-      await doc.updateRows("Table1", {id: [2], A: [5], B: [false]});  // not ready again
-      await doc.updateRows("Table1", {id: [2], A: [6]});  // still not ready
-      await doc.updateRows("Table1", {id: [2], A: [7], B: [true]});  // ready!
-      await doc.updateRows("Table1", {id: [2], A: [8]});  // still ready!
-
-      // The end result here is additions for column A (now A3) with values [13, 15, 18]
-      // and an update for 101
-      await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
-        ['BulkAddRecord', 'Table1', [3, 4, 5, 6], {A: [9, 10, 11, 12], B: [true, true, false, false]}],
-        ['BulkUpdateRecord', 'Table1', [1, 2, 3, 4, 5, 6], {
-          A: [101, 102, 13, 14, 15, 16],
-          B: [true, false, true, false, true, false],
-        }],
-
-        ['RenameColumn', 'Table1', 'A', 'A3'],
-        ['RenameColumn', 'Table1', 'B', 'B3'],
-
-        ['RenameTable', 'Table1', 'Table12'],
-
-        // FIXME a double rename A->A2->A3 doesn't seem to get summarised correctly
-        // ['RenameColumn', 'Table12', 'A2', 'A3'],
-        // ['RenameColumn', 'Table12', 'B2', 'B3'],
-
-        ['RemoveColumn', 'Table12', 'C'],
-      ], chimpy);
-
-      // FIXME record changes after a RenameTable in the same bundle
-      //  don't appear in the action summary
-      await axios.post(`${serverUrl}/api/docs/${docId}/apply`, [
-        ['AddRecord', 'Table12', 7, {A3: 17, B3: false}],
-        ['UpdateRecord', 'Table12', 7, {A3: 18, B3: true}],
-
-        ['AddRecord', 'Table12', 8, {A3: 19, B3: true}],
-        ['UpdateRecord', 'Table12', 8, {A3: 20, B3: false}],
-
-        ['AddRecord', 'Table12', 9, {A3: 20, B3: true}],
-        ['RemoveRecord', 'Table12', 9],
-      ], chimpy);
-
-      // Add 200 rows. These become the `expected200AddEvents`
-      await doc.addRows("Table12", {
-        A3: _.range(200, 400),
-        B3: arrayRepeat(200, true),
-      });
-
-      await receivedLastEvent;
-
-      // Unsubscribe
-      await Promise.all(subscribeResponses.map(async subscribeResponse => {
-        const unsubscribeResponse = await axios.post(
-          `${serverUrl}/api/docs/${docId}/tables/Table12/_unsubscribe`,
-          subscribeResponse, chimpy
-        );
-        assert.equal(unsubscribeResponse.status, 200);
-        assert.deepEqual(unsubscribeResponse.data, {success: true});
-      }));
-
-      // Further changes should generate no events because the triggers are gone
-      await doc.addRows("Table12", {
-        A3: [88, 99],
-        B3: [true, false],
-      });
-
-      assert.deepEqual(requests, expectedRequests);
-
-      // Check that the events were all pushed to the redis queue
-      const queueRedisCalls = redisCalls.filter(args => args[1] === "webhook-queue-" + docId);
-      const redisPushes = _.chain(queueRedisCalls)
-        .filter(args => args[0] === "rpush")          // Array<["rpush", key, ...events: string[]]>
-        .flatMap(args => args.slice(2))               // events: string[]
-        .map(JSON.parse)                              // events: WebhookEvent[]
-        .groupBy('id')                                // {[webHookId: string]: WebhookEvent[]}
-        .mapKeys((_value, key) => webhookIds[key])    // {[eventTypes: 'add'|'update'|'add,update']: WebhookEvent[]}
-        .mapValues(group => _.map(group, 'payload'))  // {[eventTypes: 'add'|'update'|'add,update']: RowRecord[]}
-        .value();
-      const expectedPushes = _.mapValues(expectedRequests, value => _.flatten(value));
-      assert.deepEqual(redisPushes, expectedPushes);
-
-      // Check that the events were all removed from the redis queue
-      const redisTrims = queueRedisCalls.filter(args => args[0] === "ltrim")
-        .map(([,, start, end]) => {
-          assert.equal(end, '-1');
-          start = Number(start);
-          assert.isTrue(start > 0);
-          return start;
-      });
-      const expectedTrims = Object.values(redisPushes).map(value => value.length);
-      assert.equal(
-        _.sum(redisTrims),
-        _.sum(expectedTrims),
-      );
-
+      await checkOrigin("https://www.toto.com", false);
+      await checkOrigin("https://badexample.com", false);
+      await checkOrigin("https://bad.com/example.com/toto", false);
+      await checkOrigin("https://example.com/path", true);
+      await checkOrigin("https://example.com:3000/path", true);
+      await checkOrigin("https://good.example.com/toto", true);
     });
+
+    it("should respond with correct CORS headers", async function() {
+      const wid = await getWorkspaceId(userApi, 'Private');
+      const docId = await userApi.newDoc({name: 'CorsTestDoc'}, wid);
+      await userApi.updateDocPermissions(docId, {
+        users: {
+          'everyone@getgrist.com': 'owners',
+        }
+      });
+
+      const chimpyConfig = configForUser("Chimpy");
+      const anonConfig = configForUser("Anonymous");
+      delete chimpyConfig.headers["X-Requested-With"];
+      delete anonConfig.headers["X-Requested-With"];
+
+      const url = `${serverUrl}/api/docs/${docId}/tables/Table1/records`;
+      const data = {records: [{fields: {}}]};
+
+      // Normal same origin requests
+      anonConfig.headers.Origin = serverUrl;
+      let response: AxiosResponse;
+      for (response of [
+        await axios.post(url, data, anonConfig),
+        await axios.get(url, anonConfig),
+        await axios.options(url, anonConfig),
+      ]) {
+        assert.equal(response.status, 200);
+        assert.equal(response.headers['access-control-allow-methods'], 'GET, PATCH, PUT, POST, DELETE, OPTIONS');
+        assert.equal(response.headers['access-control-allow-headers'], 'Authorization, Content-Type, X-Requested-With');
+        assert.equal(response.headers['access-control-allow-origin'], serverUrl);
+        assert.equal(response.headers['access-control-allow-credentials'], 'true');
+      }
+
+      // Cross origin requests from untrusted origin.
+      for (const config of [anonConfig, chimpyConfig]) {
+        config.headers.Origin = "https://evil.com/";
+        for (response of [
+          await axios.post(url, data, config),
+          await axios.get(url, config),
+          await axios.options(url, config),
+        ]) {
+          if (config === anonConfig) {
+            // Requests without credentials are still OK.
+            assert.equal(response.status, 200);
+          } else {
+            assert.equal(response.status, 403);
+            assert.deepEqual(response.data, {error: 'Credentials not supported for cross-origin requests'});
+          }
+          assert.equal(response.headers['access-control-allow-methods'], 'GET, PATCH, PUT, POST, DELETE, OPTIONS');
+          // Authorization header is not allowed
+          assert.equal(response.headers['access-control-allow-headers'], 'Content-Type, X-Requested-With');
+          // Origin is not echoed back. Arbitrary origin is allowed, but credentials are not.
+          assert.equal(response.headers['access-control-allow-origin'], '*');
+          assert.equal(response.headers['access-control-allow-credentials'], undefined);
+        }
+      }
+
+      // POST requests without credentials require a custom header so that a CORS preflight request is triggered.
+      // One possible header is X-Requested-With, which we removed at the start of the test.
+      // The other is Content-Type: application/json, which we have been using implicitly above because axios
+      // automatically treats the given data object as data. Passing a string instead prevents this.
+      response = await axios.post(url, JSON.stringify(data), anonConfig);
+      assert.equal(response.status, 401);
+      assert.deepEqual(response.data, {
+        error: "Unauthenticated requests require one of the headers" +
+          "'Content-Type: application/json' or 'X-Requested-With: XMLHttpRequest'"
+      });
+
+      // ^ that's for requests without credentials, otherwise we get the same 403 as earlier.
+      response = await axios.post(url, JSON.stringify(data), chimpyConfig);
+      assert.equal(response.status, 403);
+      assert.deepEqual(response.data, {error: 'Credentials not supported for cross-origin requests'});
+    });
+
   });
 
   // PLEASE ADD MORE TESTS HERE
@@ -2741,6 +3889,7 @@ interface WebhookRequests {
   "add,update": object[][];
 }
 
+const ORG_NAME = 'docs-1';
 function setup(name: string, cb: () => Promise<void>) {
   let api: UserAPIImpl;
 
@@ -2752,7 +3901,7 @@ function setup(name: string, cb: () => Promise<void>) {
     await cb();
 
     // create TestDoc as an empty doc into Private workspace
-    userApi = api = makeUserApi('docs-1');
+    userApi = api = makeUserApi(ORG_NAME);
     const wid = await getWorkspaceId(api, 'Private');
     docIds.TestDoc = await api.newDoc({name: 'TestDoc'}, wid);
   });
@@ -2768,9 +3917,9 @@ function setup(name: string, cb: () => Promise<void>) {
   });
 }
 
-function makeUserApi(org: string) {
+function makeUserApi(org: string, user?: string) {
   return new UserAPIImpl(`${home.serverUrl}/o/${org}`, {
-    headers: {Authorization: 'Bearer api_key_for_chimpy'},
+    headers: {Authorization: `Bearer api_key_for_${user || 'chimpy'}`},
     fetch: fetch as any,
     newFormData: () => new FormData() as any,
     logger: log
@@ -2814,17 +3963,22 @@ class TestServer {
 
     // env
     const env = {
-      IRELIA_DATA_DIR: dataDir,
-      IRELIA_INST_DIR: tmpDir,
-      IRELIA_SERVERS: this._serverTypes,
+      GRIST_DATA_DIR: dataDir,
+      GRIST_INST_DIR: tmpDir,
+      GRIST_SERVERS: this._serverTypes,
       // with port '0' no need to hard code a port number (we can use testing hooks to find out what
       // port server is listening on).
-      IRELIA_PORT: '0',
-      IRELIA_TESTING_SOCKET: this.testingSocket,
-      IRELIA_DISABLE_S3: 'true',
+      GRIST_PORT: '0',
+      GRIST_TESTING_SOCKET: this.testingSocket,
+      GRIST_DISABLE_S3: 'true',
       REDIS_URL: process.env.TEST_REDIS_URL,
       APP_HOME_URL: _homeUrl,
       ALLOWED_WEBHOOK_DOMAINS: `example.com,localhost:${webhooksTestPort}`,
+      GRIST_ALLOWED_HOSTS: `example.com,localhost`,
+      GRIST_TRIGGER_WAIT_DELAY: '100',
+      // this is calculated value, some tests expect 4 attempts and some will try 3 times
+      GRIST_TRIGGER_MAX_ATTEMPTS: '4',
+      GRIST_MAX_QUEUE_SIZE: '10',
       ...process.env
     };
 
@@ -2860,7 +4014,7 @@ class TestServer {
 
   public async isServerReady(): Promise<boolean> {
     // Let's wait for the testingSocket to be created, then get the port the server is listening on,
-    // and then do an api check. This approach allow us to start server with IRELIA_PORT set to '0',
+    // and then do an api check. This approach allow us to start server with GRIST_PORT set to '0',
     // which will listen on first available port, removing the need to hard code a port number.
     try {
 
@@ -2911,4 +4065,43 @@ async function setupDataDir(dir: string) {
   await testUtils.copyFixtureDoc(
     'ApiDataRecordsTest.grist',
     path.resolve(dir, docIds.ApiDataRecordsTest + '.grist'));
+}
+
+/**
+ * Helper that creates a promise that can be resolved from outside.
+ */
+function signal() {
+  let resolve: null | ((data: any) => void) = null;
+  let promise: null | Promise<any> = null;
+  let called = false;
+  return {
+    emit(data: any) {
+      if (!resolve) {
+        throw new Error("signal.emit() called before signal.reset()");
+      }
+      called = true;
+      resolve(data);
+    },
+    async wait() {
+      if (!promise) {
+        throw new Error("signal.wait() called before signal.reset()");
+      }
+      const proms = Promise.race([promise, delay(2000).then(() => { throw new Error("signal.wait() timed out"); })]);
+      return await proms;
+    },
+    async waitAndReset() {
+      try {
+        return await this.wait();
+      } finally {
+        this.reset();
+      }
+    },
+    called() {
+      return called;
+    },
+    reset() {
+      called = false;
+      promise = new Promise((res) => { resolve = res; });
+    }
+  };
 }

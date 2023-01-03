@@ -1,12 +1,18 @@
 import {FocusLayer} from 'app/client/lib/FocusLayer';
+import {makeT} from 'app/client/lib/localization';
 import {reportError} from 'app/client/models/errors';
-import {cssInput} from 'app/client/ui/MakeCopyMenu';
+import {cssInput} from 'app/client/ui/cssInput';
+import {prepareForTransition, TransitionWatcher} from 'app/client/ui/transitions';
 import {bigBasicButton, bigPrimaryButton, cssButton} from 'app/client/ui2018/buttons';
-import {colors, mediaSmall, testId, vars} from 'app/client/ui2018/cssVars';
+import {mediaSmall, testId, theme, vars} from 'app/client/ui2018/cssVars';
 import {loadingSpinner} from 'app/client/ui2018/loaders';
 import {waitGrainObs} from 'app/common/gutil';
+import {IOpenController, IPopupOptions, PopupControl, popupOpen} from 'popweasel';
 import {Computed, Disposable, dom, DomContents, DomElementArg, input, keyframes,
   MultiHolder, Observable, styled} from 'grainjs';
+import {cssMenuElem} from 'app/client/ui2018/menus';
+
+const t = makeT('ui2018.modals');
 
 // IModalControl is passed into the function creating the body of the modal.
 export interface IModalControl {
@@ -112,10 +118,25 @@ export class ModalControl extends Disposable implements IModalControl {
   }
 }
 
-export interface IModalOptions {
-  noEscapeKey?: boolean;      // If set, escape key does not close the dialog
-  noClickAway?: boolean;      // If set, clicking into background does not close dialog.
+/**
+ * The modal variant.
+ *
+ * Fade-in modals open with a fade-in background animation, and close immediately.
+ *
+ * Collapsing modals open with a expanding animation from a referenced DOM element, and
+ * close with a collapsing animation into the referenced element.
+ */
+export type IModalVariant = 'fade-in' | 'collapsing';
 
+export interface IModalOptions {
+  // The modal variant. Defaults to "fade-in".
+  variant?: IModalVariant;
+  // Required for "collapsing" variant modals. This is the anchor element for animations.
+  refElement?: HTMLElement;
+  // If set, escape key does not close the dialog.
+  noEscapeKey?: boolean;
+  // If set, clicking into background does not close dialog.
+  noClickAway?: boolean;
   // If given, call and wait for this before closing the dialog. If it returns false, don't close.
   // Error also prevents closing, and is reported as an unexpected error.
   beforeClose?: () => Promise<boolean>;
@@ -153,41 +174,78 @@ export function modal(
   createFn: (ctl: IModalControl, owner: MultiHolder) => DomElementArg,
   options: IModalOptions = {}
 ): void {
+  const {noEscapeKey, noClickAway, refElement = document.body, variant = 'fade-in'} = options;
 
   function doClose() {
     if (!modalDom.isConnected) { return; }
+
+    variant === 'collapsing' ? collapseAndCloseModal() : closeModal();
+  }
+
+  function closeModal() {
     document.body.removeChild(modalDom);
     // Ensure we run the disposers for the DOM contained in the modal.
     dom.domDispose(modalDom);
   }
+
+  function collapseAndCloseModal() {
+    const watcher = new TransitionWatcher(dialogDom);
+    watcher.onDispose(() => closeModal());
+    modalDom.classList.add(cssModalBacker.className + '-collapsing');
+    collapseModal();
+  }
+
+  function expandModal() {
+    prepareForTransition(dialogDom, () => collapseModal());
+    Object.assign(dialogDom.style, {
+      transform: '',
+      opacity: '',
+      visibility: 'visible',
+    });
+  }
+
+  function collapseModal() {
+    const rect = dialogDom.getBoundingClientRect();
+    const collapsedRect = refElement.getBoundingClientRect();
+    const originX = (collapsedRect.left + collapsedRect.width / 2) - rect.left;
+    const originY = (collapsedRect.top + collapsedRect.height / 2) - rect.top;
+    Object.assign(dialogDom.style, {
+      transform: `scale(${collapsedRect.width / rect.width}, ${collapsedRect.height / rect.height})`,
+      transformOrigin: `${originX}px ${originY}px`,
+      opacity: '0',
+    });
+  }
+
   let close = doClose;
+  let dialogDom: HTMLElement;
 
   const modalDom = cssModalBacker(
     dom.create((owner) => {
-      const focus = () => dialog.focus();
+      const focus = () => dialogDom.focus();
       const ctl = ModalControl.create(owner, doClose, focus);
       close = () => ctl.close();
 
-      const dialog = cssModalDialog(
+      dialogDom = cssModalDialog(
         createFn(ctl, owner),
+        cssModalDialog.cls('-collapsing', variant === 'collapsing'),
         dom.on('click', (ev) => ev.stopPropagation()),
-        options.noEscapeKey ? null : dom.onKeyDown({ Escape: close }),
-        testId('modal-dialog')
+        noEscapeKey ? null : dom.onKeyDown({ Escape: close }),
+        testId('modal-dialog'),
       );
       FocusLayer.create(owner, {
-        defaultFocusElem: dialog,
+        defaultFocusElem: dialogDom,
         allowFocus: (elem) => (elem !== document.body),
         // Pause mousetrap keyboard shortcuts while the modal is shown. Without this, arrow keys
         // will navigate in a grid underneath the modal, and Enter may open a cell there.
         pauseMousetrap: true
       });
-      return dialog;
+      return dialogDom;
     }),
-    options.noClickAway ? null : dom.on('click', () => close()),
+    noClickAway ? null : dom.on('click', () => close()),
   );
 
-
   document.body.appendChild(modalDom);
+  if (variant === 'collapsing') { expandModal(); }
 }
 
 export interface ISaveModalOptions {
@@ -248,13 +306,13 @@ export function saveModal(createFunc: (ctl: IModalControl, owner: MultiHolder) =
       cssModalTitle(options.title, testId('modal-title')),
       cssModalBody(options.body),
       cssModalButtons(
-        bigPrimaryButton(options.saveLabel || 'Save',
+        bigPrimaryButton(options.saveLabel || t('Save'),
           dom.boolAttr('disabled', isSaveDisabled),
           dom.on('click', save),
           testId('modal-confirm'),
         ),
         options.extraButtons,
-        options.hideCancel ? null : bigBasicButton('Cancel',
+        options.hideCancel ? null : bigBasicButton(t('Cancel'),
           dom.on('click', () => ctl.close()),
           testId('modal-cancel'),
         ),
@@ -368,7 +426,7 @@ export function invokePrompt(
   const prom = new Promise<string|undefined>((resolve) => {
     onResolve = resolve;
   });
-  promptModal(title, onResolve!, btnText ?? 'Ok', initial, placeholder, () => {
+  promptModal(title, onResolve!, btnText ?? t('Ok'), initial, placeholder, () => {
     if (onResolve) {
       onResolve(undefined);
     }
@@ -415,18 +473,49 @@ export function cssModalWidth(style: ModalWidth) {
   return cssModalDialog.cls('-' + style);
 }
 
+/**
+ * Shows a little modal as a tooltip.
+ *
+ * Example:
+ * dom.on('click', (_, element) => modalTooltip(element, (ctl) => {
+ *  return dom('div', 'Hello world', dom.on('click', () => ctl.close()));
+ * }))
+ */
+export function modalTooltip(
+  reference: Element,
+  domCreator: (ctl: IOpenController) => DomElementArg,
+  options: IPopupOptions = {}
+): PopupControl {
+  return popupOpen(reference, (ctl: IOpenController) => {
+    const element = cssModalTooltip(
+      domCreator(ctl)
+    );
+    return element;
+  }, options);
+}
+
 /* CSS styled components */
+
+export const cssModalTooltip = styled(cssMenuElem, `
+  padding: 16px 24px;
+  background: ${theme.modalBg};
+  border-radius: 3px;
+  outline: none;
+  & > div {
+    outline: none;
+  }
+`);
 
 // For centering, we use 'margin: auto' on the flex item instead of 'justify-content: center' on
 // the flex container, to ensure the full item can be scrolled in case of overflow.
 // See https://stackoverflow.com/a/33455342/328565
 const cssModalDialog = styled('div', `
-  background-color: white;
+  background-color: ${theme.modalBg};
   min-width: 428px;
-  color: black;
+  color: ${theme.darkText};
   margin: auto;
   border-radius: 3px;
-  box-shadow: 0 2px 18px 0 rgba(31,37,50,0.31), 0 0 1px 0 rgba(76,86,103,0.24);
+  box-shadow: 0 2px 18px 0 ${theme.modalInnerShadow}, 0 0 1px 0 ${theme.modalOuterShadow};
   padding: 40px 64px;
   outline: none;
 
@@ -435,6 +524,11 @@ const cssModalDialog = styled('div', `
   }
   &-fixed-wide {
     width: 600px;
+  }
+  &-collapsing {
+    transition-property: opacity, transform;
+    transition-duration: 0.4s;
+    transition-timing-function: ease-in-out;
   }
   @media ${mediaSmall} {
     & {
@@ -448,13 +542,14 @@ const cssModalDialog = styled('div', `
 export const cssModalTitle = styled('div', `
   font-size: ${vars.xxxlargeFontSize};
   font-weight: ${vars.headerControlTextWeight};
-  color: ${colors.dark};
+  color: ${theme.text};
   margin: 0 0 16px 0;
   line-height: 32px;
   overflow-wrap: break-word;
 `);
 
 export const cssModalBody = styled('div', `
+  color: ${theme.text};
   margin: 16px 0;
 `);
 
@@ -467,8 +562,25 @@ export const cssModalButtons = styled('div', `
   }
 `);
 
+export const cssModalCloseButton = styled('div', `
+  align-self: flex-end;
+  margin: -8px;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  --icon-color: ${theme.modalCloseButtonFg};
+
+  &:hover {
+    background-color: ${theme.hover};
+  }
+`);
+
 const cssFadeIn = keyframes(`
   from {background-color: transparent}
+`);
+
+const cssFadeOut = keyframes(`
+  from {background-color: ${theme.modalBackdrop}}
 `);
 
 const cssModalBacker = styled('div', `
@@ -481,10 +593,15 @@ const cssModalBacker = styled('div', `
   left: 0;
   padding: 16px;
   z-index: 999;
-  background-color: ${colors.backdrop};
+  background-color: ${theme.modalBackdrop};
   overflow-y: auto;
   animation-name: ${cssFadeIn};
   animation-duration: 0.4s;
+
+  &-collapsing {
+    animation-name: ${cssFadeOut};
+    background-color: transparent;
+  }
 `);
 
 const cssSpinner = styled('div', `
@@ -497,4 +614,15 @@ const cssSpinner = styled('div', `
 const cssModalSpinner = styled('div', `
   display: flex;
   flex-direction: column;
+`);
+
+const cssFadeInFromTop = keyframes(`
+  from {top: -250px; opacity: 0}
+  to {top: 0; opacity: 1}
+`);
+
+export const cssAnimatedModal = styled('div', `
+  animation-name: ${cssFadeInFromTop};
+  animation-duration: 0.4s;
+  position: relative;
 `);

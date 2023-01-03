@@ -36,9 +36,11 @@ export type IconName = "ChartArea" |
   "GoogleLogo" |
   "GristLogo" |
   "ThumbPreview" |
+  "AddUser" |
   "BarcodeQR" |
   "BarcodeQR2" |
   "CenterAlign" |
+  "Chat" |
   "Code" |
   "Collapse" |
   "Convert" |
@@ -58,6 +60,7 @@ export type IconName = "ChartArea" |
   "Feedback" |
   "Filter" |
   "FilterSimple" |
+  "Fireworks" |
   "Folder" |
   "FontBold" |
   "FontItalic" |
@@ -74,6 +77,8 @@ export type IconName = "ChartArea" |
   "Lock" |
   "Log" |
   "Mail" |
+  "Memo" |
+  "Message" |
   "Minus" |
   "MobileChat" |
   "MobileChat2" |
@@ -86,20 +91,26 @@ export type IconName = "ChartArea" |
   "Pencil" |
   "PinBig" |
   "PinSmall" |
+  "PinTilted" |
   "Pivot" |
+  "PivotLight" |
   "Plus" |
+  "Popup" |
   "Public" |
+  "PublicColor" |
   "PublicFilled" |
   "Redo" |
   "Remove" |
   "Repl" |
   "ResizePanel" |
+  "Revert" |
   "RightAlign" |
   "Script" |
   "Search" |
   "Settings" |
   "Share" |
   "Sort" |
+  "Sparks" |
   "Tick" |
   "TickSolid" |
   "Undo" |
@@ -158,9 +169,11 @@ export const IconList: IconName[] = ["ChartArea",
   "GoogleLogo",
   "GristLogo",
   "ThumbPreview",
+  "AddUser",
   "BarcodeQR",
   "BarcodeQR2",
   "CenterAlign",
+  "Chat",
   "Code",
   "Collapse",
   "Convert",
@@ -180,6 +193,7 @@ export const IconList: IconName[] = ["ChartArea",
   "Feedback",
   "Filter",
   "FilterSimple",
+  "Fireworks",
   "Folder",
   "FontBold",
   "FontItalic",
@@ -196,6 +210,8 @@ export const IconList: IconName[] = ["ChartArea",
   "Lock",
   "Log",
   "Mail",
+  "Memo",
+  "Message",
   "Minus",
   "MobileChat",
   "MobileChat2",
@@ -208,20 +224,26 @@ export const IconList: IconName[] = ["ChartArea",
   "Pencil",
   "PinBig",
   "PinSmall",
+  "PinTilted",
   "Pivot",
+  "PivotLight",
   "Plus",
+  "Popup",
   "Public",
+  "PublicColor",
   "PublicFilled",
   "Redo",
   "Remove",
   "Repl",
   "ResizePanel",
+  "Revert",
   "RightAlign",
   "Script",
   "Search",
   "Settings",
   "Share",
   "Sort",
+  "Sparks",
   "Tick",
   "TickSolid",
   "Undo",

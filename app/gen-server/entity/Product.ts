@@ -1,13 +1,14 @@
-import {Features, Product as IProduct} from 'app/common/Features';
+import {Features, Product as IProduct, PERSONAL_FREE_PLAN, PERSONAL_LEGACY_PLAN, TEAM_FREE_PLAN,
+        TEAM_PLAN} from 'app/common/Features';
 import {nativeValues} from 'app/gen-server/lib/values';
 import * as assert from 'assert';
 import {BillingAccount} from 'app/gen-server/entity/BillingAccount';
 import {BaseEntity, Column, Connection, Entity, OneToMany, PrimaryGeneratedColumn} from 'typeorm';
 
 /**
- * A summary of features used in 'starter' plans.
+ * A summary of features available in legacy personal sites.
  */
-export const starterFeatures: Features = {
+export const personalLegacyFeatures: Features = {
   workspaces: true,
   // no vanity domain
   maxDocsPerOrg: 10,
@@ -27,14 +28,27 @@ export const teamFeatures: Features = {
 
 /**
  * A summary of features available in free team sites.
- * At time of writing, this is a placeholder, as free sites are fleshed out.
  */
 export const teamFreeFeatures: Features = {
   workspaces: true,
   vanityDomain: true,
   maxSharesPerWorkspace: 0,   // all workspace shares need to be org members.
   maxSharesPerDoc: 2,
-  maxDocsPerOrg: 20,
+  snapshotWindow: { count: 30, unit: 'days' },
+  baseMaxRowsPerDocument: 5000,
+  baseMaxApiUnitsPerDocumentPerDay: 5000,
+  baseMaxDataSizePerDocument: 5000 * 2 * 1024,  // 2KB per row
+  baseMaxAttachmentsBytesPerDocument: 1 * 1024 * 1024 * 1024,  // 1GB
+  gracePeriodDays: 14,
+};
+
+/**
+ * A summary of features available in free personal sites.
+ */
+ export const personalFreeFeatures: Features = {
+  workspaces: true,
+  maxSharesPerWorkspace: 0,   // workspace sharing is disabled.
+  maxSharesPerDoc: 2,
   snapshotWindow: { count: 30, unit: 'days' },
   baseMaxRowsPerDocument: 5000,
   baseMaxApiUnitsPerDocumentPerDay: 5000,
@@ -96,44 +110,54 @@ export const PRODUCTS: IProduct[] = [
     name: 'stub',
     features: {},
   },
-
-  // These are products set up in stripe.
+  // This is a product for legacy personal accounts/orgs.
   {
-    name: 'starter',
-    features: starterFeatures,
+    name: PERSONAL_LEGACY_PLAN,
+    features: personalLegacyFeatures,
   },
   {
     name: 'professional',  // deprecated, can be removed once no longer referred to in stripe.
     features: teamFeatures,
   },
   {
-    name: 'team',
-    features: teamFeatures,
+    name: TEAM_PLAN,
+    features: teamFeatures
   },
 
   // This is a product for a team site that is no longer in good standing, but isn't yet
   // to be removed / deactivated entirely.
   {
     name: 'suspended',
-    features: suspendedFeatures,
+    features: suspendedFeatures
   },
   {
-    name: 'teamFree',
-    features: teamFreeFeatures,
+    name: TEAM_FREE_PLAN,
+    features: teamFreeFeatures
+  },
+  {
+    name: PERSONAL_FREE_PLAN,
+    features: personalFreeFeatures,
   },
 ];
+
 
 /**
  * Get names of products for different situations.
  */
 export function getDefaultProductNames() {
-  const defaultProduct = process.env.IRELIA_DEFAULT_PRODUCT;
+  const defaultProduct = process.env.GRIST_DEFAULT_PRODUCT;
+  // TODO: can be removed once new deal is released.
+  const personalFreePlan = PERSONAL_FREE_PLAN;
   return {
-    personal: defaultProduct || 'starter',  // Personal site start off on a functional plan.
-    teamInitial: defaultProduct || 'stub',  // Team site starts off on a limited plan, requiring subscription.
-    teamCancel: 'suspended',  // Team site that has been 'turned off'.
-    team: defaultProduct || 'team',         // Functional team site.
-    teamFree: defaultProduct || 'teamFree',
+    // Personal site start off on a functional plan.
+    personal: defaultProduct || personalFreePlan,
+     // Team site starts off on a limited plan, requiring subscription.
+    teamInitial: defaultProduct || 'stub',
+    // Team site that has been 'turned off'.
+    teamCancel: 'suspended',
+    // Functional team site.
+    team: defaultProduct || TEAM_PLAN,
+    teamFree: defaultProduct || TEAM_FREE_PLAN,
   };
 }
 
