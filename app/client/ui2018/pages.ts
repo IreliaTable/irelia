@@ -1,10 +1,14 @@
 import { isDesktop } from 'app/client/lib/browserInfo';
+import { makeT } from 'app/client/lib/localization';
 import { cssEditorInput } from "app/client/ui/HomeLeftPane";
 import { itemHeader, itemHeaderWrapper, treeViewContainer } from "app/client/ui/TreeViewComponentCss";
-import { colors } from "app/client/ui2018/cssVars";
+import { theme } from "app/client/ui2018/cssVars";
 import { icon } from "app/client/ui2018/icons";
+import { hoverTooltip } from 'app/client/ui/tooltips';
 import { menu, menuItem, menuText } from "app/client/ui2018/menus";
 import { dom, domComputed, DomElementArg, makeTestId, observable, Observable, styled } from "grainjs";
+
+const t = makeT('ui2018.pages');
 
 const testId = makeTestId('test-docpage-');
 
@@ -17,6 +21,11 @@ export interface PageActions {
   isReadonly: Observable<boolean>;
 }
 
+function isTargetSelected(target: HTMLElement) {
+  const parentItemHeader = target.closest('.' + itemHeader.className);
+  return parentItemHeader ? parentItemHeader.classList.contains('selected') : false;
+}
+
 // build the dom for a document page entry. It shows an icon (for now the first letter of the name,
 // but later we'll support user selected icon), the name and a dots menu containing a "Rename" and
 // "Remove" entries. Clicking "Rename" turns the page name into an editable input, which then call
@@ -26,13 +35,13 @@ export function buildPageDom(name: Observable<string>, actions: PageActions, ...
 
   const isRenaming = observable(false);
   const pageMenu = () => [
-    menuItem(() => isRenaming.set(true), "Rename", testId('rename'),
+    menuItem(() => isRenaming.set(true), t("Rename"), testId('rename'),
             dom.cls('disabled', actions.isReadonly)),
-    menuItem(actions.onRemove, 'Remove', testId('remove'),
+    menuItem(actions.onRemove, t('Remove'), testId('remove'),
              dom.cls('disabled', (use) => use(actions.isReadonly) || actions.isRemoveDisabled())),
-    menuItem(actions.onDuplicate, 'Duplicate Page', testId('duplicate'),
+    menuItem(actions.onDuplicate, t('DuplicatePage'), testId('duplicate'),
              dom.cls('disabled', actions.isReadonly)),
-    dom.maybe(actions.isReadonly, () => menuText('You do not have edit access to this document')),
+    dom.maybe(actions.isReadonly, () => menuText(t('NoEditAccess'))),
   ];
   let pageElem: HTMLElement;
 
@@ -52,7 +61,10 @@ export function buildPageDom(name: Observable<string>, actions: PageActions, ...
       domComputed(isRenaming, (isrenaming) => (
         isrenaming ?
           cssPageItem(
-            cssPageInitial(dom.text((use) => Array.from(use(name))[0])),
+            cssPageInitial(
+              testId('initial'),
+              dom.text((use) => Array.from(use(name))[0])
+              ),
             cssEditorInput(
               {
                 initialValue: name.get() || '',
@@ -68,10 +80,17 @@ export function buildPageDom(name: Observable<string>, actions: PageActions, ...
             // firefox.
           ) :
           cssPageItem(
-            cssPageInitial(dom.text((use) => Array.from(use(name))[0])),
-            cssPageName(dom.text(name), testId('label')),
+            cssPageInitial(
+              testId('initial'),
+              dom.text((use) => Array.from(use(name))[0]),
+            ),
+            cssPageName(
+              dom.text(name),
+              testId('label'),
+              dom.on('click', (ev) => isTargetSelected(ev.target as HTMLElement) && isRenaming.set(true)),
+            ),
             cssPageMenuTrigger(
-              cssPageIcon('Dots'),
+              cssPageMenuIcon('Dots'),
               menu(pageMenu, {placement: 'bottom-start', parentSelectorToMark: '.' + itemHeader.className}),
               dom.on('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); }),
 
@@ -88,16 +107,28 @@ export function buildPageDom(name: Observable<string>, actions: PageActions, ...
     ));
 }
 
+export function buildCensoredPage() {
+  return cssPageItem(
+    cssPageInitial(
+      testId('initial'),
+      dom.text('C'),
+    ),
+    cssCensoredPageName(
+      dom.text('CENSORED'),
+      testId('label'),
+    ),
+    hoverTooltip('This page is censored due to access rules.'),
+  );
+}
+
 const cssPageItem = styled('a', `
-  --icon-color: ${colors.slate};
   display: flex;
   flex-direction: row;
   height: 28px;
   align-items: center;
   flex-grow: 1;
   .${treeViewContainer.className}-close & {
-    // margin-left: 22px;
-    justify-content: center;
+    margin-left: 16px;
   }
   &, &:hover, &:focus {
     text-decoration: none;
@@ -108,23 +139,27 @@ const cssPageItem = styled('a', `
 
 const cssPageInitial = styled('div', `
   flex-shrink: 0;
-  color: white;
+  color: ${theme.pageInitialsFg};
   border-radius: 3px;
-  background-color: ${colors.slate};
+  background-color: ${theme.pageInitialsBg};
   width: 16px;
   height: 16px;
   text-align: center;
-  // margin-right: 8px;
+  margin-right: 8px;
 `);
 
 const cssPageName = styled('div', `
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-left: 8px;
+  flex-grow: 1;
   .${treeViewContainer.className}-close & {
     display: none;
   }
+`);
+
+const cssCensoredPageName = styled(cssPageName, `
+  color: ${theme.disabledPageFg};
 `);
 
 function onHoverSupport(yesNo: boolean) {
@@ -173,20 +208,21 @@ const cssPageMenuTrigger = styled('div', `
     }
   }
   .${itemHeaderWrapper.className}-not-dragging &:hover, &.weasel-popup-open {
-    background-color: ${colors.darkGrey};
+    background-color: ${theme.pageOptionsHoverBg};
   }
   .${itemHeaderWrapper.className}-not-dragging > .${itemHeader.className}.selected &:hover,
   .${itemHeaderWrapper.className}-not-dragging > .${itemHeader.className}.selected &.weasel-popup-open {
-    background-color: ${colors.slate};
+    background-color: ${theme.pageOptionsSelectedHoverBg};
   }
 
   .${itemHeader.className}.weasel-popup-open, .${itemHeader.className}-renaming {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.pageHoverBg};
   }
 `);
 
-const cssPageIcon = styled(icon, `
+const cssPageMenuIcon = styled(icon, `
+  background-color: ${theme.pageOptionsFg};
   .${itemHeader.className}.selected & {
-    background-color: white;
+    background-color: ${theme.pageOptionsHoverFg};
   }
 `);

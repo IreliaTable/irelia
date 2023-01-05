@@ -32,6 +32,7 @@ var dispose = require('../lib/dispose');
 var dom = require('../lib/dom');
 var {Delay} = require('../lib/Delay');
 var kd = require('../lib/koDom');
+var {makeT} = require('../lib/localization');
 var Layout = require('./Layout');
 var RecordLayoutEditor = require('./RecordLayoutEditor');
 var commands = require('./commands');
@@ -39,6 +40,8 @@ var {menuToggle} = require('app/client/ui/MenuToggle');
 var {menu} = require('../ui2018/menus');
 var {testId} = require('app/client/ui2018/cssVars');
 var {contextMenu} = require('app/client/ui/contextMenu');
+
+const t = makeT('components.RecordLayout');
 
 /**
  * Construct a RecordLayout.
@@ -69,6 +72,7 @@ function RecordLayout(options) {
 
   // Update the stored layoutSpecObj with any missing fields that are present in viewFields.
   this.layoutSpec = this.autoDispose(ko.computed(function() {
+    if (this.viewSection.isDisposed()) { return null; }
     return RecordLayout.updateLayoutSpecWithFields(
       this.viewSection.layoutSpecObj(), this.viewSection.viewFields().all());
   }, this).extend({rateLimit: 0})); // layoutSpecObj and viewFields should be updated together.
@@ -259,7 +263,7 @@ RecordLayout.prototype.saveLayoutSpec = async function(layoutSpec) {
   // Use separate copies of addColAction, since sendTableActions modified each in-place.
   let addActions = gutil.arrayRepeat(addColNum, 0).map(() => addColAction.slice());
 
-  await docData.bundleActions('Updating record layout.', () => {
+  await docData.bundleActions(t('UpdatingRecordLayout'), () => {
     return Promise.try(() => {
       return addColNum > 0 ? docModel.dataTables[tableId].sendTableActions(addActions) : [];
     })
@@ -322,7 +326,7 @@ RecordLayout.prototype.buildLayoutDom = function(row, optCreateEditor) {
     )
   );
 
-  const sub = this.layoutSpec.subscribe((spec) => { layout.buildLayout(spec); });
+  const sub = this.layoutSpec.subscribe((spec) => { layout.buildLayout(spec, createEditor); });
 
   if (createEditor) {
     this.layoutEditor(RecordLayoutEditor.create(this, layout));

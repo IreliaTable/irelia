@@ -11,16 +11,18 @@ import {DocAuthKey, DocAuthResult, HomeDBManager} from 'app/gen-server/lib/HomeD
 import {forceSessionChange, getSessionProfiles, getSessionUser, getSignInStatus, linkOrgWithEmail, SessionObj,
         SessionUserObj, SignInStatus} from 'app/server/lib/BrowserSession';
 import {RequestWithOrg} from 'app/server/lib/extractOrg';
+import {GristServer} from 'app/server/lib/GristServer';
 import {COOKIE_MAX_AGE, getAllowedOrgForSessionID, getCookieDomain,
         cookieName as sessionCookieName} from 'app/server/lib/gristSessions';
 import {makeId} from 'app/server/lib/idUtils';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {IPermitStore, Permit} from 'app/server/lib/Permit';
-import {allowHost, getOriginUrl, optStringParam} from 'app/server/lib/requestUtils';
+import {AccessTokenInfo} from 'app/server/lib/AccessTokens';
+import {allowHost, isEnvironmentAllowedHost, getOriginUrl, optStringParam} from 'app/server/lib/requestUtils';
 import * as cookie from 'cookie';
 import {NextFunction, Request, RequestHandler, Response} from 'express';
 import {IncomingMessage} from 'http';
-import * as onHeaders from 'on-headers';
+import onHeaders from 'on-headers';
 
 export interface RequestWithLogin extends Request {
   sessionID: string;
@@ -34,6 +36,7 @@ export interface RequestWithLogin extends Request {
   userIsAuthorized?: boolean;   // If userId is for "anonymous", this will be false.
   docAuth?: DocAuthResult;      // For doc requests, the docId and the user's access level.
   specialPermit?: Permit;
+  accessToken?: AccessTokenInfo;
   altSessionId?: string;   // a session id for use in trigger formulas and granular access rules
   activation?: ActivationState;
 }
@@ -90,19 +93,22 @@ export function isAnonymousUser(req: Request) {
 // True if Grist is configured for a single user without specific authorization
 // (classic standalone/electron mode).
 export function isSingleUserMode(): boolean {
-  return process.env.IRELIA_SINGLE_USER === '1';
+  return process.env.GRIST_SINGLE_USER === '1';
 }
 
 
 /**
  * Returns a profile if it can be deduced from the request. This requires a
  * header to specify the users' email address. The header to set comes from the
- * environment variable IRELIA_PROXY_AUTH_HEADER, or may be passed in.
+ * environment variable GRIST_PROXY_AUTH_HEADER, or may be passed in.
+ * A result of null means that the user should be considered known to be anonymous.
+ * A result of undefined means we should go on to consider other authentication
+ * methods (such as cookies).
  */
 export function getRequestProfile(req: Request|IncomingMessage,
-                                  header?: string): UserProfile|undefined {
-  header = header || process.env.IRELIA_PROXY_AUTH_HEADER;
-  let profile: UserProfile|undefined;
+                                  header?: string): UserProfile|null|undefined {
+  header = header || process.env.GRIST_PROXY_AUTH_HEADER;
+  let profile: UserProfile|null|undefined;
 
   if (header) {
     // Careful reading headers. If we have an IncomingMessage, there is no
@@ -118,8 +124,13 @@ export function getRequestProfile(req: Request|IncomingMessage,
         };
       }
     }
+    // If no profile at this point, and header was present,
+    // treat as anonymous user, represented by null value.
+    // Don't go on to look at session.
+    if (!profile && headerContent !== undefined) {
+      profile = null;
+    }
   }
-
   return profile;
 }
 
@@ -134,12 +145,36 @@ export function getRequestProfile(req: Request|IncomingMessage,
  *   - req.users: set for org-and-session-based logins, with list of profiles in session
  */
 export async function addRequestUser(dbManager: HomeDBManager, permitStore: IPermitStore,
+                                     options: {
+                                       gristServer: GristServer,
+                                       skipSession?: boolean,
+                                       getProfile?(req: Request|IncomingMessage): Promise<UserProfile|null|undefined>,
+                                     },
                                      req: Request, res: Response, next: NextFunction) {
   const mreq = req as RequestWithLogin;
   let profile: UserProfile|undefined;
 
-  // First, check for an apiKey
-  if (mreq.headers && mreq.headers.authorization) {
+  // We support multiple method of authentication. This flag gets set once
+  // we need not try any more. Specifically, it is used to avoid processing
+  // anything else after setting an access token, for simplicity in reasoning
+  // about this case.
+  let authDone: boolean = false;
+
+  // Support providing an access token via an `auth` query parameter.
+  // This is useful for letting the browser load assets like image
+  // attachments.
+  const auth = optStringParam(mreq.query.auth);
+  if (auth) {
+    const tokens = options.gristServer.getAccessTokens();
+    const token = await tokens.verify(auth);
+    mreq.accessToken = token;
+    // Once an accessToken is supplied, we don't consider anything else.
+    // User is treated as anonymous apart from having an accessToken.
+    authDone = true;
+  }
+
+  // Now, check for an apiKey
+  if (!authDone && mreq.headers && mreq.headers.authorization) {
     // header needs to be of form "Bearer XXXXXXXXX" to apply
     const parts = String(mreq.headers.authorization).split(' ');
     if (parts[0] === "Bearer") {
@@ -160,7 +195,7 @@ export async function addRequestUser(dbManager: HomeDBManager, permitStore: IPer
   }
 
   // Special permission header for internal housekeeping tasks
-  if (mreq.headers && mreq.headers.permit) {
+  if (!authDone && mreq.headers && mreq.headers.permit) {
     const permitKey = String(mreq.headers.permit);
     try {
       const permit = await permitStore.getPermit(permitKey);
@@ -175,134 +210,156 @@ export async function addRequestUser(dbManager: HomeDBManager, permitStore: IPer
   }
 
   // If we haven't already been authenticated, and this is not a GET/HEAD/OPTIONS, then
-  // require that the X-Requested-With header field be set to XMLHttpRequest.
+  // require a header that would trigger a CORS pre-flight request, either:
+  //   - X-Requested-With: XMLHttpRequest
+  //       - https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#use-of-custom-request-headers
+  //       - https://markitzeroday.com/x-requested-with/cors/2017/06/29/csrf-mitigation-for-ajax-requests.html
+  //   - Content-Type: application/json
+  //       - https://www.directdefense.com/csrf-in-the-age-of-json/
   // This is trivial for legitimate web clients to do, and an obstacle to
   // nefarious ones.
-  //   https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#use-of-custom-request-headers
-  //   https://markitzeroday.com/x-requested-with/cors/2017/06/29/csrf-mitigation-for-ajax-requests.html
-  if (!mreq.userId && !mreq.xhr && !['GET', 'HEAD', 'OPTIONS'].includes(mreq.method)) {
-    return res.status(401).send('Bad request (missing header)');
+  if (
+    !mreq.userId &&
+    !(mreq.xhr || mreq.get("content-type") === "application/json") &&
+    !['GET', 'HEAD', 'OPTIONS'].includes(mreq.method)
+  ) {
+    return res.status(401).json({
+      error: "Unauthenticated requests require one of the headers" +
+        "'Content-Type: application/json' or 'X-Requested-With: XMLHttpRequest'"
+    });
+  }
+
+  // For some configurations, the user profile can be determined from the request.
+  // If this is the case, we won't use session information.
+  let skipSession: boolean = options.skipSession || authDone;
+  if (!authDone && !mreq.userId) {
+    let candidate = await options.getProfile?.(mreq);
+    if (candidate === undefined) {
+      candidate = getRequestProfile(mreq);
+    }
+    if (candidate !== undefined) {
+      skipSession = true;
+    }
+    if (candidate) {
+      profile = candidate;
+      const user = await dbManager.getUserByLoginWithRetry(profile.email, {profile});
+      if (user) {
+        mreq.user = user;
+        mreq.users = [profile];
+        mreq.userId = user.id;
+        mreq.userIsAuthorized = true;
+      }
+    }
   }
 
   // A bit of extra info we'll add to the "Auth" log message when this request passes the check
   // for custom-host-specific sessionID.
   let customHostSession = '';
 
-  // If we haven't selected a user by other means, and have profiles available in the
-  // session, then select a user based on those profiles.
-  const session = mreq.session;
-  if (session && !session.altSessionId) {
-    // Create a default alternative session id for use in documents.
-    session.altSessionId = makeId();
-    forceSessionChange(session);
-  }
-  mreq.altSessionId = session?.altSessionId;
-  if (!mreq.userId && session && session.users && session.users.length > 0 &&
-     mreq.org !== undefined) {
+  if (!authDone && !skipSession) {
+    // If we haven't selected a user by other means, and have profiles available in the
+    // session, then select a user based on those profiles.
+    const session = mreq.session;
+    if (session && !session.altSessionId) {
+      // Create a default alternative session id for use in documents.
+      session.altSessionId = makeId();
+      forceSessionChange(session);
+    }
+    mreq.altSessionId = session?.altSessionId;
+    if (!mreq.userId && session && session.users && session.users.length > 0 &&
+      mreq.org !== undefined) {
 
-    // Prevent using custom-domain sessionID to authorize to a different domain, since
-    // custom-domain owner could hijack such sessions.
-    const allowedOrg = getAllowedOrgForSessionID(mreq.sessionID);
-    if (allowedOrg) {
-      if (allowHost(req, allowedOrg.host)) {
-        customHostSession = ` custom-host-match ${allowedOrg.host}`;
-      } else {
-        // We need an exception for internal forwarding from home server to doc-workers. These use
-        // internal hostnames, so we can't expect a custom domain. These requests do include an
-        // Organization header, which we'll use to grant the exception, but security issues remain.
-        // TODO Issue 1: an attacker can use a custom-domain request to get an API key, which is an
-        // open door to all orgs accessible by this user.
-        // TODO Issue 2: Organization header is easy for an attacker (who has stolen a session
-        // cookie) to include too; it does nothing to prove that the request is internal.
-        const org = req.header('organization');
-        if (org && org === allowedOrg.org) {
-          customHostSession = ` custom-host-fwd ${org}`;
+      // Prevent using custom-domain sessionID to authorize to a different domain, since
+      // custom-domain owner could hijack such sessions.
+      const allowedOrg = getAllowedOrgForSessionID(mreq.sessionID);
+      if (allowedOrg) {
+        if (allowHost(req, allowedOrg.host) || isEnvironmentAllowedHost(allowedOrg.host)) {
+          customHostSession = ` custom-host-match ${allowedOrg.host}`;
         } else {
-          // Log error and fail.
-          log.warn("Auth[%s]: sessionID for host %s org %s; wrong for host %s org %s", mreq.method,
-              allowedOrg.host, allowedOrg.org, mreq.get('host'), mreq.org);
-          return res.status(403).send('Bad request: invalid session ID');
+          // We need an exception for internal forwarding from home server to doc-workers. These use
+          // internal hostnames, so we can't expect a custom domain. These requests do include an
+          // Organization header, which we'll use to grant the exception, but security issues remain.
+          // TODO Issue 1: an attacker can use a custom-domain request to get an API key, which is an
+          // open door to all orgs accessible by this user.
+          // TODO Issue 2: Organization header is easy for an attacker (who has stolen a session
+          // cookie) to include too; it does nothing to prove that the request is internal.
+          const org = req.header('organization');
+          if (org && org === allowedOrg.org) {
+            customHostSession = ` custom-host-fwd ${org}`;
+          } else {
+            // Log error and fail.
+            log.warn("Auth[%s]: sessionID for host %s org %s; wrong for host %s org %s", mreq.method,
+                     allowedOrg.host, allowedOrg.org, mreq.get('host'), mreq.org);
+            return res.status(403).send('Bad request: invalid session ID');
+          }
         }
       }
-    }
 
-    mreq.users = getSessionProfiles(session);
+      mreq.users = getSessionProfiles(session);
 
-    // If we haven't set a maxAge yet, set it now.
-    if (session && session.cookie && !session.cookie.maxAge) {
-      if (COOKIE_MAX_AGE !== null) {
-        session.cookie.maxAge = COOKIE_MAX_AGE;
-        forceSessionChange(session);
+      // If we haven't set a maxAge yet, set it now.
+      if (session && session.cookie && !session.cookie.maxAge) {
+        if (COOKIE_MAX_AGE !== null) {
+          session.cookie.maxAge = COOKIE_MAX_AGE;
+          forceSessionChange(session);
+        }
       }
-    }
 
-    // See if we have a profile linked with the active organization already.
-    // TODO: implement userSelector for rest API, to allow "sticky" user selection on pages.
-    let sessionUser: SessionUserObj|null = getSessionUser(session, mreq.org, optStringParam(mreq.query.user) || '');
+      // See if we have a profile linked with the active organization already.
+      // TODO: implement userSelector for rest API, to allow "sticky" user selection on pages.
+      let sessionUser: SessionUserObj|null = getSessionUser(session, mreq.org, optStringParam(mreq.query.user) || '');
 
-    if (!sessionUser) {
-      // No profile linked yet, so let's elect one.
-      // Choose a profile that is no worse than the others available.
-      const option = await dbManager.getBestUserForOrg(mreq.users, mreq.org);
-      if (option) {
-        // Modify request session object to link the current org with our choice of
-        // profile.  Express-session will save this change.
-        sessionUser = linkOrgWithEmail(session, option.email, mreq.org);
+      if (!sessionUser) {
+        // No profile linked yet, so let's elect one.
+        // Choose a profile that is no worse than the others available.
+        const option = await dbManager.getBestUserForOrg(mreq.users, mreq.org);
+        if (option) {
+          // Modify request session object to link the current org with our choice of
+          // profile.  Express-session will save this change.
+          sessionUser = linkOrgWithEmail(session, option.email, mreq.org);
+          const userOptions: UserOptions = {};
+          if (sessionUser?.profile?.loginMethod === 'Email + Password') {
+            // Link the session authSubject, if present, to the user. This has no effect
+            // if the user already has an authSubject set in the db.
+            userOptions.authSubject = sessionUser.authSubject;
+          }
+          // In this special case of initially linking a profile, we need to look up the user's info.
+          mreq.user = await dbManager.getUserByLogin(option.email, {userOptions});
+          mreq.userId = option.id;
+          mreq.userIsAuthorized = true;
+        } else {
+          // No profile has access to this org.  We could choose to
+          // link no profile, in which case user will end up
+          // immediately presented with a sign-in page, or choose to
+          // link an arbitrary profile (say, the first one the user
+          // logged in as), in which case user will end up with a
+          // friendlier page explaining the situation and offering to
+          // add an account to resolve it.  We go ahead and pick an
+          // arbitrary profile.
+          sessionUser = session.users[0];
+          if (!session.orgToUser) { throw new Error("Session misconfigured"); }
+          // Express-session will save this change.
+          session.orgToUser[mreq.org] = 0;
+        }
+      }
+
+      profile = sessionUser?.profile ?? undefined;
+
+      // If we haven't computed a userId yet, check for one using an email address in the profile.
+      // A user record will be created automatically for emails we've never seen before.
+      if (profile && !mreq.userId) {
         const userOptions: UserOptions = {};
-        if (sessionUser?.profile?.loginMethod === 'Email + Password') {
+        if (profile?.loginMethod === 'Email + Password') {
           // Link the session authSubject, if present, to the user. This has no effect
           // if the user already has an authSubject set in the db.
           userOptions.authSubject = sessionUser.authSubject;
         }
-        // In this special case of initially linking a profile, we need to look up the user's info.
-        mreq.user = await dbManager.getUserByLogin(option.email, {userOptions});
-        mreq.userId = option.id;
-        mreq.userIsAuthorized = true;
-      } else {
-        // No profile has access to this org.  We could choose to
-        // link no profile, in which case user will end up
-        // immediately presented with a sign-in page, or choose to
-        // link an arbitrary profile (say, the first one the user
-        // logged in as), in which case user will end up with a
-        // friendlier page explaining the situation and offering to
-        // add an account to resolve it.  We go ahead and pick an
-        // arbitrary profile.
-        sessionUser = session.users[0];
-        if (!session.orgToUser) { throw new Error("Session misconfigured"); }
-        // Express-session will save this change.
-        session.orgToUser[mreq.org] = 0;
-      }
-    }
-
-    profile = sessionUser?.profile ?? undefined;
-
-    // If we haven't computed a userId yet, check for one using an email address in the profile.
-    // A user record will be created automatically for emails we've never seen before.
-    if (profile && !mreq.userId) {
-      const userOptions: UserOptions = {};
-      if (profile?.loginMethod === 'Email + Password') {
-        // Link the session authSubject, if present, to the user. This has no effect
-        // if the user already has an authSubject set in the db.
-        userOptions.authSubject = sessionUser.authSubject;
-      }
-      const user = await dbManager.getUserByLoginWithRetry(profile.email, {profile, userOptions});
-      if (user) {
-        mreq.user = user;
-        mreq.userId = user.id;
-        mreq.userIsAuthorized = true;
-      }
-    }
-  }
-
-  if (!mreq.userId) {
-    profile = getRequestProfile(mreq);
-    if (profile) {
-      const user = await dbManager.getUserByLoginWithRetry(profile.email, {profile});
-      if(user) {
-        mreq.user = user;
-        mreq.users = [profile];
-        mreq.userId = user.id;
-        mreq.userIsAuthorized = true;
+        const user = await dbManager.getUserByLoginWithRetry(profile.email, {profile, userOptions});
+        if (user) {
+          mreq.user = user;
+          mreq.userId = user.id;
+          mreq.userIsAuthorized = true;
+        }
       }
     }
   }
@@ -405,14 +462,38 @@ export function redirectToLogin(
  * Sets mreq.docAuth if not yet set, and returns it.
  */
 export async function getOrSetDocAuth(
-  mreq: RequestWithLogin, dbManager: HomeDBManager, urlId: string
+  mreq: RequestWithLogin, dbManager: HomeDBManager,
+  gristServer: GristServer,
+  urlId: string
 ): Promise<DocAuthResult> {
   if (!mreq.docAuth) {
     let effectiveUserId = getUserId(mreq);
     if (mreq.specialPermit && mreq.userId === dbManager.getAnonymousUserId()) {
       effectiveUserId = dbManager.getPreviewerUserId();
     }
+
+    // A permit with a token gives us the userId associated with that token.
+    const tokenObj = mreq.accessToken;
+    if (tokenObj) {
+      effectiveUserId = tokenObj.userId;
+    }
+
     mreq.docAuth = await dbManager.getDocAuthCached({urlId, userId: effectiveUserId, org: mreq.org});
+
+    if (tokenObj) {
+      // Sanity check: does the current document match the document the token is
+      // for? If not, fail.
+      if (!mreq.docAuth.docId || mreq.docAuth.docId !== tokenObj.docId) {
+        throw new ApiError('token misuse', 401);
+      }
+      // Limit access to read-only if specified.
+      if (tokenObj.readOnly) {
+        mreq.docAuth = {...mreq.docAuth, access: getWeakestRole('viewers', mreq.docAuth.access)};
+      }
+    }
+
+    // A permit with a user set to the anonymous user and linked to this document
+    // gets updated to full access.
     if (mreq.specialPermit && mreq.userId === dbManager.getAnonymousUserId() &&
         mreq.specialPermit.docId === mreq.docAuth.docId) {
       mreq.docAuth = {...mreq.docAuth, access: 'owners'};
@@ -457,33 +538,46 @@ export interface Authorizer {
   getCachedAuth(): DocAuthResult;
 }
 
+export interface DocAuthorizerOptions {
+  dbManager: HomeDBManager;
+  key: DocAuthKey;
+  openMode: OpenDocMode;
+  linkParameters: Record<string, string>;
+  userRef?: string|null;
+  docAuth?: DocAuthResult;
+  profile?: UserProfile;
+}
+
 /**
  *
  * Handle authorization for a single document and user.
  *
  */
 export class DocAuthorizer implements Authorizer {
+  public readonly openMode: OpenDocMode;
+  public readonly linkParameters: Record<string, string>;
   constructor(
-    private _dbManager: HomeDBManager,
-    private _key: DocAuthKey,
-    public readonly openMode: OpenDocMode,
-    public readonly linkParameters: Record<string, string>,
-    private _docAuth?: DocAuthResult,
-    private _profile?: UserProfile
+    private _options: DocAuthorizerOptions
   ) {
+    this.openMode = _options.openMode;
+    this.linkParameters = _options.linkParameters;
   }
 
   public getUserId(): number {
-    return this._key.userId;
+    return this._options.key.userId;
   }
 
   public getUser(): FullUser|null {
-    return this._profile ? {id: this.getUserId(), ...this._profile} : null;
+    return this._options.profile ? {
+      id: this.getUserId(),
+      ref: this._options.userRef,
+      ...this._options.profile
+    } : null;
   }
 
   public getDocId(): string {
     // We've been careful to require urlId === docId, see DocManager.
-    return this._key.urlId;
+    return this._options.key.urlId;
   }
 
   public getLinkParameters(): Record<string, string> {
@@ -491,18 +585,18 @@ export class DocAuthorizer implements Authorizer {
   }
 
   public async getDoc(): Promise<Document> {
-    return this._dbManager.getDoc(this._key);
+    return this._options.dbManager.getDoc(this._options.key);
   }
 
   public async assertAccess(role: 'viewers'|'editors'|'owners'): Promise<void> {
-    const docAuth = await this._dbManager.getDocAuthCached(this._key);
-    this._docAuth = docAuth;
+    const docAuth = await this._options.dbManager.getDocAuthCached(this._options.key);
+    this._options.docAuth = docAuth;
     assertAccess(role, docAuth, {openMode: this.openMode});
   }
 
   public getCachedAuth(): DocAuthResult {
-    if (!this._docAuth) { throw Error('no cached authentication'); }
-    return this._docAuth;
+    if (!this._options.docAuth) { throw Error('no cached authentication'); }
+    return this._options.docAuth;
   }
 }
 
@@ -557,6 +651,10 @@ export function assertAccess(
       throw new ErrorWithCode("AUTH_NO_EDIT", "No write access", details);
     }
   }
+
+  if (role === 'owners' && docAuth.access !== 'owners') {
+    throw new ErrorWithCode("AUTH_NO_OWNER", "No owner access", details);
+  }
 }
 
 /**
@@ -579,7 +677,7 @@ export function getTransitiveHeaders(req: Request): {[key: string]: string} {
     ...(XRequestedWith ? { 'X-Requested-With': XRequestedWith } : undefined),
     ...(Origin ? { Origin } : undefined),
   };
-  const extraHeader = process.env.IRELIA_PROXY_AUTH_HEADER;
+  const extraHeader = process.env.GRIST_PROXY_AUTH_HEADER;
   const extraHeaderValue = extraHeader && req.get(extraHeader);
   if (extraHeader && extraHeaderValue) {
     result[extraHeader] = extraHeaderValue;

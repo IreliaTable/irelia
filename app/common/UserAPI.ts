@@ -9,22 +9,19 @@ import {OrgUsageSummary} from 'app/common/DocUsage';
 import {Product} from 'app/common/Features';
 import {ICustomWidget} from 'app/common/CustomWidget';
 import {isClient} from 'app/common/gristUrls';
-import {FullUser} from 'app/common/LoginSessionAPI';
+import {FullUser, UserProfile} from 'app/common/LoginSessionAPI';
 import {OrgPrefs, UserOrgPrefs, UserPrefs} from 'app/common/Prefs';
 import * as roles from 'app/common/roles';
 import {addCurrentOrgToPath} from 'app/common/urlUtils';
 import {encodeQueryParams} from 'app/common/gutil';
 
-export {FullUser} from 'app/common/LoginSessionAPI';
+export type {FullUser, UserProfile};
 
 // Nominal email address of the anonymous user.
 export const ANONYMOUS_USER_EMAIL = 'anon@getgrist.com';
 
 // Nominal email address of a user who, if you share with them, everyone gets access.
 export const EVERYONE_EMAIL = 'everyone@getgrist.com';
-
-// A special user allowed to add/remove the EVERYONE_EMAIL to/from a resource.
-export const SUPPORT_EMAIL = 'support@getgrist.com';
 
 // A special 'docId' that means to create a new document.
 export const NEW_DOCUMENT_CODE = 'new';
@@ -68,6 +65,7 @@ export interface BillingAccount {
   individual: boolean;
   product: Product;
   isManager: boolean;
+  inGoodStanding: boolean;
   externalOptions?: {
     invoiceId?: string;
   };
@@ -177,6 +175,7 @@ export interface UserAccessData {
   id: number;
   name: string;
   email: string;
+  ref?: string|null;
   picture?: string|null; // When present, a url to a public image of unspecified dimensions.
   // Represents the user's direct access to the resource of interest. Lack of access to a resource
   // is represented by a null value.
@@ -284,8 +283,6 @@ export interface DocStateComparisonDetails {
   rightChanges: ActionSummary;
 }
 
-export {UserProfile} from 'app/common/LoginSessionAPI';
-
 export interface UserAPI {
   getSessionActive(): Promise<ActiveSessionInfo>;
   setSessionActive(email: string): Promise<void>;
@@ -347,9 +344,9 @@ export interface UserAPI {
 }
 
 /**
- * Parameters for the download CSV endpoint (/download/csv).
+ * Parameters for the download CSV and XLSX endpoint (/download/csv & /download/csv).
  */
- export interface DownloadCsvParams {
+ export interface DownloadDocParams {
   tableId: string;
   viewSection?: number;
   activeSortSpec?: string;
@@ -392,8 +389,8 @@ export interface DocAPI {
   // is HEAD, the result will contain a copy of any rows added or updated.
   compareVersion(leftHash: string, rightHash: string): Promise<DocStateComparison>;
   getDownloadUrl(template?: boolean): string;
-  getDownloadXlsxUrl(): string;
-  getDownloadCsvUrl(params: DownloadCsvParams): string;
+  getDownloadXlsxUrl(params?: DownloadDocParams): string;
+  getDownloadCsvUrl(params: DownloadDocParams): string;
   /**
    * Exports current document to the Google Drive as a spreadsheet file. To invoke this method, first
    * acquire "code" via Google Auth Endpoint (see ShareMenu.ts for an example).
@@ -756,8 +753,8 @@ export class DocWorkerAPIImpl extends BaseAPI implements DocWorkerAPI {
   }
 
   public async downloadDoc(docId: string, template: boolean = false): Promise<Response> {
-    const extra = template ? '&template=1' : '';
-    const result = await this.request(`${this.url}/download?doc=${docId}${extra}`, {
+    const extra = template ? '?template=1' : '';
+    const result = await this.request(`${this.url}/api/docs/${docId}/download${extra}`, {
       method: 'GET',
     });
     if (!result.ok) { throw new Error(await result.text()); }
@@ -867,11 +864,11 @@ export class DocAPIImpl extends BaseAPI implements DocAPI {
     return this._url + `/download?template=${Number(template)}`;
   }
 
-  public getDownloadXlsxUrl() {
-    return this._url + '/download/xlsx';
+  public getDownloadXlsxUrl(params: DownloadDocParams) {
+    return this._url + '/download/xlsx?' + encodeQueryParams({...params});
   }
 
-  public getDownloadCsvUrl(params: DownloadCsvParams) {
+  public getDownloadCsvUrl(params: DownloadDocParams) {
     // We spread `params` to work around TypeScript being overly cautious.
     return this._url + '/download/csv?' + encodeQueryParams({...params});
   }

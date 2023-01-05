@@ -16,8 +16,8 @@ const execFile = util.promisify(childProcess.execFile);
 /**
  * Output to stdout typescript code containing SQL strings for creating an empty document.
  * The code is of the form:
- *   export const IRELIA_DOC_SQL = <sql code to create a completely empty document>;
- *   export const IRELIA_DOC_WITH_TABLE1_SQL = <sql code to create a document with Table1>;
+ *   export const GRIST_DOC_SQL = <sql code to create a completely empty document>;
+ *   export const GRIST_DOC_WITH_TABLE1_SQL = <sql code to create a document with Table1>;
  * Only tables managed by the data engine are included. Any _gristsys_ tables are excluded.
  */
 export async function main(baseName: string) {
@@ -47,8 +47,8 @@ export async function main(baseName: string) {
       await activeDoc.docStorage.exec(`DROP TABLE ${table.name}`);
     }
     console.log("");
-    console.log("export const IRELIA_" + version + "_SQL = `");
-    console.log((await execFile('sqlite3', [baseName + '.irelia', '.dump'])).stdout.trim());
+    console.log("export const GRIST_" + version + "_SQL = `");
+    console.log((await execFile('sqlite3', [baseName + '.grist', '.dump'])).stdout.trim());
     console.log("`;");
     await activeDoc.shutdown();
     await docManager.shutdownAll();

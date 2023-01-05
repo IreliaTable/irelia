@@ -45,6 +45,8 @@ export interface UserInfo {
   Origin: string | null;
   LinkKey: Record<string, string | undefined>;
   UserID: number | null;
+  UserRef: string | null;
+  SessionID: string | null;
   [attributes: string]: unknown;
   toJSON(): {[key: string]: any};
 }
@@ -67,7 +69,7 @@ export type AclMatchFunc = (input: AclMatchInput) => boolean;
  * Representation of a parsed ACL formula.
  */
 type PrimitiveCellValue = number|string|boolean|null;
-export type ParsedAclFormula = [string, ...Array<ParsedAclFormula|PrimitiveCellValue>];
+export type ParsedAclFormula = [string, ...(ParsedAclFormula|PrimitiveCellValue)[]];
 
 /**
  * Observations about a formula.

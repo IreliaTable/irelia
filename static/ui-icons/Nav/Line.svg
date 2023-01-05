@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="61px" height="1px" viewBox="0 0 61 1" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>Line</title>
-    <g id="icons" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="square">
-        <line x1="0.5" y1="0.5" x2="60.5" y2="0.5" id="Line" stroke="#979797"></line>
-    </g>
-</svg>

@@ -2,6 +2,7 @@ import {setupAceEditorCompletions} from 'app/client/components/AceEditorCompleti
 import {colors} from 'app/client/ui2018/cssVars';
 import * as ace from 'brace';
 import {dom, DomArg, Observable, styled} from 'grainjs';
+import debounce from 'lodash/debounce';
 
 export interface ACLFormulaOptions {
   initialValue: string;
@@ -41,7 +42,7 @@ export function aclFormulaEditor(options: ACLFormulaOptions) {
   );
   editor.on("change", () => showPlaceholder.set(!editor.getValue().length));
 
-  async function getSuggestions(prefix: string) {
+  async function getSuggestions(prefix: string): Promise<Array<[string, null]>> {
     return [
       // The few Python keywords and constants we support.
       'and', 'or', 'not', 'in', 'is', 'True', 'False', 'None',
@@ -51,12 +52,16 @@ export function aclFormulaEditor(options: ACLFormulaOptions) {
       'user', 'rec', 'newRec',
       // Other completions that depend on doc schema or other rules.
       ...options.getSuggestions(prefix),
-    ];
+    ].map(suggestion => [suggestion, null]);  // null means no example value
   }
   setupAceEditorCompletions(editor, {getSuggestions});
 
   // Save on blur.
   editor.on("blur", () => options.setValue(editor.getValue()));
+
+  // Save changes every 1 second
+  const save = debounce(() => options.setValue(editor.getValue()), 1000);
+  editor.on("change", save);
 
   // Blur (and save) on Enter key.
   editor.commands.addCommand({
@@ -81,6 +86,7 @@ export function aclFormulaEditor(options: ACLFormulaOptions) {
     // anyway, listen to the mousedown event in the capture phase.
     dom.on('mousedown', () => { editor.focus(); }, {useCapture: true}),
     dom.onDispose(() => editor.destroy()),
+    dom.onDispose(() => save.cancel()),
     editorElem,
   );
 }

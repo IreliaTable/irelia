@@ -19,7 +19,7 @@ import {DocStatus, IDocWorkerMap} from 'app/server/lib/DocWorkerMap';
 import {expressWrap} from 'app/server/lib/expressWrap';
 import {DocTemplate, GristServer} from 'app/server/lib/GristServer';
 import {getAssignmentId} from 'app/server/lib/idUtils';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {adaptServerUrl, addOrgToPathIfNeeded, pruneAPIResult, trustOrigin} from 'app/server/lib/requestUtils';
 import {ISendAppPageOptions} from 'app/server/lib/sendAppPage';
 
@@ -93,13 +93,13 @@ function customizeDocWorkerUrl(docWorkerUrlSeed: string|undefined, req: express.
  * If the fetch fails, we throw an exception, unless we see enough evidence
  * to unassign the worker and try again.
  *
- *  - If IRELIA_MANAGED_WORKERS is set, we assume that we've arranged
+ *  - If GRIST_MANAGED_WORKERS is set, we assume that we've arranged
  *    for unhealthy workers to be removed automatically, and that if a
  *    fetch returns a 404 with specific content, it is proof that the
  *    worker is no longer in existence. So if we see a 404 with that
  *    specific content, we can safely de-list the worker from redis,
  *    and repeat.
- *  - If IRELIA_MANAGED_WORKERS is not set, we accept a broader set
+ *  - If GRIST_MANAGED_WORKERS is not set, we accept a broader set
  *    of failures as evidence of a missing worker.
  *
  * The specific content of a 404 that will be treated as evidence of
@@ -122,7 +122,7 @@ async function getWorker(docWorkerMap: IDocWorkerMap, assignmentId: string,
     throw new Error("AppEndpoint.getWorker was called unnecessarily");
   }
   let docStatus: DocStatus|undefined;
-  const workersAreManaged = Boolean(process.env.IRELIA_MANAGED_WORKERS);
+  const workersAreManaged = Boolean(process.env.GRIST_MANAGED_WORKERS);
   for (;;) {
     docStatus = await docWorkerMap.assignDocWorker(assignmentId);
     const configWithTimeout = {timeout: 10000, ...config};
@@ -152,6 +152,13 @@ async function getWorker(docWorkerMap: IDocWorkerMap, assignmentId: string,
       }
       // This is a 404 with the expected content for a missing worker.
     } catch (e) {
+      log.rawDebug(`AppEndpoint.getWorker failure`, {
+        url: fullUrl,
+        docId: assignmentId,
+        status: e.status,
+        message: String(e),
+        workerId: docStatus.docWorker.id,
+      });
       // If workers are managed, no errors merit continuing except a 404.
       // Otherwise, we continue if we see a system error (e.g. ECONNREFUSED).
       // We don't accept timeouts since there is too much potential to
@@ -305,5 +312,5 @@ export function attachAppEndpoint(options: AttachOptions): void {
 
 // Return true if document related endpoints are served by separate workers.
 function useWorkerPool() {
-  return process.env.IRELIA_SINGLE_PORT !== 'true';
+  return process.env.GRIST_SINGLE_PORT !== 'true';
 }

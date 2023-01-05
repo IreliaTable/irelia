@@ -1,11 +1,14 @@
 import ast
 import contextlib
 import itertools
+import linecache
 import re
 import six
 
 import astroid
 import asttokens
+
+import friendly_errors
 import textbuilder
 import logger
 log = logger.Logger(__name__, logger.INFO)
@@ -21,6 +24,13 @@ LAZY_ARG_FUNCTIONS = {
   'IFERROR': slice(0, 1),
   'PEEK': slice(0, 1),
 }
+
+
+class GristSyntaxError(SyntaxError):
+  """
+  Indicates a formula is invalid in a Grist-specific way.
+  """
+
 
 def make_formula_body(formula, default_value, assoc_value=None):
   """
@@ -46,7 +56,7 @@ def make_formula_body(formula, default_value, assoc_value=None):
 
   # Parse the formula into an abstract syntax tree (AST), catching syntax errors.
   try:
-    atok = asttokens.ASTTokens(tmp_formula.get_text(), parse=True)
+    atok = asttokens.ASTTokens(tmp_formula.get_text(), parse=True, filename=code_filename)
   except SyntaxError as e:
     return textbuilder.Text(_create_syntax_error_code(tmp_formula, formula, e))
 
@@ -91,8 +101,7 @@ def make_formula_body(formula, default_value, assoc_value=None):
     message = "No `return` statement, and the last line isn't an expression."
     if isinstance(last_statement, ast.Assign):
       message += " If you want to check for equality, use `==` instead of `=`."
-    error = SyntaxError(message,
-                        ('<string>', 1, 1, ""))
+    error = GristSyntaxError(message, ('<string>', 1, 1, ""))
     return textbuilder.Text(_create_syntax_error_code(tmp_formula, formula, error))
 
   # Apply the new set of patches to the original formula to get the real output.
@@ -113,6 +122,26 @@ def make_formula_body(formula, default_value, assoc_value=None):
   return final_formula
 
 
+def replace_dollar_attrs(formula):
+  """
+  Translates formula "$" expression into rec. expression. This is extracted from the
+  make_formula_body function.
+  """
+  formula_builder_text = textbuilder.Text(formula)
+  tmp_patches = textbuilder.make_regexp_patches(formula, DOLLAR_REGEX, 'DOLLAR')
+  tmp_formula = textbuilder.Replacer(formula_builder_text, tmp_patches)
+  atok = asttokens.ASTTokens(tmp_formula.get_text(), parse=True)
+  patches = []
+  for node in ast.walk(atok.tree):
+    if isinstance(node, ast.Name) and node.id.startswith('DOLLAR'):
+      input_pos = tmp_formula.map_back_offset(node.first_token.startpos)
+      m = DOLLAR_REGEX.match(formula, input_pos)
+      if m:
+        patches.append(textbuilder.make_patch(formula, m.start(0), m.end(0), 'rec.'))
+  final_formula = textbuilder.Replacer(formula_builder_text, patches)
+  return final_formula.get_text()
+
+
 def _create_syntax_error_code(builder, input_text, err):
   """
   Returns the text for a function that raises the given SyntaxError and includes the offending
@@ -129,11 +158,24 @@ def _create_syntax_error_code(builder, input_text, err):
   output_offset = output_ln.line_to_offset(err.lineno, err.offset - 1 if err.offset else 0)
   input_offset = builder.map_back_offset(output_offset)
   line, col = input_ln.offset_to_line(input_offset)
-  message = err.args[0]
   input_text_line = input_text.splitlines()[line - 1]
+
+  message = err.args[0]
+  err_type = type(err)
+  if isinstance(err, GristSyntaxError):
+    # Just use SyntaxError in the final code
+    err_type = SyntaxError
+  elif six.PY3:
+    # Add explanation from friendly-traceback.
+    # Only supported in Python 3.
+    # Not helpful for Grist-specific errors.
+    # Needs to use the source code, so save it to its source cache.
+    save_to_linecache(builder.get_text())
+    message += friendly_errors.friendly_message(err)
+
   return "%s\nraise %s(%r, ('usercode', %r, %r, %r))" % (
     textbuilder.line_start_re.sub('# ', input_text.rstrip()),
-    type(err).__name__, message, line, col + 1, input_text_line)
+    err_type.__name__, message, line, col + 1, input_text_line)
 
 #----------------------------------------------------------------------
 
@@ -247,21 +289,48 @@ class InferLookupReference(InferenceTip):
   def infer(cls, node, context=None):
     yield astroid.bases.Instance(infer(node.func.expr))
 
-class InferLookupComprehension(InferenceTip):
+
+class InferAllReference(InferenceTip):
+  """
+  Inference helper to treat the return value of `Table.all` as returning instances
+  of table `Table`.
+  """
+  node_class = astroid.nodes.Attribute
+
+  @classmethod
+  def filter(cls, node):
+    return node.attrname == "all" and _is_table(infer(node.expr))
+
+  @classmethod
+  def infer(cls, node, context=None):
+    yield astroid.bases.Instance(infer(node.expr))
+
+
+class InferComprehensionBase(InferenceTip):
   node_class = astroid.nodes.AssignName
+  reference_inference_class = None
 
   @classmethod
   def filter(cls, node):
     compr = node.parent
     if not isinstance(compr, astroid.nodes.Comprehension):
       return False
-    if not isinstance(compr.iter, astroid.nodes.Call):
-      return False
-    return InferLookupReference.filter(compr.iter)
+    if isinstance(compr.iter, cls.reference_inference_class.node_class):
+      return cls.reference_inference_class.filter(compr.iter)
+    return False
 
   @classmethod
   def infer(cls, node, context=None):
-    return InferLookupReference.infer(node.parent.iter)
+    return cls.reference_inference_class.infer(node.parent.iter)
+
+
+class InferLookupComprehension(InferComprehensionBase):
+  reference_inference_class = InferLookupReference
+
+
+class InferAllComprehension(InferComprehensionBase):
+  reference_inference_class = InferAllReference
+
 
 class InferRecAssignment(InferenceTip):
   """
@@ -272,7 +341,7 @@ class InferRecAssignment(InferenceTip):
   @classmethod
   def filter(cls, node):
     if node.name == 'rec':
-      raise SyntaxError('Grist disallows assignment to the special variable "rec"',
+      raise GristSyntaxError('Grist disallows assignment to the special variable "rec"',
           ('<string>', node.lineno, node.col_offset, ""))
 
   @classmethod
@@ -288,8 +357,8 @@ class InferRecAttrAssignment(InferenceTip):
   @classmethod
   def filter(cls, node):
     if isinstance(node.expr, astroid.nodes.Name) and node.expr.name == 'rec':
-      raise SyntaxError("You can't assign a value to a column with `=`. "
-                        "If you mean to check for equality, use `==` instead.",
+      raise GristSyntaxError("You can't assign a value to a column with `=`. "
+                             "If you mean to check for equality, use `==` instead.",
           ('<string>', node.lineno, node.col_offset, ""))
 
   @classmethod
@@ -311,7 +380,7 @@ def parse_grist_names(builder):
   code_text = builder.get_text()
 
   with use_inferences(InferReferenceColumn, InferReferenceFormula, InferLookupReference,
-                      InferLookupComprehension):
+                      InferLookupComprehension, InferAllReference, InferAllComprehension):
     atok = asttokens.ASTTokens(code_text, tree=astroid.builder.parse(code_text))
 
   def make_tuple(start, end, table_id, col_id):
@@ -323,7 +392,8 @@ def parse_grist_names(builder):
     if not patch_source:
       return None
     in_text, in_value, in_patch = patch_source
-    return (in_value, in_patch.start, table_id, col_id)
+    if in_value:
+      return (in_value, in_patch.start, table_id, col_id)
 
   parsed_names = []
   for node in asttokens.util.walk(atok.tree):
@@ -351,3 +421,23 @@ def parse_grist_names(builder):
           parsed_names.append(make_tuple(start, end, obj.name, node.arg))
 
   return [name for name in parsed_names if name]
+
+
+code_filename = "usercode"
+
+
+def save_to_linecache(source_code):
+  """
+  Makes source code available to friendly-traceback and traceback formatting in general.
+  """
+  if six.PY3:
+    import friendly_traceback.source_cache
+
+    friendly_traceback.source_cache.cache.add(code_filename, source_code)
+  else:
+    linecache.cache[code_filename] = (
+      len(source_code),
+      None,
+      [line + '\n' for line in source_code.splitlines()],
+      code_filename,
+    )

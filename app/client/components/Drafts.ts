@@ -4,10 +4,13 @@ import {
   IDomArgs, MultiHolder, styled, TagElem
 } from "grainjs";
 import { GristDoc } from "app/client/components/GristDoc";
+import { makeT } from 'app/client/lib/localization';
 import { ITooltipControl, showTooltip, tooltipCloseButton } from "app/client/ui/tooltips";
 import { FieldEditorStateEvent } from "app/client/widgets/FieldEditor";
-import { colors, testId } from "app/client/ui2018/cssVars";
+import { testId, theme } from "app/client/ui2018/cssVars";
 import { cssLink } from "app/client/ui2018/links";
+
+const t = makeT('components.Drafts');
 
 /**
  * Component that keeps track of editor's state (draft value). If user hits an escape button
@@ -270,7 +273,7 @@ class NotificationAdapter extends Disposable implements Notification {
   }
   public showUndoDiscard() {
     const notifier = this._doc.app.topAppModel.notifier;
-    const notification = notifier.createUserMessage("Undo discard", {
+    const notification = notifier.createUserMessage(t("UndoDiscard"), {
       message: () =>
         discardNotification(
           dom.on("click", () => {
@@ -408,7 +411,7 @@ class EditorAdapter extends Disposable implements Editor {
 const styledTooltip = styled('div', `
   display: flex;
   align-items: center;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${theme.controlFg};
 
   & > .${cssLink.className} {
     margin-left: 8px;
@@ -418,7 +421,7 @@ const styledTooltip = styled('div', `
 function cellTooltip(clb: () => any) {
   return function (ctl: ITooltipControl) {
     return styledTooltip(
-      cssLink('Restore last edit',
+      cssLink(t('RestoreLastEdit'),
         dom.on('mousedown', (ev) => { ev.preventDefault(); ctl.close(); clb(); }),
         testId('draft-tooltip'),
       ),
@@ -430,14 +433,14 @@ function cellTooltip(clb: () => any) {
 // Discard notification dom
 const styledNotification = styled('div', `
   cursor: pointer;
-  color: ${colors.lightGreen};
+  color: ${theme.controlFg};
   &:hover {
     text-decoration: underline;
   }
 `);
 function discardNotification(...args: IDomArgs<TagElem<"div">>) {
   return styledNotification(
-    "Undo Discard",
+    t("UndoDiscard"),
     testId("draft-notification"),
     ...args
   );

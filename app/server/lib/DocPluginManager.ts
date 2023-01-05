@@ -6,20 +6,20 @@ import { createRpcLogger, PluginInstance } from 'app/common/PluginInstance';
 import { Promisified } from 'app/common/tpromisified';
 import { ParseFileResult, ParseOptions } from 'app/plugin/FileParserAPI';
 import { checkers, GristTable } from "app/plugin/grist-plugin-api";
-import { GristDocAPI } from "app/plugin/GristAPI";
+import { AccessTokenResult, GristDocAPI } from "app/plugin/GristAPI";
 import { Storage } from 'app/plugin/StorageAPI';
 import { ActiveDoc } from 'app/server/lib/ActiveDoc';
 import { DocPluginData } from 'app/server/lib/DocPluginData';
 import { makeExceptionalDocSession } from 'app/server/lib/DocSession';
 import { FileParserElement } from 'app/server/lib/FileParserElement';
 import { GristServer } from 'app/server/lib/GristServer';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import { SafePythonComponent } from 'app/server/lib/SafePythonComponent';
 import { UnsafeNodeComponent } from 'app/server/lib/UnsafeNodeComponent';
 import { promisifyAll } from 'bluebird';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import * as tmp from 'tmp';
+import tmp from 'tmp';
 
 
 promisifyAll(tmp);
@@ -33,9 +33,10 @@ class GristDocAPIImpl implements GristDocAPI {
   public async getDocName() { return this._activeDoc.docName; }
 
   public async listTables(): Promise<string[]> {
-    const table = this._activeDoc.docData!.getMetaTable('_grist_Tables');
-    return table.getColValues('tableId')
-      .filter(id => !id.startsWith("GristSummary_")).sort();
+    return this._activeDoc.docData!.getMetaTable('_grist_Tables')
+      .getRecords()
+      .filter(r => !r.summarySourceTable)
+      .map(r => r.tableId);
   }
 
   public async fetchTable(tableId: string): Promise<TableColValues> {
@@ -45,6 +46,13 @@ class GristDocAPIImpl implements GristDocAPI {
 
   public applyUserActions(actions: any[][]): Promise<ApplyUAResult> {
     return this._activeDoc.applyUserActions(makeExceptionalDocSession('plugin'), actions);
+  }
+
+  // These implementations of GristDocAPI are from an early implementation of
+  // plugins that is incompatible with access control. No need to add new
+  // methods here.
+  public async getAccessToken(): Promise<AccessTokenResult> {
+    throw new Error('getAccessToken not implemented');
   }
 }
 
@@ -101,7 +109,7 @@ export class DocPluginManager {
       }
     }
 
-    if (path.extname(fileName) === '.irelia') {
+    if (path.extname(fileName) === '.grist') {
       throw new Error(`To import a grist document use the "Import document" menu option on your home screen`);
     }
 

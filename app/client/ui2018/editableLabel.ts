@@ -9,7 +9,7 @@
  *
  * TODO: Consider merging this into grainjs's input widget.
  */
-import { colors } from 'app/client/ui2018/cssVars';
+import { theme } from 'app/client/ui2018/cssVars';
 import { dom, DomArg, styled } from 'grainjs';
 import { Observable } from 'grainjs';
 import noop = require('lodash/noop');
@@ -45,7 +45,7 @@ export const cssLabelText = styled(rawTextInput, `
 export const cssTextInput = styled('input', `
   outline: none;
   height: 28px;
-  border: 1px solid ${colors.darkGrey};
+  border: 1px solid ${theme.inputBorder};
   border-radius: 3px;
   padding: 0 6px;
 `);
@@ -64,12 +64,20 @@ enum Status { NORMAL, EDITING, SAVING }
 
 type SaveFunc = (value: string) => Promise<void>;
 
+export interface EditableLabelOptions {
+  save: SaveFunc;
+  args?: Array<DomArg<HTMLDivElement>>;
+  inputArgs?: Array<DomArg<HTMLInputElement>>;
+}
+
 /**
  * Provides a label that takes in an observable that is set on Enter or loss of focus. Escape
  * cancels editing. Label grows in size with typed input. Validation logic (if any) should happen in
  * the save function, to reject a value simply throw an error, this will revert to the saved one .
  */
-export function editableLabel(label: Observable<string>, save: SaveFunc, ...args: Array<DomArg<HTMLInputElement>>) {
+export function editableLabel(label: Observable<string>, options: EditableLabelOptions) {
+  const {save, args, inputArgs} = options;
+
   let input: HTMLInputElement;
   let sizer: HTMLSpanElement;
 
@@ -81,14 +89,15 @@ export function editableLabel(label: Observable<string>, save: SaveFunc, ...args
     sizer = cssSizer(label.get()),
     input = rawTextInput(label, save, updateSizer, dom.cls(cssLabelText.className),
       dom.on('focus', () => input.select()),
-      ...args
+      ...inputArgs ?? [],
     ),
+    ...args ?? [],
   );
 }
 
 /**
  * Provides a text input element that pretty much behaves like the editableLabel only it shows as a
- * regular input within a rigid static frame. It takes in an observable that is setf on Enter or loss
+ * regular input within a rigid static frame. It takes in an observable that is set on Enter or loss
  * of focus. Escape cancels editing. Validation logic (if any) should happen in the save function,
  * to reject a value simply throw an error, this will revert to the the saved one.
  */

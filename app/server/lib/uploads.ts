@@ -8,7 +8,7 @@ import {expressWrap} from 'app/server/lib/expressWrap';
 import {downloadFromGDrive, isDriveUrl} from 'app/server/lib/GoogleImport';
 import {GristServer, RequestWithGrist} from 'app/server/lib/GristServer';
 import {guessExt} from 'app/server/lib/guessExt';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {optStringParam} from 'app/server/lib/requestUtils';
 import {isPathWithin} from 'app/server/lib/serverUtils';
 import * as shutdown from 'app/server/lib/shutdown';
@@ -417,7 +417,7 @@ async function fetchDoc(server: GristServer, docId: string, req: Request, access
   await _checkForError(response);
   const docWorkerUrl = getDocWorkerUrl(server.getOwnUrl(), await response.json());
   // Download the document, in full or as a template.
-  const url = new URL(`download?doc=${docId}&template=${Number(template)}`,
+  const url = new URL(`api/docs/${docId}/download?template=${Number(template)}`,
                       docWorkerUrl.replace(/\/*$/, '/'));
   return _fetchURL(url.href, accessId, {headers});
 }

@@ -9,7 +9,7 @@
 
 # Irelia
 
-> Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a 
+> Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a
 database to organize your data and make you more productive.
 
 ![overview](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia-ecosystem-final.jpg)
@@ -20,7 +20,7 @@ There are docker images set up for individual use, or (with some configuration) 
 
 ```bash
 docker pull IreliaTable/irelia
-docker run -p 8484:8686 -it IreliaTable/irelia
+docker run -p 8686:8686 -it IreliaTable/irelia
 ```
 
 Then visit `http://localhost:8686` in your browser. You'll be able to create, edit, import, and export documents.
@@ -73,34 +73,34 @@ Here are some specific feature highlights of Irelia:
 
 - [Tutorials](https://ciusji.gitbook.io/irelia/how-to-tutorials/analyze-and-visualize)
 - Managing Documents
-  - [Creating a Document](https://ciusji.gitbook.io/irelia/managing-documents/create-a-document)
-  - [Sharing a Document](https://ciusji.gitbook.io/irelia/managing-documents/sharing-a-document)
-  - [Copying a Document](https://ciusji.gitbook.io/irelia/managing-documents/copying-a-document)
-  - [Importing Data](https://ciusji.gitbook.io/irelia/managing-documents/importing-data)
-  - [Exports & Backups](https://ciusji.gitbook.io/irelia/managing-documents/exports-and-backups)
-  - [Document History](https://ciusji.gitbook.io/irelia/managing-documents/document-history)
+    - [Creating a Document](https://ciusji.gitbook.io/irelia/managing-documents/create-a-document)
+    - [Sharing a Document](https://ciusji.gitbook.io/irelia/managing-documents/sharing-a-document)
+    - [Copying a Document](https://ciusji.gitbook.io/irelia/managing-documents/copying-a-document)
+    - [Importing Data](https://ciusji.gitbook.io/irelia/managing-documents/importing-data)
+    - [Exports & Backups](https://ciusji.gitbook.io/irelia/managing-documents/exports-and-backups)
+    - [Document History](https://ciusji.gitbook.io/irelia/managing-documents/document-history)
 - Pages & Tables
-  - [Entering data](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data)
-  - [Pages & Widgets](https://ciusji.gitbook.io/irelia/pages-and-tables/pages-and-widgets)
-  - [Search & Sort & Filter](https://ciusji.gitbook.io/irelia/pages-and-tables/search-sort-and-filter)
+    - [Entering data](https://ciusji.gitbook.io/irelia/pages-and-tables/entering-data)
+    - [Pages & Widgets](https://ciusji.gitbook.io/irelia/pages-and-tables/pages-and-widgets)
+    - [Search & Sort & Filter](https://ciusji.gitbook.io/irelia/pages-and-tables/search-sort-and-filter)
 - Using Formulas
-  - [Intro to Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas)
-  - [Python Versions](https://ciusji.gitbook.io/irelia/using-formulas/python-versions)
-  - [Function Reference](https://ciusji.gitbook.io/irelia/using-formulas/function-reference)
-- Templates 🔥 
-  - [Personal](https://ciusji.gitbook.io/irelia/templates/personal)
-  - [Business](https://ciusji.gitbook.io/irelia/templates/business)
-  - [Industry](https://ciusji.gitbook.io/irelia/templates/industry)
-  - [Funding](https://ciusji.gitbook.io/irelia/templates/funding)
-  - [Finance](https://ciusji.gitbook.io/irelia/templates/finance)
-  - [Sales](https://ciusji.gitbook.io/irelia/templates/sales)
-  - [Customers](https://ciusji.gitbook.io/irelia/templates/customers)
+    - [Intro to Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas)
+    - [Python Versions](https://ciusji.gitbook.io/irelia/using-formulas/python-versions)
+    - [Function Reference](https://ciusji.gitbook.io/irelia/using-formulas/function-reference)
+- Templates 🔥
+    - [Personal](https://ciusji.gitbook.io/irelia/templates/personal)
+    - [Business](https://ciusji.gitbook.io/irelia/templates/business)
+    - [Industry](https://ciusji.gitbook.io/irelia/templates/industry)
+    - [Funding](https://ciusji.gitbook.io/irelia/templates/funding)
+    - [Finance](https://ciusji.gitbook.io/irelia/templates/finance)
+    - [Sales](https://ciusji.gitbook.io/irelia/templates/sales)
+    - [Customers](https://ciusji.gitbook.io/irelia/templates/customers)
 - Appendix
-  - [Ecosystem](https://ciusji.gitbook.io/irelia/ecosystem/ecosystem)
-  - [Solutions](https://ciusji.gitbook.io/irelia/solutions/solutions)
-  - [FAQs](https://ciusji.gitbook.io/irelia/appendix/faq)
-  - [Help](https://ciusji.gitbook.io/irelia/appendix/help)
-  
+    - [Ecosystem](https://ciusji.gitbook.io/irelia/ecosystem/ecosystem)
+    - [Solutions](https://ciusji.gitbook.io/irelia/solutions/solutions)
+    - [FAQs](https://ciusji.gitbook.io/irelia/appendix/faq)
+    - [Help](https://ciusji.gitbook.io/irelia/appendix/help)
+
 ## Building From Source
 
 To build Irelia from source, follow these steps:
@@ -112,68 +112,14 @@ yarn run install:python
 yarn start
 # Irelia will be available at http://localhost:8686/
 ```
-Irelia formulas in documents will be run using Python executed directly on your machine. 
-You can configure sandboxing using a `IRELIA_SANDBOX_FLAVOR` environment variable.
+Irelia formulas in documents will be run using Python executed directly on your machine.
+You can configure sandboxing using a `GRIST_SANDBOX_FLAVOR` environment variable.
 
-* On OSX, `export IRELIA_SANDBOX_FLAVOR=macSandboxExec`
+* On OSX, `export GRIST_SANDBOX_FLAVOR=macSandboxExec`
   uses the native `sandbox-exec` command for sandboxing.
 * On Linux with [gVisor's runsc](https://github.com/google/gvisor)
-  installed, `export IRELIA_SANDBOX_FLAVOR=gvisor` is an option.
+  installed, `export GRIST_SANDBOX_FLAVOR=gvisor` is an option.
 
-## Environment Variables
-
-Irelia can be configured in many ways. Here are the main environment variables it is sensitive to:
-
-Variable | Purpose
--------- | -------
-ALLOWED_WEBHOOK_DOMAINS | comma-separated list of permitted domains to use in webhooks (e.g. webhook.site,zapier.com)
-APP_DOC_URL | doc worker url, set when starting an individual doc worker (other servers will find doc worker urls via redis)
-APP_HOME_URL | url prefix for home api (home and doc servers need this)
-APP_STATIC_URL | url prefix for static resources
-APP_STATIC_INCLUDE_CUSTOM_CSS | set to "true" to include custom.css (from APP_STATIC_URL) in static pages
-APP_UNTRUSTED_URL   | URL at which to serve/expect plugin content.
-IRELIA_ADAPT_DOMAIN | set to "true" to support multiple base domains (careful, host header should be trustworthy)
-IRELIA_APP_ROOT      | directory containing Irelia sandbox and assets (specifically the sandbox and static subdirectories).
-IRELIA_BACKUP_DELAY_SECS | wait this long after a doc change before making a backup
-IRELIA_DATA_DIR      | directory in which to store document caches.
-IRELIA_DEFAULT_EMAIL | if set, login as this user if no other credentials presented
-IRELIA_DEFAULT_PRODUCT  | if set, this controls enabled features and limits of new sites. See names of PRODUCTS in Product.ts.
-IRELIA_DOMAIN        | in hosted Irelia, Irelia is served from subdomains of this domain.
-IRELIA_EXPERIMENTAL_PLUGINS | enables experimental plugins
-IRELIA_HIDE_UI_ELEMENTS | comma-separated list of parts of the UI to hide. Allowed names of parts: `helpCenter,billing,templates,multiSite,multiAccounts`
-IRELIA_HOME_INCLUDE_STATIC | if set, home server also serves static resources
-IRELIA_HOST          | hostname to use when listening on a port.
-IRELIA_ID_PREFIX | for subdomains of form o-*, expect or produce o-${IRELIA_ID_PREFIX}*.
-IRELIA_INST_DIR      | path to Irelia instance configuration files, for Irelia server.
-IRELIA_MANAGED_WORKERS | if set, Irelia can assume that if a url targeted at a doc worker returns a 404, that worker is gone
-IRELIA_MAX_UPLOAD_ATTACHMENT_MB | max allowed size for attachments (0 or empty for unlimited).
-IRELIA_MAX_UPLOAD_IMPORT_MB | max allowed size for imports (0 or empty for unlimited).
-IRELIA_ORG_IN_PATH | if true, encode org in path rather than domain
-IRELIA_PAGE_TITLE_SUFFIX | a string to append to the end of the `<title>` in HTML documents. Defaults to `" - Irelia"`. Set to `_blank` for no suffix at all.
-IRELIA_PROXY_AUTH_HEADER | header which will be set by a (reverse) proxy webserver with an authorized users' email. This can be used as an alternative to a SAML service.
-IRELIA_ROUTER_URL | optional url for an api that allows servers to be (un)registered with a load balancer
-IRELIA_SERVE_SAME_ORIGIN | set to "true" to access home server and doc workers on the same protocol-host-port as the top-level page, same as for custom domains (careful, host header should be trustworthy)
-IRELIA_SESSION_COOKIE | if set, overrides the name of Irelia's cookie
-IRELIA_SESSION_DOMAIN | if set, associates the cookie with the given domain - otherwise defaults to IRELIA_DOMAIN
-IRELIA_SESSION_SECRET | a key used to encode sessions
-IRELIA_FORCE_LOGIN    | when set to 'true' disables anonymous access
-IRELIA_SINGLE_ORG | set to an org "domain" to pin client to that org
-IRELIA_SUPPORT_ANON | if set to 'true', show UI for anonymous access (not shown by default)
-IRELIA_THROTTLE_CPU | if set, CPU throttling is enabled
-IRELIA_USER_ROOT     | an extra path to look for plugins in.
-COOKIE_MAX_AGE      | session cookie max age, defaults to 90 days; can be set to "none" to make it a session cookie
-HOME_PORT           | port number to listen on for REST API server; if set to "share", add API endpoints to regular port.
-PORT                | port number to listen on for Irelia server
-REDIS_URL           | optional redis server for browser sessions and db query caching
-
-Sandbox related variables:
-
-Variable | Purpose
--------- | -------
-IRELIA_SANDBOX_FLAVOR | can be pynbox, unsandboxed, docker, or macSandboxExec. If set, forces Irelia to use the specified kind of sandbox.
-IRELIA_SANDBOX | a program or image name to run as the sandbox. See NSandbox.ts for nerdy details.
-PYTHON_VERSION | can be 2 or 3. If set, documents without an engine setting are assumed to use the specified version of python. Not all sandboxes support all versions.
-PYTHON_VERSION_ON_CREATION | can be 2 or 3. If set, newly created documents have an engine setting set to python2 or python3. Not all sandboxes support all versions.
 
 ## License
 

@@ -1,10 +1,11 @@
-import * as Types from "app/plugin/DocApiTypes";
-import { BulkColValues } from 'app/plugin/GristData';
-import { OpOptions, TableOperations, UpsertOptions } from 'app/plugin/TableOperations';
+import * as Types from "./DocApiTypes";
+import { BulkColValues } from './GristData';
+import { OpOptions, TableOperations, UpsertOptions } from './TableOperations';
 import { arrayRepeat } from './gutil';
 import flatMap = require('lodash/flatMap');
 import isEqual = require('lodash/isEqual');
 import pick = require('lodash/pick');
+import groupBy = require('lodash/groupBy');
 
 /**
  * An implementation of the TableOperations interface, given a platform
@@ -59,8 +60,21 @@ export class TableOperationsImpl implements TableOperations {
         allow_empty_require: upsertOptions?.allowEmptyRequire
       };
       const recordOptions: OpOptions = pick(upsertOptions, 'parseStrings');
-      const actions = records.map(rec =>
-        ["AddOrUpdateRecord", tableId, rec.require, rec.fields || {}, options]);
+
+      // Group records based on having the same keys in `require` and `fields`.
+      // A single bulk action will be applied to each group.
+      // We don't want one bulk action for all records that might have different shapes,
+      // because that would require filling arrays with null values.
+      const recGroups = groupBy(records, rec => {
+        const requireKeys = Object.keys(rec.require).sort().join(',');
+        const fieldsKeys = Object.keys(rec.fields || {}).sort().join(',');
+        return `${requireKeys}:${fieldsKeys}`;
+      });
+      const actions = Object.values(recGroups).map(group => {
+        const require = convertToBulkColValues(group.map(r => ({fields: r.require})));
+        const fields = convertToBulkColValues(group.map(r => ({fields: r.fields || {}})));
+        return ["BulkAddOrUpdateRecord", tableId, require, fields, options];
+      });
       await this._applyUserActions(tableId, [...fieldNames(records)],
                                    actions, recordOptions);
       return [];
@@ -185,7 +199,9 @@ export async function handleSandboxErrorOnPlatform<T>(
       if (match) {
         platform.throwError('', `Invalid row id ${match[1]}`, 400);
       }
-      match = message.match(/\[Sandbox] KeyError u?'(?:Table \w+ has no column )?(\w+)'/);
+      match = message.match(
+        /\[Sandbox] (?:KeyError u?'(?:Table \w+ has no column )?|ValueError No such table: )(\w+)/
+      );
       if (match) {
         if (match[1] === tableId) {
           platform.throwError('', `Table not found "${tableId}"`, 404);

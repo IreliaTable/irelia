@@ -1,14 +1,15 @@
 .cell_editor {
   position: absolute;
   z-index: 1000;        /* make it higher than popper's 999 */
+  display: flex;
 }
 
 .default_editor {
-  box-shadow: 0 0 3px 2px var(--grist-color-cursor);
+  box-shadow: 0 0 3px 2px var(--grist-theme-cursor, var(--grist-color-cursor));
 }
 
 .readonly_editor {
-  box-shadow: 0 0 3px 2px var(--grist-color-slate);
+  box-shadow: 0 0 3px 2px var(--grist-theme-cursor-readonly, var(--grist-color-slate));
 }
 
 /* make room for lock icon */
@@ -32,14 +33,21 @@
   -webkit-mask-image: var(--icon-Lock);
 }
 
+.formula_editor_wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
 
 /* Make overflow hidden, since editor might be 1 pixel bigger due to fix for devices
  * with different pixel ratio */
 .formula_editor {
-  background-color: white;
+  background-color: var(--grist-theme-formula-editor-bg, white);
   padding: 4px 0 2px 21px;
   z-index: 10;
   overflow: hidden;
+  flex: none;
+  min-height: 22px;   /* this is the usual height, but helps slightly when font is shorter than expected */
 }
 
 /* styles specific to the formula editor in the side panel */
@@ -55,7 +63,7 @@
 }
 
 .celleditor_cursor_editor {
-  background-color: white;
+  background-color: var(--grist-theme-cell-editor-bg, white);
 
   /* the following are copied from .field_clip */
   padding: 3px 3px 0px 3px;
@@ -74,7 +82,8 @@
   border: none;
   resize: none;
   z-index: 10;
-  color: black;
+  background-color: var(--grist-theme-cell-editor-bg, unset);
+  color: var(--grist-theme-cell-editor-fg, black);
 
   /* Inherit styles, same as for .celleditor_content_measure, to ensure that sizes correspond. */
   font-family: inherit;
@@ -100,23 +109,26 @@
 }
 
 .error_msg {
+  background-color: #ffb6c1;
+  padding: 4px;
   color: black;
   cursor: pointer;
-  padding: 4px;
+  white-space: pre-wrap;
+  flex: none;
 }
 
 .error_details {
-  padding: 2px 2px 2px 2px;
-  background-color: #F8ECEA;
-  margin: 0 0 -2px 0;
+  background-color: #F8EAD5;  /* 20% of color-warning-bg */
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 12px;
+  white-space: pre-wrap;
+  flex: auto;
+  overflow: auto;
+  word-break: break-all;
 }
 
-.error_box {
-  background-color: #ffb6c1;
-  padding: 2px 0px 2px 0px;
-  white-space: pre-wrap;
+.error_details_inner {
+  padding: 2px 2px 2px 28px;
 }
 
 .kf_collapser {

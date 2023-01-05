@@ -15,36 +15,36 @@
  * Note that the code is based on the example at https://github.com/Clever/saml2
  *
  * Expected environment variables:
- *    env IRELIA_SAML_SP_HOST=https://<your-domain>
+ *    env GRIST_SAML_SP_HOST=https://<your-domain>
  *        Host at which our /saml/assert endpoint will live; identifies our application.
- *    env IRELIA_SAML_SP_KEY
+ *    env GRIST_SAML_SP_KEY
  *        Path to file with our private key, PEM format.
- *    env IRELIA_SAML_SP_CERT
+ *    env GRIST_SAML_SP_CERT
  *        Path to file with our public key, PEM format.
- *    env IRELIA_SAML_IDP_LOGIN
+ *    env GRIST_SAML_IDP_LOGIN
  *        Login url to redirect user to for log-in.
- *    env IRELIA_SAML_IDP_LOGOUT
+ *    env GRIST_SAML_IDP_LOGOUT
  *        Logout URL to redirect user to for log-out.
- *    env IRELIA_SAML_IDP_SKIP_SLO
+ *    env GRIST_SAML_IDP_SKIP_SLO
  *        If set and non-empty, don't attempt "Single Logout" flow (which I haven't gotten to
- *        work), but simply redirect to IRELIA_SAML_IDP_LOGOUT after clearing session.
- *    env IRELIA_SAML_IDP_CERTS
+ *        work), but simply redirect to GRIST_SAML_IDP_LOGOUT after clearing session.
+ *    env GRIST_SAML_IDP_CERTS
  *        Comma-separated list of paths for certificates from identity provider, PEM format.
- *    env IRELIA_SAML_IDP_UNENCRYPTED
+ *    env GRIST_SAML_IDP_UNENCRYPTED
  *        If set and non-empty, allow unencrypted assertions, relying on https for privacy.
  *
  * This version of SamlConfig has been tested with Auth0 SAML IdP following the instructions
  * at:
  *   https://auth0.com/docs/protocols/saml-protocol/configure-auth0-as-saml-identity-provider
  * When running on localhost and http, the settings tested were with:
- *   - IRELIA_SAML_IDP_SKIP_SLO not set
- *   - IRELIA_SAML_SP_HOST=http://localhost:8080 or 8585
- *   - IRELIA_SAML_IDP_UNENCRYPTED=1
- *   - IRELIA_SAML_IDP_LOGIN=https://...auth0.com/samlp/xxxx
- *   - IRELIA_SAML_IDP_LOGOUT=https://...auth0.com/samlp/xxxx  # these are same for Auth0
- *   - IRELIA_SAML_IDP_CERTS=.../auth0.pem   # downloaded per Auth0 instructions
- *   - IRELIA_SAML_SP_KEY=.../saml.pem       # created
- *   - IRELIA_SAML_SP_CERT=.../saml.crt      # created
+ *   - GRIST_SAML_IDP_SKIP_SLO not set
+ *   - GRIST_SAML_SP_HOST=http://localhost:8080 or 8484
+ *   - GRIST_SAML_IDP_UNENCRYPTED=1
+ *   - GRIST_SAML_IDP_LOGIN=https://...auth0.com/samlp/xxxx
+ *   - GRIST_SAML_IDP_LOGOUT=https://...auth0.com/samlp/xxxx  # these are same for Auth0
+ *   - GRIST_SAML_IDP_CERTS=.../auth0.pem   # downloaded per Auth0 instructions
+ *   - GRIST_SAML_SP_KEY=.../saml.pem       # created
+ *   - GRIST_SAML_SP_CERT=.../saml.crt      # created
  *
  * Created and used the key/cert pair following instructions here:
  *   https://auth0.com/docs/protocols/saml-protocol/saml-sso-integrations/sign-and-encrypt-saml-requests#use-custom-certificate-to-sign-requests
@@ -59,7 +59,7 @@ import * as saml2 from 'saml2-js';
 
 import {expressWrap} from 'app/server/lib/expressWrap';
 import {GristLoginSystem, GristServer} from 'app/server/lib/GristServer';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {Permit} from 'app/server/lib/Permit';
 import {getOriginUrl} from 'app/server/lib/requestUtils';
 import {fromCallback} from 'app/server/lib/serverUtils';
@@ -73,34 +73,34 @@ export class SamlConfig {
 
   // Read SAML certificate files and initialize the SAML state.
   public async initSaml(): Promise<void> {
-    if (!process.env.IRELIA_SAML_SP_HOST) { throw new Error("initSaml requires IRELIA_SAML_SP_HOST to be set"); }
-    if (!process.env.IRELIA_SAML_SP_KEY) { throw new Error("initSaml requires IRELIA_SAML_SP_KEY to be set"); }
-    if (!process.env.IRELIA_SAML_SP_CERT) { throw new Error("initSaml requires IRELIA_SAML_SP_CERT to be set"); }
-    if (!process.env.IRELIA_SAML_IDP_LOGIN) { throw new Error("initSaml requires IRELIA_SAML_IDP_LOGIN to be set"); }
-    if (!process.env.IRELIA_SAML_IDP_LOGOUT) { throw new Error("initSaml requires IRELIA_SAML_IDP_LOGOUT to be set"); }
-    if (!process.env.IRELIA_SAML_IDP_CERTS) { throw new Error("initSaml requires IRELIA_SAML_IDP_CERTS to be set"); }
+    if (!process.env.GRIST_SAML_SP_HOST) { throw new Error("initSaml requires GRIST_SAML_SP_HOST to be set"); }
+    if (!process.env.GRIST_SAML_SP_KEY) { throw new Error("initSaml requires GRIST_SAML_SP_KEY to be set"); }
+    if (!process.env.GRIST_SAML_SP_CERT) { throw new Error("initSaml requires GRIST_SAML_SP_CERT to be set"); }
+    if (!process.env.GRIST_SAML_IDP_LOGIN) { throw new Error("initSaml requires GRIST_SAML_IDP_LOGIN to be set"); }
+    if (!process.env.GRIST_SAML_IDP_LOGOUT) { throw new Error("initSaml requires GRIST_SAML_IDP_LOGOUT to be set"); }
+    if (!process.env.GRIST_SAML_IDP_CERTS) { throw new Error("initSaml requires GRIST_SAML_IDP_CERTS to be set"); }
 
-    const spHost: string = process.env.IRELIA_SAML_SP_HOST;
+    const spHost: string = process.env.GRIST_SAML_SP_HOST;
     const spOptions: saml2.ServiceProviderOptions = {
       entity_id: `${spHost}/saml/metadata.xml`,
-      private_key: await fse.readFile(process.env.IRELIA_SAML_SP_KEY, {encoding: 'utf8'}),
-      certificate: await fse.readFile(process.env.IRELIA_SAML_SP_CERT, {encoding: 'utf8'}),
+      private_key: await fse.readFile(process.env.GRIST_SAML_SP_KEY, {encoding: 'utf8'}),
+      certificate: await fse.readFile(process.env.GRIST_SAML_SP_CERT, {encoding: 'utf8'}),
       assert_endpoint: `${spHost}/saml/assert`,
       notbefore_skew: 5,      // allow 5 seconds of time skew
       sign_get_request: true  // Auth0 requires this. If it is a problem for others, could make optional.
     };
     this._serviceProvider = new saml2.ServiceProvider(spOptions);
 
-    const idpCerts = process.env.IRELIA_SAML_IDP_CERTS.split(",");
+    const idpCerts = process.env.GRIST_SAML_IDP_CERTS.split(",");
     const idpOptions: saml2.IdentityProviderOptions = {
-      sso_login_url: process.env.IRELIA_SAML_IDP_LOGIN,
-      sso_logout_url: process.env.IRELIA_SAML_IDP_LOGOUT,
+      sso_login_url: process.env.GRIST_SAML_IDP_LOGIN,
+      sso_logout_url: process.env.GRIST_SAML_IDP_LOGOUT,
       certificates: await Promise.all(idpCerts.map((p) => fse.readFile(p, {encoding: 'utf8'}))),
       // Encrypted assertions are recommended, but not necessary when over https.
-      allow_unencrypted_assertion: Boolean(process.env.IRELIA_SAML_IDP_UNENCRYPTED),
+      allow_unencrypted_assertion: Boolean(process.env.GRIST_SAML_IDP_UNENCRYPTED),
     };
     this._identityProvider = new saml2.IdentityProvider(idpOptions);
-    log.info(`SamlConfig set with host ${spHost}, IdP ${process.env.IRELIA_SAML_IDP_LOGIN}`);
+    log.info(`SamlConfig set with host ${spHost}, IdP ${process.env.GRIST_SAML_IDP_LOGIN}`);
   }
 
   // Return a login URL to which to redirect the user to log in. Once logged in, the user will be
@@ -119,9 +119,9 @@ export class SamlConfig {
 
   // Returns the URL to log the user out of SAML IdentityProvider.
   public async getLogoutRedirectUrl(req: express.Request, redirectUrl: URL): Promise<string> {
-    if (process.env.IRELIA_SAML_IDP_SKIP_SLO) {
+    if (process.env.GRIST_SAML_IDP_SKIP_SLO) {
       // TODO: This does NOT eventually take us to redirectUrl.
-      return process.env.IRELIA_SAML_IDP_LOGOUT!;
+      return process.env.GRIST_SAML_IDP_LOGOUT!;
     }
 
     const sp = this._serviceProvider;
@@ -242,7 +242,7 @@ export class SamlConfig {
  * Return SAML login system if environment looks configured for it, else return undefined.
  */
 export async function getSamlLoginSystem(): Promise<GristLoginSystem|undefined> {
-  if (!process.env.IRELIA_SAML_SP_HOST) {
+  if (!process.env.GRIST_SAML_SP_HOST) {
     return undefined;
   }
   return {

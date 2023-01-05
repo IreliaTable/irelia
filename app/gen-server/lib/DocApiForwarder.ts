@@ -7,6 +7,7 @@ import { HomeDBManager } from "app/gen-server/lib/HomeDBManager";
 import { assertAccess, getOrSetDocAuth, getTransitiveHeaders, RequestWithLogin } from 'app/server/lib/Authorizer';
 import { IDocWorkerMap } from "app/server/lib/DocWorkerMap";
 import { expressWrap } from "app/server/lib/expressWrap";
+import { GristServer } from "app/server/lib/GristServer";
 import { getAssignmentId } from "app/server/lib/idUtils";
 
 /**
@@ -25,7 +26,8 @@ import { getAssignmentId } from "app/server/lib/idUtils";
  */
 export class DocApiForwarder {
 
-  constructor(private _docWorkerMap: IDocWorkerMap, private _dbManager: HomeDBManager) {
+  constructor(private _docWorkerMap: IDocWorkerMap, private _dbManager: HomeDBManager,
+              private _gristServer: GristServer) {
   }
 
   public addEndpoints(app: express.Application) {
@@ -53,6 +55,8 @@ export class DocApiForwarder {
     app.use('/api/docs/:docId/states', withDoc);
     app.use('/api/docs/:docId/compare', withDoc);
     app.use('/api/docs/:docId/assign', withDocWithoutAuth);
+    app.use('/api/docs/:docId/webhooks/queue', withDoc);
+    app.use('/api/docs/:docId/webhooks', withDoc);
     app.use('^/api/docs$', withoutDoc);
   }
 
@@ -61,7 +65,8 @@ export class DocApiForwarder {
   ): Promise<void> {
     let docId: string|null = null;
     if (withDocId) {
-      const docAuth = await getOrSetDocAuth(req as RequestWithLogin, this._dbManager, req.params.docId);
+      const docAuth = await getOrSetDocAuth(req as RequestWithLogin, this._dbManager,
+                                            this._gristServer, req.params.docId);
       if (role) {
         assertAccess(role, docAuth, {allowRemoved: true});
       }

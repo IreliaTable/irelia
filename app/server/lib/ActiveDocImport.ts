@@ -17,7 +17,7 @@ import {ParseFileResult, ParseOptions} from 'app/plugin/FileParserAPI';
 import {GristColumn, GristTable} from 'app/plugin/GristTable';
 import {ActiveDoc} from 'app/server/lib/ActiveDoc';
 import {DocSession, OptDocSession} from 'app/server/lib/DocSession';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {globalUploadSet, moveUpload, UploadInfo} from 'app/server/lib/uploads';
 import {buildComparisonQuery} from 'app/server/lib/ExpandedQuery';
 import flatten = require('lodash/flatten');
@@ -234,7 +234,7 @@ export class ActiveDocImport {
                              isHidden: boolean): Promise<ImportResult> {
 
     // Check that upload size is within the configured limits.
-    const limit = (Number(process.env.IRELIA_MAX_UPLOAD_IMPORT_MB) * 1024 * 1024) || Infinity;
+    const limit = (Number(process.env.GRIST_MAX_UPLOAD_IMPORT_MB) * 1024 * 1024) || Infinity;
     const totalSize = upload.files.reduce((acc, f) => acc + f.size, 0);
     if (totalSize > limit) {
       throw new ApiError(`Imported files must not exceed ${gutil.byteString(limit)}`, 413);
@@ -242,6 +242,7 @@ export class ActiveDocImport {
 
     // The upload must be within the plugin-accessible directory. Once moved, subsequent calls to
     // moveUpload() will return without having to do anything.
+    if (!this._activeDoc.docPluginManager) { throw new Error('no plugin manager available'); }
     await moveUpload(upload, this._activeDoc.docPluginManager.tmpDir());
 
     const importResult: ImportResult = {options: parseOptions, tables: []};
@@ -287,6 +288,7 @@ export class ActiveDocImport {
     const {originalFilename, parseOptions, mergeOptionsMap, isHidden, uploadFileIndex,
            transformRuleMap} = importOptions;
     log.info("ActiveDoc._importFileAsNewTable(%s, %s)", tmpPath, originalFilename);
+    if (!this._activeDoc.docPluginManager) { throw new Error('no plugin manager available'); }
     const optionsAndData: ParseFileResult =
       await this._activeDoc.docPluginManager.parseFile(tmpPath, originalFilename, parseOptions);
     const options = optionsAndData.parseOptions;
@@ -605,8 +607,6 @@ export class ActiveDocImport {
     const srcColIds = srcCols.map(c => c.id as string);
 
     for (const {id, fields} of targetCols) {
-      if (fields.isFormula === true || fields.formula !== '') { continue; }
-
       destCols.push({
         colId: destTableId ? id as string : null,
         label: fields.label as string,

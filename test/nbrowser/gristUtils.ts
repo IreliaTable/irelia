@@ -7,15 +7,17 @@ import * as fse from 'fs-extra';
 import escapeRegExp = require('lodash/escapeRegExp');
 import noop = require('lodash/noop');
 import startCase = require('lodash/startCase');
-import { assert, driver, error, Key, WebElement, WebElementPromise } from 'mocha-webdriver';
-import { stackWrapFunc, stackWrapOwnMethods } from 'mocha-webdriver';
+import { assert, driver as driverOrig, error, Key, WebElement, WebElementPromise } from 'mocha-webdriver';
+import { stackWrapFunc, stackWrapOwnMethods, WebDriver } from 'mocha-webdriver';
 import * as path from 'path';
 
 import { decodeUrl } from 'app/common/gristUrls';
 import { FullUser, UserProfile } from 'app/common/LoginSessionAPI';
 import { resetOrg } from 'app/common/resetOrg';
+import { UserAction } from 'app/common/DocActions';
 import { TestState } from 'app/common/TestState';
-import { Organization as APIOrganization, DocStateComparison, UserAPIImpl, Workspace } from 'app/common/UserAPI';
+import { Organization as APIOrganization, DocStateComparison,
+         UserAPI, UserAPIImpl, Workspace } from 'app/common/UserAPI';
 import { Organization } from 'app/gen-server/entity/Organization';
 import { Product } from 'app/gen-server/entity/Product';
 import { create } from 'app/server/lib/create';
@@ -24,10 +26,20 @@ import { HomeUtil } from 'test/nbrowser/homeUtil';
 import { server } from 'test/nbrowser/testServer';
 import { Cleanup } from 'test/nbrowser/testUtils';
 import * as testUtils from 'test/server/testUtils';
+import type { AssertionError } from 'assert';
 
 // tslint:disable:no-namespace
 // Wrap in a namespace so that we can apply stackWrapOwnMethods to all the exports together.
 namespace gristUtils {
+
+// Allow overriding the global 'driver' to use in gristUtil.
+let driver: WebDriver;
+
+// Substitute a custom driver to use with gristUtils functions. Omit argument to restore to default.
+export function setDriver(customDriver: WebDriver = driverOrig) { driver = customDriver; }
+
+// Set the 'driver' to use here in before() callback, because driverOrig isn't set until then.
+before(() => setDriver());
 
 const homeUtil = new HomeUtil(testUtils.fixturesRoot, server);
 
@@ -39,6 +51,8 @@ export const listDocs = homeUtil.listDocs.bind(homeUtil);
 export const createHomeApi = homeUtil.createHomeApi.bind(homeUtil);
 export const simulateLogin = homeUtil.simulateLogin.bind(homeUtil);
 export const removeLogin = homeUtil.removeLogin.bind(homeUtil);
+export const enableTips = homeUtil.enableTips.bind(homeUtil);
+export const disableTips = homeUtil.disableTips.bind(homeUtil);
 export const setValue = homeUtil.setValue.bind(homeUtil);
 export const isOnLoginPage = homeUtil.isOnLoginPage.bind(homeUtil);
 export const isOnGristLoginPage = homeUtil.isOnLoginPage.bind(homeUtil);
@@ -92,17 +106,25 @@ export function exactMatch(value: string): RegExp {
 }
 
 /**
- * Helper function that creates a regular expression to match the begging of the string.
+ * Helper function that creates a regular expression to match the beginning of the string.
  */
 export function startsWith(value: string): RegExp {
   return new RegExp(`^${escapeRegExp(value)}`);
+}
+
+
+/**
+ * Helper function that creates a regular expression to match the anywhere in of the string.
+ */
+ export function contains(value: string): RegExp {
+  return new RegExp(`${escapeRegExp(value)}`);
 }
 
 /**
  * Helper to scroll an element into view.
  */
 export function scrollIntoView(elem: WebElement): Promise<void> {
-  return driver.executeScript((el: any) => el.scrollIntoView(), elem);
+  return driver.executeScript((el: any) => el.scrollIntoView({behavior: 'auto'}), elem);
 }
 
 /**
@@ -374,6 +396,13 @@ export function getActiveCell(): WebElementPromise {
 
 
 /**
+ * Returns a visible GridView row from the active section.
+ */
+export function getRow(rowNum: number): WebElementPromise {
+  return driver.findContent('.active_section .gridview_data_row_num', String(rowNum));
+}
+
+/**
  * Get the numeric value from the row header of the first selected row. This would correspond to
  * the row with the cursor when a single rows is selected.
  */
@@ -392,6 +421,30 @@ export async function getGridRowCount(): Promise<number> {
   const rowNum = await driver.find('.active_cursor')
       .findClosest('.gridview_row').find('.gridview_data_row_num').getText();
   return parseInt(rowNum, 10);
+}
+
+/**
+ * Returns the total row count in the card list that is the active section by scrolling to the bottom
+ * and examining the last row number. The count includes the special "Add Row".
+ */
+export async function getCardListCount(): Promise<number> {
+  await sendKeys(Key.chord(await modKey(), Key.DOWN));
+  const rowNum = await driver.find('.active.detailview_record_detail .detail_row_num').getText();
+  return parseInt(rowNum, 10);
+}
+
+/**
+ * Returns the total row count in the card widget that is the active section by looking
+ * at the displayed count in the section header. The count includes the special "Add Row".
+ */
+export async function getCardCount(): Promise<number> {
+  const section = await driver.findWait('.active_section', 4000);
+  const counter = await section.findAll(".grist-single-record__menu__count");
+  if (counter.length) {
+    const cardRow = (await counter[0].getText()).split(' OF ')[1];
+    return  parseInt(cardRow) + 1;
+  }
+  return 1;
 }
 
 /**
@@ -447,32 +500,34 @@ export async function rightClick(cell: WebElement) {
  * grid view or field name for detail view.
  */
 export async function getCursorPosition() {
-  const section = await driver.findWait('.active_section', 4000);
-  const cursor = await section.findWait('.active_cursor', 1000);
-  // Query assuming the cursor is in a GridView and a DetailView, then use whichever query data
-  // works out.
-  const [colIndex, rowIndex, rowNum, colName] = await Promise.all([
-    catchNoSuchElem(() => cursor.findClosest('.field').index()),
-    catchNoSuchElem(() => cursor.findClosest('.gridview_row').index()),
-    catchNoSuchElem(() => cursor.findClosest('.g_record_detail').find('.detail_row_num').getText()),
-    catchNoSuchElem(() => cursor.findClosest('.g_record_detail_el')
-      .find('.g_record_detail_label').getText())
-  ]);
-  if (rowNum && colName) {
-    // This must be a detail view, and we just got the info we need.
-    return {rowNum: parseInt(rowNum, 10), col: colName};
-  } else {
-    // We might be on a single card record
-    const counter = await section.findAll(".grist-single-record__menu__count");
-    if (counter.length) {
-      const cardRow = (await counter[0].getText()).split(' OF ')[0];
-      return { rowNum : parseInt(cardRow), col: colName };
+  return await retryOnStale(async () => {
+    const section = await driver.findWait('.active_section', 4000);
+    const cursor = await section.findWait('.active_cursor', 1000);
+    // Query assuming the cursor is in a GridView and a DetailView, then use whichever query data
+    // works out.
+    const [colIndex, rowIndex, rowNum, colName] = await Promise.all([
+      catchNoSuchElem(() => cursor.findClosest('.field').index()),
+      catchNoSuchElem(() => cursor.findClosest('.gridview_row').index()),
+      catchNoSuchElem(() => cursor.findClosest('.g_record_detail').find('.detail_row_num').getText()),
+      catchNoSuchElem(() => cursor.findClosest('.g_record_detail_el')
+        .find('.g_record_detail_label').getText())
+    ]);
+    if (rowNum && colName) {
+      // This must be a detail view, and we just got the info we need.
+      return {rowNum: parseInt(rowNum, 10), col: colName};
+    } else {
+      // We might be on a single card record
+      const counter = await section.findAll(".grist-single-record__menu__count");
+      if (counter.length) {
+        const cardRow = (await counter[0].getText()).split(' OF ')[0];
+        return { rowNum : parseInt(cardRow), col: colName };
+      }
+      // Otherwise, it's a grid view, and we need to use indices to look up the info.
+      const gridRows = await section.findAll('.gridview_data_row_num');
+      const gridRowNum = await gridRows[rowIndex].getText();
+      return { rowNum: parseInt(gridRowNum, 10), col: colIndex };
     }
-    // Otherwise, it's a grid view, and we need to use indices to look up the info.
-    const gridRows = await section.findAll('.gridview_data_row_num');
-    const gridRowNum = await gridRows[rowIndex].getText();
-    return { rowNum: parseInt(gridRowNum, 10), col: colIndex };
-  }
+  });
 }
 
 /**
@@ -483,6 +538,15 @@ async function catchNoSuchElem(query: () => any) {
     return await query();
   } catch (err) {
     if (err instanceof error.NoSuchElementError) { return null; }
+    throw err;
+  }
+}
+
+async function retryOnStale<T>(query: () => Promise<T>): Promise<T> {
+  try {
+    return await query();
+  } catch (err) {
+    if (err instanceof error.StaleElementReferenceError) { return await query(); }
     throw err;
   }
 }
@@ -527,16 +591,18 @@ export async function getFormulaText() {
 /**
  * Check that formula editor is shown and its value matches the given regexp.
  */
-export async function checkFormulaEditor(valueRe: RegExp) {
+export async function checkFormulaEditor(value: RegExp|string) {
   assert.equal(await driver.findWait('.test-formula-editor', 500).isDisplayed(), true);
+  const valueRe = typeof value === 'string' ? exactMatch(value) : value;
   assert.match(await driver.find('.code_editor_container').getText(), valueRe);
 }
 
 /**
  * Check that plain text editor is shown and its value matches the given regexp.
  */
-export async function checkTextEditor(valueRe: RegExp) {
+export async function checkTextEditor(value: RegExp|string) {
   assert.equal(await driver.findWait('.test-widget-text-editor', 500).isDisplayed(), true);
+  const valueRe = typeof value === 'string' ? exactMatch(value) : value;
   assert.match(await driver.find('.celleditor_text_editor').value(), valueRe);
 }
 
@@ -571,13 +637,13 @@ export async function setApiKey(username: string, apiKey?: string) {
 /**
  * Reach into the DB to set the given org to use the given billing plan product.
  */
-export async function updateOrgPlan(orgName: string, productName: string = 'professional') {
+export async function updateOrgPlan(orgName: string, productName: string = 'team') {
   const dbManager = await server.getDatabase();
   const db = dbManager.connection.manager;
   const dbOrg = await db.findOne(Organization, {where: {name: orgName},
     relations: ['billingAccount', 'billingAccount.product']});
   if (!dbOrg) { throw new Error(`cannot find org ${orgName}`); }
-  const product = await db.findOne(Product, {name: productName});
+  const product = await db.findOne(Product, {where: {name: productName}});
   if (!product) { throw new Error('cannot find product'); }
   dbOrg.billingAccount.product = product;
   await dbOrg.billingAccount.save();
@@ -632,6 +698,11 @@ export async function loadDocMenu(relPath: string, wait: boolean = true): Promis
 export async function waitForDocToLoad(timeoutMs: number = 10000): Promise<void> {
   await driver.findWait('.viewsection_title', timeoutMs);
   await waitForServer();
+}
+
+export async function reloadDoc() {
+  await driver.navigate().refresh();
+  await waitForDocToLoad();
 }
 
 /**
@@ -747,12 +818,13 @@ export async function userActionsVerify(expectedUserActions: unknown[]): Promise
       await driver.executeScript("return window.gristApp.comm.userActionsFetchAndReset()"),
       expectedUserActions);
   } catch (err) {
-    if (!Array.isArray(err.actual)) {
+    const assertError = err as AssertionError;
+    if (!Array.isArray(assertError.actual)) {
       throw new Error('userActionsVerify: no user actions, run userActionsCollect() first');
     }
-    err.actual = err.actual.map((a: any) => JSON.stringify(a) + ",").join("\n");
-    err.expected = err.expected.map((a: any) => JSON.stringify(a) + ",").join("\n");
-    assert.deepEqual(err.actual, err.expected);
+    assertError.actual = assertError.actual.map((a: any) => JSON.stringify(a) + ",").join("\n");
+    assertError.expected = assertError.expected.map((a: any) => JSON.stringify(a) + ",").join("\n");
+    assert.deepEqual(assertError.actual, assertError.expected);
     throw err;
   }
 }
@@ -797,6 +869,9 @@ export async function waitAppFocus(yesNo: boolean = true): Promise<void> {
   await driver.wait(async () => (await driver.find('.copypaste').hasFocus()) === yesNo, 5000);
 }
 
+export async function waitForLabelInput(): Promise<void> {
+  await driver.wait(async () => (await driver.findWait('.kf_elabel_input', 100).hasFocus()), 300);
+}
 
 /**
  * Waits for all pending comm requests from the client to the doc worker to complete. This taps into
@@ -806,14 +881,39 @@ export async function waitAppFocus(yesNo: boolean = true): Promise<void> {
  * has been processed.
  * @param optTimeout: Timeout in ms, defaults to 2000.
  */
- // TODO: waits also for api requests (both to home server or doc worker) to be resolved (maybe
- // requires to track requests in app/common/UserAPI)
 export async function waitForServer(optTimeout: number = 2000) {
   await driver.wait(() => driver.executeScript(
-    "return !window.gristApp.comm.hasActiveRequests() && window.gristApp.testNumPendingApiRequests() === 0",
+    "return window.gristApp && (!window.gristApp.comm || !window.gristApp.comm.hasActiveRequests())"
+    + " && window.gristApp.testNumPendingApiRequests() === 0",
     optTimeout,
     "Timed out waiting for server requests to complete"
   ));
+}
+
+/**
+ * Sends UserActions using client api from the browser.
+ */
+export async function sendActions(actions: UserAction[]) {
+  await driver.executeScript(`
+    gristDocPageModel.gristDoc.get().docModel.docData.sendActions(${JSON.stringify(actions)});
+  `);
+  await waitForServer();
+}
+
+/**
+ * Confirms dialog for removing rows. In the future, can be used for other dialogs.
+ */
+export async function confirm(save = true, remember = false) {
+  if (await driver.find(".test-confirm-save").isPresent()) {
+    if (remember) {
+      await driver.find(".test-confirm-remember").click();
+    }
+    if (save) {
+      await driver.find(".test-confirm-save").click();
+    } else {
+      await driver.find(".test-confirm-cancel").click();
+    }
+  }
 }
 
 /**
@@ -825,6 +925,11 @@ export function getPageItem(pageName: string|RegExp): WebElementPromise {
   const matchName: RegExp = typeof pageName === 'string' ? exactMatch(pageName) : pageName;
   return driver.findContent('.test-docpage-label', matchName)
     .findClosest('.test-treeview-itemHeaderWrapper');
+}
+
+export async function openPage(name: string|RegExp) {
+  await driver.findContentWait('.test-treeview-itemHeader', name, 500).find(".test-docpage-initial").doClick();
+  await waitForServer(); // wait for table load
 }
 
 /**
@@ -840,6 +945,51 @@ export async function openPageMenu(pageName: RegExp|string) {
  */
 export function getPageNames(): Promise<string[]> {
   return driver.findAll('.test-docpage-label', (e) => e.getText());
+}
+
+export interface PageTree {
+  label: string;
+  children?: PageTree[];
+}
+/**
+ * Returns a current page tree as a JSON object.
+ */
+export async function getPageTree(): Promise<PageTree[]> {
+  const allPages = await driver.findAll('.test-docpage-label');
+  const root: PageTree = {label: 'root', children: []};
+  const stack: PageTree[] = [root];
+  let current = 0;
+  for(const page of allPages) {
+    const label = await page.getText();
+    const offset = await page.findClosest('.test-treeview-itemHeader').find('.test-treeview-offset');
+    const level = parseInt((await offset.getCssValue('width')).replace("px", "")) / 10;
+    if (level === current) {
+      const parent = stack.pop()!;
+      parent.children ??= [];
+      parent.children.push({label});
+      stack.push(parent);
+    } else if (level > current) {
+      current = level;
+      const child = {label};
+      const grandFather = stack.pop()!;
+      grandFather.children ??= [];
+      const father = grandFather.children[grandFather.children.length - 1];
+      father.children ??= [];
+      father.children.push(child);
+      stack.push(grandFather);
+      stack.push(father);
+    } else {
+      while (level < current) {
+        stack.pop();
+        current--;
+      }
+      const parent = stack.pop()!;
+      parent.children ??= [];
+      parent.children.push({label});
+      stack.push(parent);
+    }
+  }
+  return root.children!;
 }
 
 /**
@@ -860,8 +1010,14 @@ export async function addNewTable(name?: string) {
 
 export interface PageWidgetPickerOptions {
   tableName?: string;
-  selectBy?: RegExp|string;      // Optional pattern of SELECT BY option to pick.
-  summarize?: (RegExp|string)[];   // Optional list of patterns to match Group By columns.
+  /** Optional pattern of SELECT BY option to pick. */
+  selectBy?: RegExp|string;
+  /** Optional list of patterns to match Group By columns. */
+  summarize?: (RegExp|string)[];
+  /** If true, configure the widget selection without actually adding to the page. */
+  dontAdd?: boolean;
+  /** If true, dismiss any tooltips that are shown. */
+  dismissTips?: boolean;
 }
 
 // Add a new page using the 'Add New' menu and wait for the new page to be shown.
@@ -892,46 +1048,66 @@ export async function addNewSection(typeRe: RegExp|string, tableRe: RegExp|strin
   await selectWidget(typeRe, tableRe, options);
 }
 
+export async function openAddWidgetToPage() {
+  await driver.findWait('.test-dp-add-new', 2000).doClick();
+  await driver.findWait('.test-dp-add-widget-to-page', 2000).doClick();
+}
+
 // Select type and table that matches respectively typeRe and tableRe and save. The widget picker
 // must be already opened when calling this function.
 export async function selectWidget(
   typeRe: RegExp|string,
-  tableRe: RegExp|string,
-  options: PageWidgetPickerOptions = {}) {
+  tableRe: RegExp|string = '',
+  options: PageWidgetPickerOptions = {}
+) {
+  if (options.dismissTips) { await dismissBehavioralPrompts(); }
 
-  const tableEl = driver.findContent('.test-wselect-table', tableRe);
+  // select right type
+  await driver.findContent('.test-wselect-type', typeRe).doClick();
 
-  // unselect all selected columns
-  for (const col of (await driver.findAll('.test-wselect-column[class*=-selected]'))) {
-    await col.click();
-  }
+  if (options.dismissTips) { await dismissBehavioralPrompts(); }
 
-  // let's select table
-  await tableEl.click();
+  if (tableRe) {
+    const tableEl = driver.findContent('.test-wselect-table', tableRe);
 
-  const pivotEl = tableEl.find('.test-wselect-pivot');
-  if (await pivotEl.isPresent()) {
-    await toggleSelectable(pivotEl, Boolean(options.summarize));
-  }
+    // unselect all selected columns
+    for (const col of (await driver.findAll('.test-wselect-column[class*=-selected]'))) {
+      await col.click();
+    }
 
-  if (options.summarize) {
-    for (const columnEl of await driver.findAll('.test-wselect-column')) {
-      const label = await columnEl.getText();
-      // TODO: Matching cols with regexp calls for trouble and adds no value. I think function should be
-      // rewritten using string matching only.
-      const goal = Boolean(options.summarize.find(r => label.match(r)));
-      await toggleSelectable(columnEl, goal);
+    // let's select table
+    await tableEl.click();
+
+    if (options.dismissTips) { await dismissBehavioralPrompts(); }
+
+    const pivotEl = tableEl.find('.test-wselect-pivot');
+    if (await pivotEl.isPresent()) {
+      await toggleSelectable(pivotEl, Boolean(options.summarize));
+    }
+
+    if (options.summarize) {
+      for (const columnEl of await driver.findAll('.test-wselect-column')) {
+        const label = await columnEl.getText();
+        // TODO: Matching cols with regexp calls for trouble and adds no value. I think function should be
+        // rewritten using string matching only.
+        const goal = Boolean(options.summarize.find(r => label.match(r)));
+        await toggleSelectable(columnEl, goal);
+      }
+    }
+
+    if (options.selectBy) {
+      // select link
+      await driver.find('.test-wselect-selectby').doClick();
+      await driver.findContent('.test-wselect-selectby option', options.selectBy).doClick();
     }
   }
 
-  if (options.selectBy) {
-    // select link
-    await driver.find('.test-wselect-selectby').doClick();
-    await driver.findContent('.test-wselect-selectby option', options.selectBy).doClick();
+
+  if (options.dontAdd) {
+    return;
   }
 
-  // let's select right type and save
-  await driver.findContent('.test-wselect-type', typeRe).doClick();
+  // add the widget
   await driver.find('.test-wselect-addBtn').doClick();
 
   // if we selected a new table, there will be a popup for a name
@@ -946,6 +1122,13 @@ export async function selectWidget(
     await driver.find(".test-modal-confirm").click();
   }
 
+  await waitForServer();
+}
+
+export async function changeWidget(type: string) {
+  await openWidgetPanel();
+  await driver.findContent('.test-right-panel button', /Change Widget/).click();
+  await selectWidget(type);
   await waitForServer();
 }
 
@@ -1037,10 +1220,9 @@ export async function renameColumn(col: IColHeader, newName: string) {
 }
 
 /**
- * Removes a table using RAW data view. Return back a current url.
+ * Removes a table using RAW data view.
  */
 export async function removeTable(tableId: string) {
-  const back = await driver.getCurrentUrl();
   await driver.find(".test-tools-raw").click();
   const tableIdList = await driver.findAll('.test-raw-data-table-id', e => e.getText());
   const tableIndex = tableIdList.indexOf(tableId);
@@ -1051,7 +1233,6 @@ export async function removeTable(tableId: string) {
   await driver.find(".test-raw-data-menu-remove").click();
   await driver.find(".test-modal-confirm").click();
   await waitForServer();
-  return back;
 }
 
 /**
@@ -1136,7 +1317,7 @@ export function isSidePanelOpen(which: 'right'|'left'): Promise<boolean> {
 }
 
 /*
- * Toggles (opens or closes) the right panel and wait for the transition to complete. An optional
+ * Toggles (opens or closes) the right or left panel and wait for the transition to complete. An optional
  * argument can specify the desired state.
  */
 export async function toggleSidePanel(which: 'right'|'left', goal: 'open'|'close'|'toggle' = 'toggle') {
@@ -1169,6 +1350,14 @@ export async function waitForSidePanel() {
 export async function openWidgetPanel() {
   await toggleSidePanel('right', 'open');
   await driver.find('.test-right-tab-pagewidget').click();
+}
+
+/**
+ * Opens a Creator Panel on Widget/Table settings tab.
+ */
+ export async function openColumnPanel() {
+  await toggleSidePanel('right', 'open');
+  await driver.find('.test-right-tab-field').click();
 }
 
 /**
@@ -1273,7 +1462,7 @@ export async function openRawTable(tableId: string) {
 export async function renameRawTable(tableId: string, newName: string) {
   await driver.find(`.test-raw-data-table .test-raw-data-table-id-${tableId}`)
     .findClosest('.test-raw-data-table')
-    .find('.test-raw-data-widget-title')
+    .find('.test-widget-title-text')
     .click();
   const input = await driver.find(".test-widget-title-table-name-input");
   await input.doClear();
@@ -1288,25 +1477,6 @@ export async function isRawTableOpened() {
 
 export async function closeRawTable() {
   await driver.find('.test-raw-data-close-button').click();
-}
-
-/**
- * Toggles (opens or closes) the filter bar for a section.
- */
-export async function toggleFilterBar(goal: 'open'|'close'|'toggle' = 'toggle',
-                                      options: {section?: string|WebElement, save?: boolean} = {}) {
-  const isOpen = await driver.find('.test-filter-bar').isPresent();
-  if ((goal === 'close') && !isOpen ||
-      (goal === 'open') && isOpen ) {
-    return;
-  }
-  const menu = await openSectionMenu('sortAndFilter', options.section);
-  await menu.findContent('.grist-floating-menu > div', /Toggle Filter Bar/).find('.test-section-menu-btn').click();
-  if (options.save) {
-    await menu.findContent('.grist-floating-menu button', /Save/).click();
-    await waitForServer();
-  }
-  await menu.sendKeys(Key.ESCAPE);
 }
 
 /**
@@ -1355,15 +1525,52 @@ export function openColumnMenu(col: IColHeader|string, option?: string): WebElem
   return new WebElementPromise(driver, openColumnMenuHelper(col, option));
 }
 
+export async function deleteColumn(col: IColHeader|string) {
+  await openColumnMenu(col, 'Delete column');
+  await waitForServer();
+}
+
 /**
  * Sets the type of the currently selected field to value.
  */
-export async function setType(type: RegExp, options: {skipWait?: boolean} = {}) {
+export async function setType(
+  type: RegExp|string,
+  options: {skipWait?: boolean, apply?: boolean} = {}
+) {
+  const {skipWait, apply} = options;
   await toggleSidePanel('right', 'open');
   await driver.find('.test-right-tab-field').click();
   await driver.find('.test-fbuilder-type-select').click();
-  await driver.findContentWait('.test-select-menu .test-select-row', type, 200).click();
-  if (!options.skipWait) { await waitForServer(); }
+  type = typeof type === 'string' ? exactMatch(type) : type;
+  await driver.findContentWait('.test-select-menu .test-select-row', type, 500).click();
+  if (!skipWait || apply) { await waitForServer(); }
+  if (apply) {
+    await driver.findWait('.test-type-transform-apply', 1000).click();
+    await waitForServer();
+  }
+}
+
+/**
+ * Gets the type of the currently selected field.
+ */
+export async function getType() {
+  return await driver.find('.test-fbuilder-type-select').getText();
+}
+
+/**
+ * Get the field's widget type (e.g. "CheckBox" for a Toggle column) in the creator panel.
+ */
+export async function getFieldWidgetType(): Promise<string> {
+  return await driver.find(".test-fbuilder-widget-select").getText();
+}
+
+/**
+ * Set the field's widget type (e.g. "CheckBox" for a Toggle column) in the creator panel.
+ */
+export async function setFieldWidgetType(type: string) {
+  await driver.find(".test-fbuilder-widget-select").click();
+  await driver.findContent('.test-select-menu li', exactMatch(type)).click();
+  await waitForServer();
 }
 
 export async function applyTypeTransform() {
@@ -1437,6 +1644,12 @@ export async function openWsDropdown(wsName: string): Promise<void> {
   await wsTab.find('.test-dm-workspace-options').mouseMove().click();
 }
 
+export async function openWorkspace(wsName: string): Promise<void> {
+  const wsTab = await driver.findContentWait('.test-dm-workspace', wsName, 3000);
+  await wsTab.click();
+  await waitForDocMenuToLoad();
+}
+
 /**
  * Open ⋮ dropdown menu for named document.
  */
@@ -1485,6 +1698,11 @@ export function openRowMenu(rowNum: number) {
     .then(() => driver.findWait('.grist-floating-menu', 1000));
 }
 
+export async function removeRow(rowNum: number) {
+  await (await openRowMenu(rowNum)).findContent('li', /Delete/).click();
+  await waitForServer();
+}
+
 export async function openCardMenu(rowNum: number) {
   const section = await driver.find('.active_section');
   const firstRow = await section.findContent('.detail_row_num', String(rowNum));
@@ -1528,6 +1746,16 @@ export async function completeCopy(options: {destName?: string, destWorkspace?: 
   await driver.wait(async () => (await getCurrentUrlId()) !== urlId);
 
   await waitForDocToLoad();
+}
+
+/**
+ * Removes document by name from the home page.
+ */
+export async function removeDoc(docName: string) {
+  await openDocDropdown(docName);
+  await driver.find('.test-dm-delete-doc').click();
+  await driver.find('.test-modal-confirm').click();
+  await driver.wait(async () => !(await driver.find('.test-modal-dialog').isPresent()), 3000);
 }
 
 /**
@@ -1660,7 +1888,7 @@ export class Session {
 
   // Return a session configured for a particular team site and the current session's user.
   public customTeamSite(orgDomain: string = 'test-grist', orgName = 'Test Grist') {
-    const deployment = process.env.IRELIA_ID_PREFIX;
+    const deployment = process.env.GRIST_ID_PREFIX;
     if (deployment) {
       orgDomain = `${orgDomain}-${deployment}`;
     }
@@ -1695,13 +1923,21 @@ export class Session {
   public async login(options?: {loginMethod?: UserProfile['loginMethod'],
                                 freshAccount?: boolean,
                                 isFirstLogin?: boolean,
+                                showTips?: boolean,
                                 retainExistingLogin?: boolean}) {
     // Optimize testing a little bit, so if we are already logged in as the expected
     // user on the expected org, and there are no options set, we can just continue.
     if (!options && await this.isLoggedInCorrectly()) { return this; }
     if (!options?.retainExistingLogin) {
       await removeLogin();
-      if (this.settings.email === 'anon@getgrist.com') { return this; }
+      if (this.settings.email === 'anon@getgrist.com') {
+        if (options?.showTips) {
+          await enableTips(this.settings.email);
+        } else {
+          await disableTips(this.settings.email);
+        }
+        return this;
+      }
     }
     await server.simulateLogin(this.settings.name, this.settings.email, this.settings.orgDomain,
                                {isFirstLogin: false, cacheCredentials: true, ...options});
@@ -1796,7 +2032,8 @@ export class Session {
     return doc;
   }
 
-  public async tempNewDoc(cleanup: Cleanup, docName: string, {load} = {load: true}) {
+  public async tempNewDoc(cleanup: Cleanup, docName: string = '', {load} = {load: true}) {
+    docName ||= `Test${Date.now()}`;
     const docId = await createNewDoc(this.settings.name, this.settings.orgDomain, this.settings.workspace,
                                      docName, {email: this.settings.email});
     if (load) {
@@ -1891,9 +2128,28 @@ export async function setFont(type: 'bold'|'underline'|'italic'|'strikethrough',
   }
 }
 
+/**
+ * Returns the rgb/hex representation of `color` if it's a name (e.g. red, blue, green, white, black, addRow, or
+ * transparent), or `color` unchanged if it's not a name.
+ */
+export function nameToHex(color: string) {
+  switch(color) {
+    case 'red': color = '#FF0000'; break;
+    case 'blue': color = '#0000FF'; break;
+    case 'green': color = '#00FF00'; break;
+    case 'white': color = '#FFFFFF'; break;
+    case 'black': color = '#000000'; break;
+    case 'transparent': color = 'rgba(0, 0, 0, 0)'; break;
+    case 'addRow': color = 'rgba(246, 246, 255, 1)'; break;
+  }
+  return color;
+}
+
 //  Set the value of an `<input type="color">` element to `color` and trigger the `change`
-//  event. Accepts `color` to be of following forms `rgb(120, 10, 3)` or '#780a03'.
+//  event. Accepts `color` to be of following forms `rgb(120, 10, 3)` or '#780a03' or some predefined
+//  values (red, green, blue, white, black, transparent)
 export async function setColor(colorInputEl: WebElement, color: string) {
+  color = nameToHex(color);
   if (color.startsWith('rgb(')) {
     // the `value` of an `<input type='color'>` element must be a rgb color in hexadecimal
     // notation.
@@ -1908,6 +2164,50 @@ export async function setColor(colorInputEl: WebElement, color: string) {
   }, colorInputEl, color);
 }
 
+export function setTextColor(color: string) {
+  return setColor(driver.find('.test-text-input'), color);
+}
+
+export function setFillColor(color: string) {
+  return setColor(driver.find('.test-fill-input'), color);
+}
+
+export async function clickAway() {
+  await driver.find(".test-notifier-menu-btn").click();
+  await driver.sendKeys(Key.ESCAPE);
+}
+
+export function openColorPicker() {
+  return driver.find('.test-color-select').click();
+}
+
+export async function assertCellTextColor(col: string, row: number, color: string) {
+  await assertTextColor(await getCell(col, row).find('.field_clip'), color);
+}
+
+export async function assertCellFillColor(col: string, row: number, color: string) {
+  await assertFillColor(await getCell(col, row), color);
+}
+
+export async function assertTextColor(cell: WebElement, color: string) {
+  color = nameToHex(color);
+  color = color.startsWith('#') ? hexToRgb(color) : color;
+  const test = async () => {
+    const actual = await cell.getCssValue('color');
+    assert.equal(actual, color);
+  };
+  await waitToPass(test, 500);
+}
+
+export async function assertFillColor(cell: WebElement, color: string) {
+  color = nameToHex(color);
+  color = color.startsWith('#') ? hexToRgb(color) : color;
+  const test = async () => {
+    const actual = await cell.getCssValue('background-color');
+    assert.equal(actual, color);
+  };
+  await waitToPass(test, 500);
+}
 
 // the rgbToHex function is from this conversation: https://stackoverflow.com/a/5624139/8728791
 export function rgbToHex(color: string) {
@@ -1934,19 +2234,22 @@ export function hexToRgb(hex: string) {
  * Adds new column to the table.
  * @param name Name of the column
  */
-export async function addColumn(name: string) {
+export async function addColumn(name: string, type?: string) {
   await scrollIntoView(await driver.find('.active_section .mod-add-column'));
   await driver.find('.active_section .mod-add-column').click();
   // If we are on a summary table, we could be see a menu helper
   const menu = (await driver.findAll('.grist-floating-menu'))[0];
   if (menu) {
-    await menu.findContent("li", name).click();
+    await menu.findContent("li", "Add Column").click();
   }
   await waitForServer();
   await waitAppFocus(false);
   await driver.sendKeys(name);
   await driver.sendKeys(Key.ENTER);
   await waitForServer();
+  if (type) {
+    await setType(exactMatch(type));
+  }
 }
 
 export async function showColumn(name: string) {
@@ -1962,6 +2265,14 @@ export async function selectColumnRange(col1: string, col2: string) {
   await driver.mouseDown();
   await getColumnHeader({col: col2}).mouseMove();
   await driver.mouseUp();
+}
+
+export async function selectGrid() {
+  await driver.find(".gridview_data_corner_overlay").click();
+}
+
+export async function selectColumn(col: string) {
+  await getColumnHeader({col}).click();
 }
 
 export interface WindowDimensions {
@@ -2158,7 +2469,16 @@ export async function getDateFormat(): Promise<string> {
  */
 export async function setDateFormat(format: string|RegExp) {
   await driver.find('[data-test-id=Widget_dateFormat]').click();
-  await driver.findContentWait('.test-select-menu .test-select-row', format, 200).click();
+  await driver.findContentWait('.test-select-menu .test-select-row',
+    typeof format === 'string' ? exactMatch(format) : format, 200).click();
+  await waitForServer();
+}
+
+export async function setCustomDateFormat(format: string) {
+  await setDateFormat("Custom");
+  await driver.find('[data-test-id=Widget_dateCustomFormat]').click();
+  await selectAll();
+  await driver.sendKeys(format, Key.ENTER);
   await waitForServer();
 }
 
@@ -2212,58 +2532,52 @@ export async function setRefTable(table: string) {
 
 // Add column to sort.
 export async function addColumnToSort(colName: RegExp|string) {
-  await driver.find(".test-vconfigtab-sort-add").click();
-  await driver.findContent(".test-vconfigtab-sort-add-menu-row", colName).click();
-  await driver.findContentWait(".test-vconfigtab-sort-row", colName, 100);
+  await driver.find(".test-sort-config-add").click();
+  await driver.findContent(".test-sort-config-add-menu-row", colName).click();
+  await driver.findContentWait(".test-sort-config-row", colName, 100);
 }
 
 // Remove column from sort.
 export async function removeColumnFromSort(colName: RegExp|string) {
-  await findSortRow(colName).find(".test-vconfigtab-sort-remove").click();
+  await findSortRow(colName).find(".test-sort-config-remove").click();
 }
 
 // Toggle column sort order from ascending to descending, or vice-versa.
 export async function toggleSortOrder(colName: RegExp|string) {
-  await findSortRow(colName).find(".test-vconfigtab-sort-order").click();
-}
-
-// Change the column at the given sort position.
-export async function changeSortDropdown(colName: RegExp|string, newColName: RegExp|string) {
-  await findSortRow(colName).find(".test-select-row").click();
-  await driver.findContent("li .test-select-row", newColName).click();
+  await findSortRow(colName).find(".test-sort-config-order").click();
 }
 
 // Reset the sort to the last saved sort.
 export async function revertSortConfig() {
-  await driver.find(".test-vconfigtab-sort-reset").click();
+  await driver.find(".test-sort-filter-config-revert").click();
 }
 
 // Save the sort.
 export async function saveSortConfig() {
-  await driver.find(".test-vconfigtab-sort-save").click();
+  await driver.find(".test-sort-filter-config-save").click();
   await waitForServer();
 }
 
 // Update the data positions to the given sort.
 export async function updateRowsBySort() {
-  await driver.find(".test-vconfigtab-sort-update").click();
+  await driver.find(".test-sort-config-update").click();
   await waitForServer(10000);
 }
 
 // Returns a WebElementPromise for the sort row of the given col name.
 export function findSortRow(colName: RegExp|string) {
-  return driver.findContent(".test-vconfigtab-sort-row", colName);
+  return driver.findContent(".test-sort-config-row", colName);
 }
 
 // Opens more sort options menu
 export async function openMoreSortOptions(colName: RegExp|string) {
   const row = await findSortRow(colName);
-  return row.find(".test-vconfigtab-sort-options-icon").click();
+  return row.find(".test-sort-config-options-icon").click();
 }
 
 // Selects one of the options in the more options menu.
 export async function toggleSortOption(option: SortOption) {
-  const label = await driver.find(`.test-vconfigtab-sort-option-${option} label`);
+  const label = await driver.find(`.test-sort-config-option-${option} label`);
   await label.click();
   await waitForServer();
 }
@@ -2280,7 +2594,7 @@ export const SortOptions: ReadonlyArray<SortOption> = ["orderByChoice", "emptyLa
 export async function getSortOptions(): Promise<SortOption[]> {
   const options: SortOption[] = [];
   for(const option of SortOptions) {
-    const list = await driver.findAll(`.test-vconfigtab-sort-option-${option} input:checked`);
+    const list = await driver.findAll(`.test-sort-config-option-${option} input:checked`);
     if (list.length) {
       options.push(option);
     }
@@ -2293,7 +2607,7 @@ export async function getSortOptions(): Promise<SortOption[]> {
 export async function getEnabledOptions(): Promise<SortOption[]> {
   const options: SortOption[] = [];
   for(const option of SortOptions) {
-    const list = await driver.findAll(`.test-vconfigtab-sort-option-${option}:not(.disabled)`);
+    const list = await driver.findAll(`.test-sort-config-option-${option}:not(.disabled)`);
     if (list.length) {
       options.push(option);
     }
@@ -2328,6 +2642,15 @@ export async function scrollActiveView(x: number, y: number) {
   await driver.sleep(10); // wait a bit for the scroll to happen (this is async operation in Grist).
 }
 
+export async function scrollActiveViewTop() {
+  await driver.executeScript(function() {
+    const view = document.querySelector(".active_section .grid_view_data") ||
+                 document.querySelector(".active_section .detailview_scroll_pane");
+    view!.scrollTop = 0;
+  });
+  await driver.sleep(10); // wait a bit for the scroll to happen (this is async operation in Grist).
+}
+
 /**
  * Filters a column in a Grid using the filter menu.
  */
@@ -2346,6 +2669,48 @@ export async function filterBy(col: IColHeader|string, save: boolean, values: (s
   await waitForServer();
 }
 
+export interface PinnedFilter {
+  name: string;
+  hasUnsavedChanges: boolean;
+}
+
+/**
+ * Returns a list of all pinned filters in the active section.
+ */
+export async function getPinnedFilters(): Promise<PinnedFilter[]> {
+  const filterBar = await driver.find('.active_section .test-filter-bar');
+  const allFilters = await filterBar.findAll('.test-filter-field', async (el) => {
+    const button = await el.find('.test-btn');
+    const buttonClass = await button.getAttribute('class');
+    return {
+      name: await el.getText(),
+      isPinned: await el.getCssValue('display') !== 'none',
+      hasUnsavedChanges: !/\b\w+-grayed\b/.test(buttonClass),
+    };
+  });
+  const pinnedFilters = allFilters.filter(({isPinned}) => isPinned);
+  return pinnedFilters.map(({name, hasUnsavedChanges}) => ({name, hasUnsavedChanges}));
+}
+
+export interface FilterMenuValue {
+  checked: boolean;
+  value: string;
+  count: number;
+}
+
+/**
+ * Returns a list of all values in the filter menu and their associated state.
+ */
+export async function getFilterMenuState(): Promise<FilterMenuValue[]> {
+  const items = await driver.findAll('.test-filter-menu-list > *');
+  return await Promise.all(items.map(async item => {
+    const checked = (await item.find('input').getAttribute('checked')) === null ? false : true;
+    const value = await item.find('label').getText();
+    const count = parseInt(await item.find('label + div').getText(), 10);
+    return {checked, value, count};
+  }));
+}
+
 /**
  * Refresh browser and dismiss alert that is shown (for refreshing during edits).
  */
@@ -2356,11 +2721,49 @@ export async function refreshDismiss() {
 }
 
 /**
+ * Dismisses all behavioral prompts that are present.
+ */
+export async function dismissBehavioralPrompts() {
+  let i = 0;
+  const max = 10;
+
+  // Keep dismissing prompts until there are no more, up to a maximum of 10 times.
+  while (i < max && await driver.find('.test-behavioral-prompt').isPresent()) {
+    await driver.find('.test-behavioral-prompt-dismiss').click();
+    await waitForServer();
+    i += 1;
+  }
+}
+
+/**
+ * Dismisses all card popups that are present.
+ *
+ * Optionally takes a `waitForServerTimeoutMs`, which may be null to skip waiting
+ * after closing each popup.
+ */
+ export async function dismissCardPopups(waitForServerTimeoutMs: number | null = 2000) {
+  let i = 0;
+  const max = 10;
+
+  // Keep dismissing popups until there are no more, up to a maximum of 10 times.
+  while (i < max && await driver.find('.test-popup-card').isPresent()) {
+    await driver.find('.test-popup-close-button').click();
+    if (waitForServerTimeoutMs) { await waitForServer(waitForServerTimeoutMs); }
+    i += 1;
+  }
+}
+
+/**
  * Confirms that anchor link was used for navigation.
  */
 export async function waitForAnchor() {
   await waitForDocToLoad();
   await driver.wait(async () => (await getTestState()).anchorApplied, 2000);
+}
+
+export async function getAnchor() {
+  await driver.find('body').sendKeys(Key.chord(Key.SHIFT, await modKey(), 'a'));
+  return (await getTestState()).clipboard || '';
 }
 
 export async function getActiveSectionTitle(timeout?: number) {
@@ -2412,6 +2815,90 @@ export async function setWidgetUrl(url: string) {
   }
   await sendKeys(Key.ENTER);
   await waitForServer();
+}
+
+/**
+ * Opens a behavior menu and clicks one of the option.
+ */
+export async function changeBehavior(option: string|RegExp) {
+  await driver.find('.test-field-behaviour').click();
+  await driver.findContent('.grist-floating-menu li', option).click();
+  await waitForServer();
+}
+
+/**
+ * Gets all available options in the behavior menu.
+ */
+export async function availableBehaviorOptions() {
+  await driver.find('.test-field-behaviour').click();
+  const list = await driver.findAll('.grist-floating-menu li', el => el.getText());
+  await driver.sendKeys(Key.ESCAPE);
+  return list;
+}
+
+export function withComments() {
+  let oldEnv: testUtils.EnvironmentSnapshot;
+  before(async () => {
+    if (process.env.COMMENTS !== 'true') {
+      oldEnv = new testUtils.EnvironmentSnapshot();
+      process.env.COMMENTS = 'true';
+      await server.restart();
+    }
+  });
+  after(async () => {
+    if (oldEnv) {
+      oldEnv.restore();
+      await server.restart();
+    }
+  });
+}
+
+/**
+ * Helper to revert ACL changes. It first saves the current ACL data, and
+ * then removes everything and adds it back.
+ */
+export async function beginAclTran(api: UserAPI, docId: string) {
+  const oldRes = await api.getTable(docId, '_grist_ACLResources');
+  const oldRules = await api.getTable(docId, '_grist_ACLRules');
+
+  return async () => {
+    const newRes = await api.getTable(docId, '_grist_ACLResources');
+    const newRules = await api.getTable(docId, '_grist_ACLRules');
+    const restoreRes = {tableId: oldRes.tableId, colIds: oldRes.colIds};
+    const restoreRules = {
+      resource: oldRules.resource,
+      aclFormula: oldRules.aclFormula,
+      permissionsText: oldRules.permissionsText
+    };
+    await api.applyUserActions(docId, [
+      ['BulkRemoveRecord', '_grist_ACLRules', newRules.id],
+      ['BulkRemoveRecord', '_grist_ACLResources', newRes.id],
+      ['BulkAddRecord', '_grist_ACLResources', oldRes.id, restoreRes],
+      ['BulkAddRecord', '_grist_ACLRules', oldRules.id, restoreRules],
+    ]);
+  };
+}
+
+/**
+ * Helper to set the value of a column range filter bound. Helper also support picking relative date
+ * from options for Date columns, simply pass {relative: '2 days ago'} as value.
+ */
+export async function setRangeFilterBound(minMax: 'min'|'max', value: string|{relative: string}|null) {
+  await driver.find(`.test-filter-menu-${minMax}`).click();
+  if (typeof value === 'string' || value === null) {
+    await selectAll();
+    await driver.sendKeys(value === null ? Key.DELETE : value);
+    // send TAB to trigger blur event, that will force call on the debounced callback
+    await driver.sendKeys(Key.TAB);
+  } else {
+    await waitToPass(async () => {
+      // makes sure the relative options is opened
+      if (!await driver.find('.grist-floatin-menu').isPresent()) {
+        await driver.find(`.test-filter-menu-${minMax}`).click();
+      }
+      await driver.findContent('.grist-floating-menu li', value.relative).click();
+    });
+  }
 }
 
 } // end of namespace gristUtils

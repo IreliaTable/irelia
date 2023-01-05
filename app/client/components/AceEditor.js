@@ -1,10 +1,12 @@
 var ace = require('brace');
 var _ = require('underscore');
-// Used to load python language settings and 'chrome' ace style
+// Used to load python language settings and color themes
 require('brace/mode/python');
 require('brace/theme/chrome');
+require('brace/theme/dracula');
 require('brace/ext/language_tools');
 var {setupAceEditorCompletions} = require('./AceEditorCompletions');
+var {getGristConfig} = require('../../common/urlUtils');
 var dom = require('../lib/dom');
 var dispose = require('../lib/dispose');
 var modelUtil = require('../models/modelUtil');
@@ -26,7 +28,7 @@ function AceEditor(options) {
   this.saveValueOnBlurEvent = !(options.saveValueOnBlurEvent === false);
   this.calcSize = options.calcSize || ((_elem, size) => size);
   this.gristDoc = options.gristDoc || null;
-  this.field = options.field || null;
+  this.column = options.column || null;
   this.editorState = options.editorState || null;
   this._readonly = options.readonly || false;
 
@@ -185,11 +187,13 @@ AceEditor.prototype.setFontSize = function(pxVal) {
 AceEditor.prototype._setup = function() {
   // Standard editor setup
   this.editor = this.autoDisposeWith('destroy', ace.edit(this.editorDom));
-  if (this.gristDoc && this.field) {
+  if (this.gristDoc && this.column) {
     const getSuggestions = (prefix) => {
-      const tableId = this.gristDoc.viewModel.activeSection().table().tableId();
-      const columnId = this.field.column().colId();
-      return this.gristDoc.docComm.autocomplete(prefix, tableId, columnId);
+      const section = this.gristDoc.viewModel.activeSection();
+      const tableId = section.table().tableId();
+      const columnId = this.column.colId();
+      const rowId = section.activeRowId();
+      return this.gristDoc.docComm.autocomplete(prefix, tableId, columnId, rowId);
     };
     setupAceEditorCompletions(this.editor, {getSuggestions});
   }
@@ -198,7 +202,14 @@ AceEditor.prototype._setup = function() {
   });
   this.session = this.editor.getSession();
   this.session.setMode('ace/mode/python');
-  this.editor.setTheme('ace/theme/chrome');
+
+  const gristTheme = this.gristDoc?.docPageModel.appModel.currentTheme;
+  this._setAceTheme(gristTheme?.get());
+  if (!getGristConfig().enableCustomCss && gristTheme) {
+    this.autoDispose(gristTheme.addListener((theme) => {
+      this._setAceTheme(theme);
+    }));
+  }
 
   // Default line numbers to hidden
   this.editor.renderer.setShowGutter(false);
@@ -234,11 +245,17 @@ AceEditor.prototype._setup = function() {
 AceEditor.prototype.resize = function() {
   var wrap = this.session.getUseWrapMode();
   var contentWidth = wrap ? 0 : this._getContentWidth();
+  var contentHeight = this._getContentHeight();
   var desiredSize = {
     width: wrap ? 0 : contentWidth + this.textPadding,
-    height: this._getContentHeight()
+    height: contentHeight,
   };
   var size = this.calcSize(this._fullDom, desiredSize);
+  if (size.height < contentHeight) {
+    // Editor will show a vertical scrollbar, so recalculate to make space for it.
+    desiredSize.width += 20;
+    size = this.calcSize(this._fullDom, desiredSize);
+  }
   if (size.width < contentWidth) {
     // Editor will show a horizontal scrollbar, so recalculate to make space for it.
     desiredSize.height += 20;
@@ -264,6 +281,12 @@ AceEditor.prototype._getContentHeight = function() {
   return Math.max(1, this.session.getScreenLength()) * this.editor.renderer.lineHeight;
 };
 
+AceEditor.prototype._setAceTheme = function(gristTheme) {
+  const {enableCustomCss} = getGristConfig();
+  const gristAppearance = gristTheme?.appearance;
+  const aceTheme = gristAppearance === 'dark' && !enableCustomCss ? 'dracula' : 'chrome';
+  this.editor.setTheme(`ace/theme/${aceTheme}`);
+};
 
 let _RangeConstructor = null; //singleton, load it lazily
 AceEditor.makeRange = function(a, b, c, d) {

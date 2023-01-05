@@ -1,11 +1,12 @@
+import {makeT} from 'app/client/lib/localization';
 import type {ColumnRec} from 'app/client/models/entities/ColumnRec';
 import type {TableRec} from 'app/client/models/entities/TableRec';
 import {reportError} from 'app/client/models/errors';
-import {cssRow} from 'app/client/ui/RightPanel';
+import {cssRow} from 'app/client/ui/RightPanelStyles';
 import {shadowScroll} from 'app/client/ui/shadowScroll';
 import {basicButton, primaryButton} from "app/client/ui2018/buttons";
 import {labeledSquareCheckbox} from "app/client/ui2018/checkbox";
-import {colors, testId} from 'app/client/ui2018/cssVars';
+import {testId, theme} from 'app/client/ui2018/cssVars';
 import {icon} from "app/client/ui2018/icons";
 import {menuCssClass, menuDivider} from 'app/client/ui2018/menus';
 import {cssSelectBtn} from 'app/client/ui2018/select';
@@ -17,10 +18,15 @@ import {Computed, dom, IDisposableOwner, MultiHolder, Observable, styled} from '
 import {cssMenu, cssMenuItem, defaultMenuOptions, IOpenController, setPopupToCreateDom} from "popweasel";
 import isEqual = require('lodash/isEqual');
 
+const t = makeT('TriggerFormulas');
+
 /**
  * Build UI to select triggers for formulas in data columns (such for default values).
  */
-export function buildFormulaTriggers(owner: MultiHolder, column: ColumnRec, disable: Observable<boolean>|null = null) {
+export function buildFormulaTriggers(owner: MultiHolder, column: ColumnRec, options: {
+  notTrigger?: Observable<boolean>|null // if column is not yet a trigger,
+  disabled?: Observable<boolean>
+}) {
   // Set up observables to translate between the UI representation of triggers, and what we
   // actually store.
   // - We store the pair (recalcWhen, recalcDeps). When recalcWhen is DEFAULT, recalcDeps lists
@@ -67,19 +73,33 @@ export function buildFormulaTriggers(owner: MultiHolder, column: ColumnRec, disa
   const docModel = column._table.docModel;
   const summaryText = Computed.create(owner, use => {
     if (use(column.recalcWhen) === RecalcWhen.MANUAL_UPDATES) {
-      return 'Any field';
+      return t('AnyField');
     }
     const deps = decodeObject(use(column.recalcDeps)) as number[]|null;
     if (!deps || deps.length === 0) { return ''; }
     return deps.map(dep => use(docModel.columns.getRowModel(dep)?.label)).join(", ");
   });
 
+
+  const changesDisabled = Computed.create(owner, use => {
+    return Boolean(
+      (options.disabled && use(options.disabled)) ||
+      (options.notTrigger && use(options.notTrigger))
+    );
+  });
+
+  const newRowsDisabled = Computed.create(owner, use => {
+    return Boolean(
+      use(applyOnChanges) || use(changesDisabled)
+    );
+  });
+
   return [
     cssRow(
       labeledSquareCheckbox(
         applyToNew,
-        'Apply to new records',
-        dom.boolAttr('disabled', (use) => (disable && use(disable)) || use(applyOnChanges)),
+        t('NewRecords'),
+        dom.boolAttr('disabled', newRowsDisabled),
         testId('field-formula-apply-to-new'),
       ),
     ),
@@ -87,10 +107,10 @@ export function buildFormulaTriggers(owner: MultiHolder, column: ColumnRec, disa
       labeledSquareCheckbox(
         applyOnChanges,
         dom.text(use => use(applyOnChanges) ?
-          'Apply on changes to:' :
-          'Apply on record changes'
+          t('ChangesTo') :
+          t('RecordChanges')
         ),
-        dom.boolAttr('disabled', (use) => disable ? use(disable) : false),
+        dom.boolAttr('disabled', changesDisabled),
         testId('field-formula-apply-on-changes'),
       ),
     ),
@@ -100,6 +120,7 @@ export function buildFormulaTriggers(owner: MultiHolder, column: ColumnRec, disa
           cssSelectSummary(dom.text(summaryText)),
           icon('Dropdown'),
           testId('field-triggers-select'),
+          dom.cls('disabled', use => !!options.disabled && use(options.disabled)),
           elem => {
             setPopupToCreateDom(elem, ctl => buildTriggerSelectors(ctl, column.table.peek(), column, setRecalc),
               {...defaultMenuOptions, placement: 'bottom-end'});
@@ -179,14 +200,14 @@ function buildTriggerSelectors(ctl: IOpenController, tableRec: TableRec, column:
     cssItemsFixed(
       cssSelectorItem(
         labeledSquareCheckbox(current,
-          ['Current field ', cssSelectorNote('(data cleaning)')],
+          [t('CurrentField'), cssSelectorNote('(data cleaning)')],
           dom.boolAttr('disabled', allUpdates),
         ),
       ),
       menuDivider(),
       cssSelectorItem(
         labeledSquareCheckbox(allUpdates,
-          ['Any field ', cssSelectorNote('(except formulas)')]
+          [`${t('AnyField')} `, cssSelectorNote('(except formulas)')]
         ),
       ),
     ),
@@ -203,12 +224,12 @@ function buildTriggerSelectors(ctl: IOpenController, tableRec: TableRec, column:
     cssItemsFixed(
       cssSelectorFooter(
         dom.maybe(isChanged, () =>
-          primaryButton('OK',
+          primaryButton(t('OK'),
             dom.on('click', () => close(true)),
             testId('trigger-deps-apply')
           ),
         ),
-        basicButton(dom.text(use => use(isChanged) ? 'Cancel' : 'Close'),
+        basicButton(dom.text(use => use(isChanged) ? t('Cancel') : t('Close')),
           dom.on('click', () => close(false)),
           testId('trigger-deps-cancel')
         ),
@@ -228,7 +249,7 @@ const cssSelectSummary = styled('div', `
 
   &:empty::before {
     content: "Select fields";
-    color: ${colors.slate};
+    color: ${theme.selectButtonPlaceholderFg};
   }
 `);
 
@@ -244,8 +265,8 @@ const cssSelectorMenu = styled(cssMenu, `
 const cssItemsList = styled(shadowScroll, `
   flex: auto;
   min-height: 80px;
-  border-top: 1px solid ${colors.darkGrey};
-  border-bottom: 1px solid ${colors.darkGrey};
+  border-top: 1px solid ${theme.menuBorder};
+  border-bottom: 1px solid ${theme.menuBorder};
   margin-top: 8px;
   padding: 8px 0;
 `);
@@ -263,7 +284,7 @@ const cssSelectorItem = styled(cssMenuItem, `
 `);
 
 const cssSelectorNote = styled('span', `
-  color: ${colors.slate};
+  color: ${theme.lightText};
 `);
 
 const cssSelectorFooter = styled(cssSelectorItem, `

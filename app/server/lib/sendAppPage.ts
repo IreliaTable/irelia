@@ -1,12 +1,19 @@
 import {getPageTitleSuffix, GristLoadConfig, HideableUiElements, IHideableUiElement} from 'app/common/gristUrls';
 import {getTagManagerSnippet} from 'app/common/tagManager';
+import {Document} from 'app/common/UserAPI';
+import {SUPPORT_EMAIL} from 'app/gen-server/lib/HomeDBManager';
 import {isAnonymousUser, RequestWithLogin} from 'app/server/lib/Authorizer';
 import {RequestWithOrg} from 'app/server/lib/extractOrg';
 import {GristServer} from 'app/server/lib/GristServer';
 import {getSupportedEngineChoices} from 'app/server/lib/serverUtils';
+import {readLoadedLngs, readLoadedNamespaces} from 'app/server/localization';
 import * as express from 'express';
 import * as fse from 'fs-extra';
+import jsesc from 'jsesc';
+import * as handlebars from 'handlebars';
 import * as path from 'path';
+
+const translate = (req: express.Request, key: string, args?: any) => req.t(`sendAppPage.${key}`, args);
 
 export interface ISendAppPageOptions {
   path: string;        // Ignored if .content is present (set to "" for clarity).
@@ -27,14 +34,15 @@ export function makeGristConfig(homeUrl: string|null, extra: Partial<GristLoadCo
 ): GristLoadConfig {
   // .invalid is a TLD the IETF promises will never exist.
   const pluginUrl = process.env.APP_UNTRUSTED_URL || 'http://plugins.invalid';
-  const pathOnly = (process.env.IRELIA_ORG_IN_PATH === "true") ||
+  const pathOnly = (process.env.GRIST_ORG_IN_PATH === "true") ||
     (homeUrl && new URL(homeUrl).hostname === 'localhost') || false;
   const mreq = req as RequestWithOrg|undefined;
   return {
     homeUrl,
-    org: process.env.IRELIA_SINGLE_ORG || (mreq && mreq.org),
+    org: process.env.GRIST_SINGLE_ORG || (mreq && mreq.org),
     baseDomain,
-    singleOrg: process.env.IRELIA_SINGLE_ORG,
+    singleOrg: process.env.GRIST_SINGLE_ORG,
+    helpCenterUrl: process.env.GRIST_HELP_CENTER || "https://support.getgrist.com",
     pathOnly,
     supportAnon: shouldSupportAnon(),
     supportEngines: getSupportedEngineChoices(),
@@ -45,13 +53,18 @@ export function makeGristConfig(homeUrl: string|null, extra: Partial<GristLoadCo
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleDriveScope: process.env.GOOGLE_DRIVE_SCOPE,
     helpScoutBeaconId: process.env.HELP_SCOUT_BEACON_ID_V2,
-    maxUploadSizeImport: (Number(process.env.IRELIA_MAX_UPLOAD_IMPORT_MB) * 1024 * 1024) || undefined,
-    maxUploadSizeAttachment: (Number(process.env.IRELIA_MAX_UPLOAD_ATTACHMENT_MB) * 1024 * 1024) || undefined,
+    maxUploadSizeImport: (Number(process.env.GRIST_MAX_UPLOAD_IMPORT_MB) * 1024 * 1024) || undefined,
+    maxUploadSizeAttachment: (Number(process.env.GRIST_MAX_UPLOAD_ATTACHMENT_MB) * 1024 * 1024) || undefined,
     timestampMs: Date.now(),
-    enableWidgetRepository: Boolean(process.env.IRELIA_WIDGET_LIST_URL),
+    enableWidgetRepository: Boolean(process.env.GRIST_WIDGET_LIST_URL),
     survey: Boolean(process.env.DOC_ID_NEW_USER_INFO),
     tagManagerId: process.env.GOOGLE_TAG_MANAGER_ID,
-    activation: (mreq as RequestWithLogin|undefined)?.activation,
+    activation: getActivation(req as RequestWithLogin | undefined),
+    enableCustomCss: process.env.APP_STATIC_INCLUDE_CUSTOM_CSS === 'true',
+    supportedLngs: readLoadedLngs(req?.i18n),
+    namespaces: readLoadedNamespaces(req?.i18n),
+    featureComments: process.env.COMMENTS === "true",
+    supportEmail: SUPPORT_EMAIL,
     ...extra,
   };
 }
@@ -64,8 +77,10 @@ export function makeGristConfig(homeUrl: string|null, extra: Partial<GristLoadCo
 export function makeMessagePage(staticDir: string) {
   return async (req: express.Request, resp: express.Response, message: any) => {
     const fileContent = await fse.readFile(path.join(staticDir, "message.html"), 'utf8');
-    const content = fileContent
-      .replace("<!-- INSERT MESSAGE -->", `<script>window.message = ${JSON.stringify(message)};</script>`);
+    const content = fileContent.replace(
+      "<!-- INSERT MESSAGE -->",
+      `<script>window.message = ${jsesc(message, {isScriptContext: true, json: true})};</script>`
+    );
     resp.status(200).type('html').send(content);
   };
 }
@@ -94,39 +109,36 @@ export function makeSendAppPage(opts: {
     const staticOrigin = process.env.APP_STATIC_URL || "";
     const staticBaseUrl = `${staticOrigin}/v/${options.tag || tag}/`;
     const customHeadHtmlSnippet = server?.create.getExtraHeadHtml?.() ?? "";
-    // TODO: Temporary changes until there is a handy banner to put this in.
-    let warning = testLogin ? "<div class=\"dev_warning\">Authentication is not enforced</div>" : "";
-    const activation = config.activation;
-    if (!warning && activation) {
-      if (activation.trial) {
-        warning = `Trial: ${activation.trial.daysLeft} day(s) left`;
-      } else if (activation.needKey) {
-        warning = 'Activation key needed. Documents in read-only mode.';
-      } else if (activation.key?.daysLeft && activation.key.daysLeft < 30) {
-        warning = `Need reactivation in ${activation.key.daysLeft} day(s)`;
-      }
-      if (warning) {
-        warning = `<div class="dev_warning activation-msg">${warning}</div>`;
-      }
-    }
-    // Temporary changes end.
+    const warning = testLogin ? "<div class=\"dev_warning\">Authentication is not enforced</div>" : "";
+    // Preload all languages that will be used or are requested by client.
+    const preloads = req.languages.map((lng) =>
+      readLoadedNamespaces(req.i18n).map((ns) =>
+        `<link rel="preload" href="locales/${lng}.${ns}.json" as="fetch" type="application/json" crossorigin>`
+      ).join("\n")
+    ).join('\n');
     const content = fileContent
       .replace("<!-- INSERT WARNING -->", warning)
+      .replace("<!-- INSERT TITLE -->", getPageTitle(req, config))
+      .replace("<!-- INSERT META -->", getPageMetadataHtmlSnippet(config))
       .replace("<!-- INSERT TITLE SUFFIX -->", getPageTitleSuffix(server?.getGristConfig()))
       .replace("<!-- INSERT BASE -->", `<base href="${staticBaseUrl}">` + tagManagerSnippet)
+      .replace("<!-- INSERT LOCALE -->", preloads)
       .replace("<!-- INSERT CUSTOM -->", customHeadHtmlSnippet)
-      .replace("<!-- INSERT CONFIG -->", `<script>window.gristConfig = ${JSON.stringify(config)};</script>`);
+      .replace(
+        "<!-- INSERT CONFIG -->",
+        `<script>window.gristConfig = ${jsesc(config, {isScriptContext: true, json: true})};</script>`
+      );
     resp.status(options.status).type('html').send(content);
   };
 }
 
 function shouldSupportAnon() {
   // Enable UI for anonymous access if a flag is explicitly set in the environment
-  return process.env.IRELIA_SUPPORT_ANON === "true";
+  return process.env.GRIST_SUPPORT_ANON === "true";
 }
 
 function getHiddenUiElements(): IHideableUiElement[] {
-  const str = process.env.IRELIA_HIDE_UI_ELEMENTS;
+  const str = process.env.GRIST_HIDE_UI_ELEMENTS;
   if (!str) {
     return [];
   }
@@ -134,6 +146,66 @@ function getHiddenUiElements(): IHideableUiElement[] {
 }
 
 function configuredPageTitleSuffix() {
-  const result = process.env.IRELIA_PAGE_TITLE_SUFFIX;
+  const result = process.env.GRIST_PAGE_TITLE_SUFFIX;
   return result === "_blank" ? "" : result;
+}
+
+/**
+ * Returns a page title suitable for inserting into an HTML title element.
+ *
+ * Currently returns the document name if the page being requested is for a document, or
+ * a placeholder, "Loading...", that's updated in the client once the page has loaded.
+ *
+ * Note: The string returned is escaped and safe to insert into HTML.
+ */
+function getPageTitle(req: express.Request, config: GristLoadConfig): string {
+  const maybeDoc = getDocFromConfig(config);
+  if (!maybeDoc) { return translate(req, 'Loading') + "..."; }
+
+  return handlebars.Utils.escapeExpression(maybeDoc.name);
+}
+
+/**
+ * Returns a string representation of 0 or more HTML metadata elements.
+ *
+ * Currently includes the document description and thumbnail if the requested page is
+ * for a document and the document has one set.
+ *
+ * Note: The string returned is escaped and safe to insert into HTML.
+ */
+function getPageMetadataHtmlSnippet(config: GristLoadConfig): string {
+  const metadataElements: string[] = [];
+  const maybeDoc = getDocFromConfig(config);
+
+  const description = maybeDoc?.options?.description;
+  if (description) {
+    const content = handlebars.Utils.escapeExpression(description);
+    metadataElements.push(`<meta name="description" content="${content}">`);
+    metadataElements.push(`<meta property="og:description" content="${content}">`);
+    metadataElements.push(`<meta name="twitter:description" content="${content}">`);
+  }
+
+  const icon = maybeDoc?.options?.icon;
+  if (icon) {
+    const content = handlebars.Utils.escapeExpression(icon);
+    metadataElements.push(`<meta name="thumbnail" content="${content}">`);
+    metadataElements.push(`<meta property="og:image" content="${content}">`);
+    metadataElements.push(`<meta name="twitter:image" content="${content}">`);
+  }
+
+  return metadataElements.join('\n');
+}
+
+function getDocFromConfig(config: GristLoadConfig): Document | null {
+  if (!config.getDoc || !config.assignmentId) { return null; }
+
+  return config.getDoc[config.assignmentId] ?? null;
+}
+
+function getActivation(mreq: RequestWithLogin|undefined) {
+  const defaultEmail = process.env.GRIST_DEFAULT_EMAIL;
+  return {
+    ...mreq?.activation,
+    isManager: Boolean(defaultEmail && defaultEmail === mreq?.user?.loginEmail),
+  };
 }

@@ -43,10 +43,10 @@ export function getTheme(flavor: ProductFlavor): CustomTheme {
 const cssEfcrBody = styled('body', `
   --icon-GristLogo: url("icons/logo-efcr.png");
   --grist-logo-bg: #009975;
-  --grist-color-light-green: #1c507f;
-  --grist-color-dark-green: #364151;
-  --grist-primary-fg: #364151;
-  --grist-primary-fg-hover: #364151;
+  --grist-color-light-green: #009975;
+  --grist-color-dark-green: #007F61;
+  --grist-primary-fg: #009975;
+  --grist-primary-fg-hover: #007F61;
   --grist-control-fg: #009975;
   --grist-color-darker-green: #004C38;
   --grist-color-dark-bg: #004C38;

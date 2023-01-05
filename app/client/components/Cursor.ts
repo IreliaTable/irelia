@@ -4,9 +4,9 @@
  */
 
 
-import * as BaseView from 'app/client/components/BaseView';
+import BaseView from 'app/client/components/BaseView';
 import * as commands from 'app/client/components/commands';
-import * as BaseRowModel from 'app/client/models/BaseRowModel';
+import BaseRowModel from 'app/client/models/BaseRowModel';
 import {LazyArrayModel} from 'app/client/models/DataTableModel';
 import type {RowId} from 'app/client/models/rowset';
 import {Disposable} from 'grainjs';
@@ -54,9 +54,9 @@ export class Cursor extends Disposable {
 
     // Command to be manually triggered on cell selection. Moves the cursor to the selected cell.
     // This is overridden by the formula editor to insert "$col" variables when clicking cells.
-    setCursor(this: Cursor, rowModel: BaseRowModel, colModel: BaseRowModel) {
+    setCursor(this: Cursor, rowModel: BaseRowModel, fieldModel: BaseRowModel) {
       this.rowIndex(rowModel ? rowModel._index() : 0);
-      this.fieldIndex(colModel ? colModel._index()! : 0);
+      this.fieldIndex(fieldModel ? fieldModel._index()! : 0);
     },
   };
 
@@ -81,7 +81,7 @@ export class Cursor extends Disposable {
     this.viewData = baseView.viewData;
 
     this._sectionId = this.autoDispose(ko.computed(() => baseView.viewSection.id()));
-    this._rowId = ko.observable(optCursorPos.rowId || 0);
+    this._rowId = ko.observable<RowId|null>(optCursorPos.rowId || 0);
     this.rowIndex = this.autoDispose(ko.computed({
       read: () => {
         if (!this._isLive()) { return this.rowIndex.peek(); }

@@ -26,23 +26,23 @@
  * TODO: client-side should show "..." or "50000 more rows not shown" in that case.
  * TODO: Reference columns don't work properly because always use a displayCol which relies on formulas
  */
-import * as DataTableModel from 'app/client/models/DataTableModel';
+import DataTableModel from 'app/client/models/DataTableModel';
 import {DocModel} from 'app/client/models/DocModel';
 import {BaseFilteredRowSource, RowId, RowList, RowSource} from 'app/client/models/rowset';
 import {TableData} from 'app/client/models/TableData';
 import {ActiveDocAPI, ClientQuery, QueryOperation} from 'app/common/ActiveDocAPI';
 import {CellValue, TableDataAction} from 'app/common/DocActions';
 import {DocData} from 'app/common/DocData';
+import {isList} from "app/common/gristTypes";
 import {nativeCompare} from 'app/common/gutil';
 import {IRefCountSub, RefCountMap} from 'app/common/RefCountMap';
-import {TableData as BaseTableData} from 'app/common/TableData';
 import {RowFilterFunc} from 'app/common/RowFilterFunc';
+import {TableData as BaseTableData} from 'app/common/TableData';
 import {tbind} from 'app/common/tbind';
+import {decodeObject} from "app/plugin/objtypes";
 import {Disposable, Holder, IDisposableOwnerT} from 'grainjs';
 import * as ko from 'knockout';
 import debounce = require('lodash/debounce');
-import {isList} from "app/common/gristTypes";
-import {decodeObject} from "app/plugin/objtypes";
 
 // Limit on the how many rows to request for OnDemand tables.
 const ON_DEMAND_ROW_LIMIT = 10000;
@@ -310,17 +310,21 @@ export function getFilterFunc(docData: DocData, query: ClientQuery): RowFilterFu
     (colId) => {
       const getter = tableData.getRowPropFunc(colId)!;
       const values = new Set(query.filters[colId]);
-      switch (query.operations![colId]) {
+      switch (query.operations[colId]) {
         case "intersects":
           return (rowId: RowId) => {
             const value = getter(rowId) as CellValue;
             return isList(value) &&
               (decodeObject(value) as unknown[]).some(v => values.has(v));
           };
+        case "empty":
+          return (rowId: RowId) => {
+            const value = getter(rowId);
+            // `isList(value) && value.length === 1` means `value == ['L']` i.e. an empty list
+            return !value || isList(value) && value.length === 1;
+          };
         case "in":
           return (rowId: RowId) => values.has(getter(rowId));
-        default:
-          throw new Error("Unknown operation");
       }
     });
   return (rowId: RowId) => colFuncs.every(f => f(rowId));
@@ -331,7 +335,11 @@ export function getFilterFunc(docData: DocData, query: ClientQuery): RowFilterFu
  * rowIds), and consistently sorted. We use that to identify a Query across table/column renames.
  */
 function convertQueryToRefs(docModel: DocModel, query: ClientQuery): QueryRefs {
-  const tableRec: any = docModel.dataTables[query.tableId].tableMetaRow;
+  // During table rename, we can be referencing old name of a table.
+  const tableRec = Object.values(docModel.dataTables).find(t => t.tableData.tableId === query.tableId)?.tableMetaRow;
+  if (!tableRec) {
+    throw new Error(`Table ${query.tableId} not found`);
+  }
 
   const colRefsByColId: {[colId: string]: ColRef} = {id: 'id'};
   for (const col of tableRec.columns.peek().peek()) {
@@ -342,7 +350,7 @@ function convertQueryToRefs(docModel: DocModel, query: ClientQuery): QueryRefs {
     const values = query.filters[colId];
     // Keep filter values sorted by value, for consistency.
     values.sort(nativeCompare);
-    return [colRefsByColId[colId], query.operations![colId], values] as FilterTuple;
+    return [colRefsByColId[colId], query.operations[colId], values] as FilterTuple;
   });
   // Keep filters sorted by colRef, for consistency.
   filterTuples.sort((a, b) =>

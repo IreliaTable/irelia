@@ -2,7 +2,8 @@
  * TableData maintains a single table's data.
  */
 import {ActionDispatcher} from 'app/common/ActionDispatcher';
-import {BulkColValues, CellValue, ColInfo, ColInfoWithId, ColValues, DocAction,
+import {
+  BulkAddRecord, BulkColValues, CellValue, ColInfo, ColInfoWithId, ColValues, DocAction,
         isSchemaAction, ReplaceTableData, RowRecord, TableDataAction} from 'app/common/DocActions';
 import {getDefaultForType} from 'app/common/gristTypes';
 import {arrayRemove, arraySplice, getDistinctValues} from 'app/common/gutil';
@@ -20,6 +21,12 @@ interface ColData {
   type: string;
   defl: any;
   values: CellValue[];
+}
+
+export interface SingleCell {
+  tableId: string;
+  colId: string;
+  rowId: number;
 }
 
 /**
@@ -104,7 +111,7 @@ export class TableData extends ActionDispatcher implements SkippableRows {
 
     reassignArray(this._rowIdCol, rowIds);
     for (const colData of this._colArray) {
-      const values = colValues[colData.colId];
+      const values = colData.colId === 'id' ? rowIds : colValues[colData.colId];
       // If colId is missing from tableData, use an array of default values. Note that reusing
       // default value like this is only OK because all default values we use are primitive.
       reassignArray(colData.values, values || this._rowIdCol.map(() => colData.defl));
@@ -164,17 +171,23 @@ export class TableData extends ActionDispatcher implements SkippableRows {
   }
 
   /**
+   * Returns the index of the given rowId, if it exists, in the same unstable order that's
+   * returned by getRowIds() and getColValues().
+   */
+  public getRowIdIndex(rowId: UIRowId): number|undefined {
+    return this._rowMap.get(rowId as number);
+  }
+
+  /**
    * Given a column name, returns a function that takes a rowId and returns the value for that
    * column of that row. The returned function is faster than getValue() calls.
    */
   public getRowPropFunc(colId: string): UIRowFunc<CellValue|undefined> {
+    const colData = this._columns.get(colId);
+    if (!colData) { return () => undefined; }
+    const values = colData.values;
     const rowMap = this._rowMap;
-    return (rowId: UIRowId) => {
-      const colData = this._columns.get(colId);
-      if (!colData) { return undefined; }
-      const values = colData.values;
-      return values[rowMap.get(rowId as number)!];
-    };
+    return (rowId: UIRowId) => values[rowMap.get(rowId as number)!];
   }
 
   // By default, no rows are skippable, all are kept.
@@ -238,16 +251,40 @@ export class TableData extends ActionDispatcher implements SkippableRows {
 
   /**
    * Return data in TableDataAction form ['TableData', tableId, [...rowIds], {...}]
+   * Optionally takes a list of row ids to return data from. If a row id is
+   * not actually present in the table, a row of nulls will be returned for it.
    */
-  public getTableDataAction(): TableDataAction {
-    const rowIds = this.getRowIds();
+  public getTableDataAction(desiredRowIds?: number[]): TableDataAction {
+    const rowIds = desiredRowIds || this.getRowIds();
+    let bulkColValues: {[colId: string]: CellValue[]};
+    if (desiredRowIds) {
+      const len = rowIds.length;
+      bulkColValues = {};
+      for (const colId of this.getColIds()) { bulkColValues[colId] = Array(len); }
+      for (let i = 0; i < len; i++) {
+        const index = this._rowMap.get(rowIds[i]);
+        for (const {colId, values} of this._colArray) {
+          const value = (index === undefined) ? null : values[index];
+          bulkColValues[colId][i] = value;
+        }
+      }
+    } else {
+      bulkColValues = fromPairs(
+        this.getColIds()
+          .filter(colId => colId !== 'id')
+          .map(colId => [colId, this.getColValues(colId)! as CellValue[]]));
+    }
     return ['TableData',
             this.tableId,
             rowIds as number[],
-            fromPairs(
-              this.getColIds()
-                .filter(colId => colId !== 'id')
-                .map(colId => [colId, this.getColValues(colId)! as CellValue[]]))];
+            bulkColValues];
+  }
+
+  public getBulkAddRecord(desiredRowIds?: number[]): BulkAddRecord {
+    const tableData = this.getTableDataAction(desiredRowIds?.sort((a, b) => a - b));
+    return [
+      'BulkAddRecord', tableData[1], tableData[2], tableData[3],
+    ];
   }
 
   /**
@@ -345,6 +382,13 @@ export class TableData extends ActionDispatcher implements SkippableRows {
   // ---- The following methods implement ActionDispatcher interface ----
 
   protected onAddRecord(action: DocAction, tableId: string, rowId: number, colValues: ColValues): void {
+    if (this._rowMap.get(rowId) !== undefined) {
+      // If adding a record that already exists, act like an update.
+      // We rely on this behavior for distributing attachment
+      // metadata.
+      this.onUpdateRecord(action, tableId, rowId, colValues);
+      return;
+    }
     const index: number = this._rowIdCol.length;
     this._rowMap.set(rowId, index);
     this._rowIdCol[index] = rowId;
@@ -354,14 +398,28 @@ export class TableData extends ActionDispatcher implements SkippableRows {
   }
 
   protected onBulkAddRecord(action: DocAction, tableId: string, rowIds: number[], colValues: BulkColValues): void {
-    const index: number = this._rowIdCol.length;
+    let destIndex: number = this._rowIdCol.length;
     for (let i = 0; i < rowIds.length; i++) {
-      this._rowMap.set(rowIds[i], index + i);
-      this._rowIdCol[index + i] = rowIds[i];
-    }
-    for (const {colId, defl, values} of this._colArray) {
-      for (let i = 0; i < rowIds.length; i++) {
-        values[index + i] = colValues.hasOwnProperty(colId) ? colValues[colId][i] : defl;
+      const srcIndex = this._rowMap.get(rowIds[i]);
+      if (srcIndex !== undefined) {
+        // If adding a record that already exists, act like an update.
+        // We rely on this behavior for distributing attachment
+        // metadata.
+        for (const colId in colValues) {
+          if (colValues.hasOwnProperty(colId)) {
+            const colData = this._columns.get(colId);
+            if (colData) {
+              colData.values[srcIndex] = colValues[colId][i];
+            }
+          }
+        }
+      } else {
+        this._rowMap.set(rowIds[i], destIndex);
+        this._rowIdCol[destIndex] = rowIds[i];
+        for (const {colId, defl, values} of this._colArray) {
+          values[destIndex] = colValues.hasOwnProperty(colId) ? colValues[colId][i] : defl;
+        }
+        destIndex++;
       }
     }
   }

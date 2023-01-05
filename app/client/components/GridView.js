@@ -1,29 +1,34 @@
-/* globals alert, document, $ */
+/* globals $ */
 
-var _         = require('underscore');
-var ko        = require('knockout');
+const _         = require('underscore');
+const ko        = require('knockout');
 const debounce = require('lodash/debounce');
 
-var gutil             = require('app/common/gutil');
-var BinaryIndexedTree = require('app/common/BinaryIndexedTree');
+const gutil             = require('app/common/gutil');
+const BinaryIndexedTree = require('app/common/BinaryIndexedTree');
 const {Sort} = require('app/common/SortSpec');
 
-var dom           = require('../lib/dom');
-var kd            = require('../lib/koDom');
-var kf            = require('../lib/koForm');
-var koDomScrolly  = require('../lib/koDomScrolly');
-var tableUtil     = require('../lib/tableUtil');
-var {addToSort, sortBy}   = require('../lib/sortUtil');
+const dom           = require('../lib/dom');
+const kd            = require('../lib/koDom');
+const kf            = require('../lib/koForm');
+const koDomScrolly  = require('../lib/koDomScrolly');
+const tableUtil     = require('../lib/tableUtil');
+const {addToSort, sortBy}   = require('../lib/sortUtil');
 
-var commands      = require('./commands');
-var viewCommon    = require('./viewCommon');
-var Base          = require('./Base');
-var BaseView      = require('./BaseView');
-var selector      = require('./Selector');
-var {CopySelection} = require('./CopySelection');
+const commands      = require('./commands');
+const viewCommon    = require('./viewCommon');
+const Base          = require('./Base');
+const BaseView      = require('./BaseView');
+const selector      = require('./CellSelector');
+const {CopySelection} = require('./CopySelection');
+const {SelectionSummary} = require('./SelectionSummary');
+const koUtil      = require('app/client/lib/koUtil');
+const convert       = require('color-convert');
 
 const {renderAllRows} = require('app/client/components/Printing');
-const {reportError} = require('app/client/models/AppModel');
+const {reportWarning} = require('app/client/models/errors');
+const {reportUndo} = require('app/client/components/modals');
+
 const {onDblClickMatchElem} = require('app/client/lib/dblclick');
 
 // Grist UI Components
@@ -37,10 +42,12 @@ const {setPopupToCreateDom} = require('popweasel');
 const {CellContextMenu} = require('app/client/ui/CellContextMenu');
 const {testId} = require('app/client/ui2018/cssVars');
 const {contextMenu} = require('app/client/ui/contextMenu');
+const {mouseDragMatchElem} = require('app/client/ui/mouseDrag');
 const {menuToggle} = require('app/client/ui/MenuToggle');
 const {showTooltip} = require('app/client/ui/tooltips');
 const {parsePasteForView} = require("./BaseView2");
-
+const {NEW_FILTER_JSON} = require('app/client/models/ColumnFilter');
+const {CombinedStyle} = require("app/client/models/Styles");
 
 // A threshold for interpreting a motionless click as a click rather than a drag.
 // Anything longer than this time (in milliseconds) should be interpreted as a drag
@@ -76,12 +83,20 @@ function GridView(gristDoc, viewSectionModel, isPreview = false) {
   this.scrollTop = ko.observable(0);
   this.isScrolledTop = this.autoDispose(ko.computed(() => this.scrollTop() > 0));
 
-  this.cellSelector = this.autoDispose(selector.CellSelector.create(this, {
-    // This is a bit of a hack to prevent dragging when there's an open column menu
-    // TODO: disable dragging when there is an open cell context menu as well
-    isDisabled: () => Boolean(!this.ctxMenuHolder.isEmpty())
-  }));
+  this.cellSelector = selector.CellSelector.create(this, this);
+  this.selectionSummary = SelectionSummary.create(this,
+    this.cellSelector, this.tableModel.tableData, this.sortedRows, this.viewSection.viewFields);
   this.colMenuTargets = {}; // Reference from column ref to its menu target dom
+
+  this.selectedColumns = this.autoDispose(ko.pureComputed(() => {
+    const result = this.viewSection.viewFields().all().filter((field, index) => {
+      // During column removal or restoring (with undo), some columns fields
+      // might be disposed.
+      if (field.isDisposed() || field.column().isDisposed()) { return false; }
+      return this.cellSelector.containsCol(index);
+    });
+    return result;
+  }));
 
   // Cache of column right offsets, used to determine the col select range
   this.colRightOffsets = this.autoDispose(ko.computed(() => {
@@ -234,7 +249,8 @@ function GridView(gristDoc, viewSectionModel, isPreview = false) {
   this.autoDispose(commands.createGroup(GridView.gridCommands, this, this.viewSection.hasFocus));
   // Cancel command is registered conditionally, only when there is an active
   // cell selection. This command is also used by Raw Data Views, to close the Grid popup.
-  const hasSelection = this.autoDispose(ko.pureComputed(() => !this.cellSelector.isCurrentSelectType('')));
+  const hasSelection = this.autoDispose(ko.pureComputed(() =>
+    !this.cellSelector.isCurrentSelectType('') || this.copySelection()));
   this.autoDispose(commands.createGroup(GridView.selectionCommands, this, hasSelection));
 
   // Timer to allow short, otherwise non-actionable clicks on column names to trigger renaming.
@@ -285,24 +301,19 @@ GridView.gridCommands = {
   // Re-define editField after fieldEditSave to make it take precedence for the Enter key.
   editField: function() { closeRegisteredMenu(); this.scrollToCursor(true); this.activateEditorAtCursor(); },
 
-  deleteRecords: function() {
-    const saved = this.cursor.getCursorPos();
-    this.cursor.setLive(false);
-
-    // Don't return a promise. Nothing will use it, and the Command implementation will not
-    // prevent default browser behavior if we return a truthy value.
-    this.deleteRows(this.getSelection())
-    .finally(() => {
-      this.cursor.setCursorPos(saved);
-      this.cursor.setLive(true);
-    })
-    .catch(reportError);
-  },
   insertFieldBefore: function() { this.insertColumn(this.cursor.fieldIndex()); },
   insertFieldAfter: function() { this.insertColumn(this.cursor.fieldIndex() + 1); },
   renameField: function() { this.currentEditingColumnIndex(this.cursor.fieldIndex()); },
-  hideField: function() { this.hideField(this.cursor.fieldIndex()); },
-  deleteFields: function() { this.deleteColumns(this.getSelection()); },
+  hideFields: function() { this.hideFields(this.getSelection()); },
+  deleteFields: function() {
+    const selection = this.getSelection();
+    const count = selection.colIds.length;
+    this.deleteColumns(selection).then((result) => {
+      if (result !== false) {
+        reportUndo(this.gristDoc, `You deleted ${count} column${count > 1 ? 's' : ''}.`);
+      }
+    });
+  },
   clearValues: function() { this.clearValues(this.getSelection()); },
   clearColumns: function() { this._clearColumns(this.getSelection()); },
   convertFormulasToData: function() { this._convertFormulasToData(this.getSelection()); },
@@ -524,12 +535,16 @@ GridView.prototype.getSelection = function() {
     rowEnd = this.getLastDataRowIndex();
   }
 
-  var rowId;
-  for(var i = colStart; i <= colEnd; i++) {
-    let field = this.viewSection.viewFields().at(i);
-    fields.push(field);
-    colStyle[field.colId()] = this._getColStyle(i);
+  // Start or end will be null if no fields are visible.
+  if (colStart !== null && colEnd !== null) {
+    for(var i = colStart; i <= colEnd; i++) {
+      let field = this.viewSection.viewFields().at(i);
+      fields.push(field);
+      colStyle[field.colId()] = this._getColStyle(i);
+    }
   }
+
+  var rowId;
   for(var j = rowStart; j <= rowEnd; j++) {
     rowId = this.viewData.getRowId(j);
     rowIds.push(rowId);
@@ -614,8 +629,21 @@ GridView.prototype.assignCursor = function(elem, elemType) {
     console.error("GridView.assignCursor expects a row/col header, or cell as an input.");
   }
 
-
-  this.cellSelector.currentSelectType(elemType);
+  /* CellSelector already updates the selection whenever rowIndex/fieldIndex is changed, but
+   * since those observables don't currently notify subscribers when an unchanged value is
+   * written, there are cases where the selection doesn't get updated. For example, when doing
+   * a click and drag to select cells and then clicking the "selected" cell that's outlined in
+   * green, the row/column numbers remain highlighted as if they are still selected, while
+   * GridView indicates the cells are not selected. This causes bugs that range from the
+   * aformentioned visual discrepancy to incorrect copy/paste behavior due to out-of-date
+   * selection ranges.
+   *
+   * We address this by calling setToCursor here unconditionally, but another possible approach
+   * might be to extend rowIndex/fieldIndex to always notify their subscribers. Always notifying
+   * currently introduces some bugs, and we'd also need to check that it doesn't cause too
+   * much unnecessary UI recomputation elsewhere, so in the interest of time we use the first
+   * approach. */
+  this.cellSelector.setToCursor(elemType);
 };
 
 /**
@@ -638,14 +666,21 @@ GridView.prototype.preventAssignCursor = function() {
   this._assignCursorTimeoutId = null;
 }
 
-GridView.prototype.deleteRows = function(selection) {
-  if (!this.viewSection.disableAddRemoveRows()) {
-    var rowIds = _.without(selection.rowIds, 'new');
-    if (rowIds.length > 0) {
-      return this.tableModel.sendTableAction(['BulkRemoveRecord', rowIds]);
-    }
+GridView.prototype.selectedRows = function() {
+  const selection = this.getSelection();
+  return _.without(selection.rowIds, 'new');
+};
+
+GridView.prototype.deleteRows = async function(rowIds) {
+  const saved = this.cursor.getCursorPos();
+  this.cursor.setLive(false);
+  try {
+    await BaseView.prototype.deleteRows.call(this, rowIds);
+  } finally {
+    this.cursor.setCursorPos(saved);
+    this.cursor.setLive(true);
+    this.clearSelection();
   }
-  return Promise.resolve();
 };
 
 GridView.prototype.addNewColumn = function() {
@@ -696,20 +731,23 @@ GridView.prototype.showColumn = function(colId, index) {
 GridView.prototype.deleteColumns = function(selection) {
   var fields = selection.fields;
   if (fields.length === this.viewSection.viewFields().peekLength) {
-    alert("You can't delete all the columns on the grid.");
-    return;
+    reportWarning("You can't delete all the columns on the grid.", {
+      key: 'delete-all-columns',
+    });
+    return Promise.resolve(false);
   }
   let actions = fields.filter(col => !col.disableModify()).map(col => ['RemoveColumn', col.colId()]);
   if (actions.length > 0) {
-    this.tableModel.sendTableActions(actions, `Removed columns ${actions.map(a => a[1]).join(', ')} ` +
-      `from ${this.tableModel.tableData.tableId}.`);
+    return this.tableModel.sendTableActions(actions, `Removed columns ${actions.map(a => a[1]).join(', ')} ` +
+      `from ${this.tableModel.tableData.tableId}.`).then(() => this.clearSelection());
   }
+  return Promise.resolve(false);
 };
 
-GridView.prototype.hideField = function(index) {
-  var field = this.viewSection.viewFields().at(index);
-  var action = ['RemoveRecord', field.id()];
-  return this.gristDoc.docModel.viewFields.sendTableAction(action);
+GridView.prototype.hideFields = function(selection) {
+  var actions = selection.fields.map(field => ['RemoveRecord', field.id()]);
+  return this.gristDoc.docModel.viewFields.sendTableActions(actions, `Hide columns ${actions.map(a => a[1]).join(', ')} ` +
+  `from ${this.tableModel.tableData.tableId}.`);
 };
 
 GridView.prototype.moveColumns = function(oldIndices, newIndex) {
@@ -837,7 +875,6 @@ GridView.prototype._getRowStyle = function(rowIndex) {
 GridView.prototype._getColStyle = function(colIndex) {
   return { 'width' : this.viewSection.viewFields().at(colIndex).widthPx() };
 };
-
 
 // TODO: for now lets just assume you are clicking on a .field, .row, or .column
 GridView.prototype.domToRowModel = function(elem, elemType) {
@@ -1037,12 +1074,16 @@ GridView.prototype.buildDom = function() {
                   // Select the column if it's not part of a multiselect.
                   dom.on('click', (ev) => this.maybeSelectColumn(ev.currentTarget.parentNode, field)),
                   (elem) => {
-                    filterTriggerCtl = setPopupToCreateDom(elem, ctl => this._columnFilterMenu(ctl, field), {
-                      attach: 'body',
-                      placement: 'bottom-start',
-                      boundaries: 'viewport',
-                      trigger: [],
-                    });
+                    filterTriggerCtl = setPopupToCreateDom(
+                      elem,
+                      ctl => this._columnFilterMenu(ctl, field, {showAllFiltersButton: true}),
+                      {
+                        attach: 'body',
+                        placement: 'bottom-start',
+                        boundaries: 'viewport',
+                        trigger: [],
+                      }
+                    );
                   },
                   menu(ctl => this.columnContextMenu(ctl, this.getSelection(), field, filterTriggerCtl)),
                   testId('column-menu-trigger'),
@@ -1097,8 +1138,41 @@ GridView.prototype.buildDom = function() {
     // rows. IsCellActive is only subscribed to columns for the active row. This way, when
     // the cursor moves, there are (rows+2*columns) calls rather than rows*columns.
     var isRowActive = ko.computed(() => row._index() === self.cursor.rowIndex());
+
+    const computedFlags = ko.pureComputed(() => {
+      return self.viewSection.rulesColsIds().map(colRef => {
+        if (row.cells[colRef]) { return row.cells[colRef]() || false; }
+        return false;
+      });
+    });
+
+    const computedRule = koUtil.withKoUtils(ko.pureComputed(() => {
+      if (row._isAddRow() || !row.id()) { return null; }
+      const flags = computedFlags();
+      if (flags.length === 0) { return null; }
+      const styles = self.viewSection.rulesStyles() || [];
+      return { style : new CombinedStyle(styles, flags) };
+    }, this).extend({deferred: true}));
+
+    const fillColor = buildStyleOption(self, computedRule, 'fillColor');
+    const zebraColor = ko.pureComputed(() => calcZebra(fillColor()));
+    const textColor = buildStyleOption(self, computedRule, 'textColor');
+    const fontBold = buildStyleOption(self, computedRule, 'fontBold');
+    const fontItalic = buildStyleOption(self, computedRule, 'fontItalic');
+    const fontUnderline = buildStyleOption(self, computedRule, 'fontUnderline');
+    const fontStrikethrough = buildStyleOption(self, computedRule, 'fontStrikethrough');
+
     return dom('div.gridview_row',
       dom.autoDispose(isRowActive),
+      dom.autoDispose(computedFlags),
+      dom.autoDispose(computedRule),
+      dom.autoDispose(textColor),
+      dom.autoDispose(fillColor),
+      dom.autoDispose(zebraColor),
+      dom.autoDispose(fontBold),
+      dom.autoDispose(fontItalic),
+      dom.autoDispose(fontUnderline),
+      dom.autoDispose(fontStrikethrough),
 
       // rowid dom
       dom('div.gridview_data_row_num',
@@ -1145,6 +1219,13 @@ GridView.prototype.buildDom = function() {
         kd.toggleClass('record-add', row._isAddRow),
         kd.style('borderLeftWidth', v.borderWidthPx),
         kd.style('borderBottomWidth', v.borderWidthPx),
+        kd.toggleClass('font-bold', fontBold),
+        kd.toggleClass('font-underline', fontUnderline),
+        kd.toggleClass('font-italic', fontItalic),
+        kd.toggleClass('font-strikethrough', fontStrikethrough),
+        kd.style('--grist-row-rule-background-color', fillColor),
+        kd.style('--grist-row-rule-background-color-zebra', zebraColor),
+        kd.style('--grist-row-color', textColor),
         //These are grabbed from v.optionsObj at start of GridView buildDom
         kd.toggleClass('record-hlines', vHorizontalGridlines),
         kd.toggleClass('record-vlines', vVerticalGridlines),
@@ -1209,6 +1290,7 @@ GridView.prototype.buildDom = function() {
 
             kd.toggleClass('selected', isSelected),
             fieldBuilder.buildDomWithCursor(row, isCellActive, isCellSelected),
+            dom('div.field_selection')
           );
         })
       )
@@ -1300,19 +1382,19 @@ GridView.prototype.rowMouseDown = function(elem, event) {
   }
 };
 
-GridView.prototype.rowMouseMove = function(elem, event) {
+GridView.prototype.rowMouseMove = function(event) {
   this.cellSelector.row.end(this.currentMouseRow(event.pageY));
 };
 
-GridView.prototype.colMouseMove = function(elem, event) {
+GridView.prototype.colMouseMove = function(event) {
   var currentCol = Math.min(this.getMousePosCol(event.pageX),
                             this.viewSection.viewFields().peekLength - 1);
   this.cellSelector.col.end(currentCol);
 };
 
-GridView.prototype.cellMouseMove = function(elem, event, extra) {
-  this.colMouseMove(elem, event);
-  this.rowMouseMove(elem, event);
+GridView.prototype.cellMouseMove = function(event) {
+  this.colMouseMove(event);
+  this.rowMouseMove(event);
   // Maintain single cells cannot be selected invariant
   if (this.cellSelector.onlyCellSelected(this.cursor.rowIndex(), this.cursor.fieldIndex())) {
     this.cellSelector.currentSelectType(selector.NONE);
@@ -1329,58 +1411,70 @@ GridView.prototype.createSelector = function() {
 // but we can't attach any of the mouse handlers in the Selector class until the
 // dom elements exist so we attach the selector handlers separately from instantiation
 GridView.prototype.attachSelectorHandlers = function () {
-  // We attach mousemove and mouseup to document so that selecting and drag/dropping
-  // work even if the mouse leaves the view pane: http://news.qooxdoo.org/mouse-capturing
-  // Mousemove/up events fire to document even if the mouse leaves the browser window.
-  var rowCallbacks =  {
-    'disableDrag': this.viewSection.disableDragRows,
-    'mousedown': { 'select': this.rowMouseDown,
-                   'drag': this.styleRowDragElements,
-                   'elemName': '.gridview_data_row_num',
-                   'source': this.viewPane,
-    },
-    'mousemove':  { 'select': this.rowMouseMove,
-                    'drag': this.dragRows,
-                    'source': document,
-    },
-    'mouseup':   { 'select': this.rowMouseUp,
-                   'drag': this.dropRows,
-                   'source': document,
-    }
-  };
-  var colCallbacks =  {
-    'mousedown': { 'select': this.colMouseDown,
-                   'drag': this.styleColDragElements,
-                   // Trigger on column headings but not on the add column button
-                   'elemName': '.column_name.field:not(.mod-add-column)',
-                   'source': this.viewPane,
-    },
-    'mousemove':  { 'select': this.colMouseMove,
-                    'drag': this.dragCols,
-                    'source': document,
-    },
-    'mouseup':   { 'drag': this.dropCols,
-                   'source': document,
-    }
-  };
-  var cellCallbacks =  {
-    'mousedown': { 'select': this.cellMouseDown,
-                   'drag' : function(elem) { this.scheduleAssignCursor(elem, selector.NONE); },
-                   'elemName': '.field:not(.column_name)',
-                   'source': this.scrollPane
-    },
-    'mousemove':  { 'select': this.cellMouseMove,
-                    'source': document,
-    },
-    'mouseup':   { 'select': this.cellMouseUp,
-                   'source': document,
-    }
-  };
+  const ignoreEvent = (event, elem) => (
+    event.button !== 0 ||
+    event.target.classList.contains('ui-resizable-handle') ||
+    // This is a bit of a hack to prevent dragging when there's an open column menu
+    // TODO: disable dragging when there is an open cell context menu as well
+    !this.ctxMenuHolder.isEmpty()
+  );
 
-  this.cellSelector.registerMouseHandlers(rowCallbacks, selector.ROW);
-  this.cellSelector.registerMouseHandlers(colCallbacks, selector.COL);
-  this.cellSelector.registerMouseHandlers(cellCallbacks, selector.CELL);
-};
+  this.autoDispose(mouseDragMatchElem(this.viewPane, '.gridview_data_row_num', (event, elem) => {
+    if (!ignoreEvent(event, elem)) {
+      if (!this.cellSelector.isSelected(elem, selector.ROW)) {
+        this.rowMouseDown(elem, event);
+        return {
+          onMove: (ev) => this.rowMouseMove(ev),
+          onStop: (ev) => {},
+        };
+      } else if (!this.viewSection.disableDragRows()) {
+        this.styleRowDragElements(elem, event);
+        return {
+          onMove: (ev) => this.dragRows(ev),
+          onStop: (ev) => this.dropRows(),
+        };
+      }
+    }
+  }));
+
+  // Trigger on column headings but not on the add column button
+  this.autoDispose(mouseDragMatchElem(this.viewPane, '.column_name.field:not(.mod-add-column)', (event, elem) => {
+    if (!ignoreEvent(event, elem)) {
+      if (!this.cellSelector.isSelected(elem, selector.COL)) {
+        this.colMouseDown(elem, event);
+        return {
+          onMove: (ev) => this.colMouseMove(ev),
+          onStop: (ev) => {},
+        };
+      } else {
+        this.styleColDragElements(elem, event);
+        return {
+          onMove: (ev) => this.dragCols(ev),
+          onStop: (ev) => this.dropCols(),
+        };
+      }
+    }
+  }));
+
+  this.autoDispose(mouseDragMatchElem(this.scrollPane, '.field:not(.column_name)', (event, elem) => {
+    if (!ignoreEvent(event, elem)) {
+      // TODO: should always enable
+      if (!this.cellSelector.isSelected(elem, selector.CELL)) {
+        this.cellMouseDown(elem, event);
+        return {
+          onMove: (ev) => this.cellMouseMove(ev),
+          onStop: (ev) => {},
+        }
+      } else { // TODO: if true above, this will never come into play.
+        this.scheduleAssignCursor(elem, selector.NONE);
+        return {
+          onMove: (ev) => {},
+          onStop: (ev) => { this.cellSelector.currentDragType(selector.NONE); },
+        };
+      }
+    }
+  }));
+}
 
 // End of Selector stuff
 
@@ -1428,7 +1522,7 @@ GridView.prototype.styleColDragElements = function(elem, event) {
  * 3) If the last col/row is in the select range, the indicator line should be clamped to the start of the
  *    select range.
  **/
-GridView.prototype.dragRows = function(elem, event) {
+GridView.prototype.dragRows = function(event) {
   var dropIndex = Math.min(this.getMousePosRow(event.pageY + this.scrollTop()),
                            this.getLastDataRowIndex());
   if (this.cellSelector.containsRow(dropIndex)) {
@@ -1447,7 +1541,7 @@ GridView.prototype.dragRows = function(elem, event) {
   this.dragY(event.pageY);
 };
 
-GridView.prototype.dragCols = function(elem, event) {
+GridView.prototype.dragCols = function(event) {
   let dropIndex = Math.min(this.getMousePosCol(event.pageX),
                            this.viewSection.viewFields().peekLength - 1);
   if (this.cellSelector.containsCol(dropIndex)) {
@@ -1480,6 +1574,7 @@ GridView.prototype.dragCols = function(elem, event) {
 GridView.prototype.dropRows = function() {
   var oldIndices = _.range(this.cellSelector.rowLower(), this.cellSelector.rowUpper() + 1);
   this.moveRows(oldIndices, this.cellSelector.row.dropIndex());
+  this.cellSelector.currentDragType(selector.NONE);
 };
 
 GridView.prototype.dropCols = function() {
@@ -1493,6 +1588,7 @@ GridView.prototype.dropCols = function() {
     this.currentEditingColumnIndex(idx);
   }
   this._colClickTime = 0;
+  this.cellSelector.currentDragType(selector.NONE);
 };
 
 // End of Dragging logic
@@ -1532,11 +1628,18 @@ GridView.prototype._getColumnMenuOptions = function(copySelection) {
   };
 }
 
-GridView.prototype._columnFilterMenu = function(ctl, field) {
+GridView.prototype._columnFilterMenu = function(ctl, field, options) {
   this.ctxMenuHolder.autoDispose(ctl);
   const filterInfo = this.viewSection.filters()
     .find(({fieldOrColumn}) => fieldOrColumn.origCol().origColRef() === field.column().origColRef());
-  return this.createFilterMenu(ctl, filterInfo);
+  if (!filterInfo.isFiltered.peek()) {
+    // This is a new filter - initialize its spec and pin it.
+    this.viewSection.setFilter(filterInfo.fieldOrColumn.origCol().origColRef(), {
+      filter: NEW_FILTER_JSON,
+      pinned: true,
+    });
+  }
+  return this.createFilterMenu(ctl, filterInfo, options);
 };
 
 GridView.prototype.maybeSelectColumn = function (elem, field) {
@@ -1597,6 +1700,15 @@ GridView.prototype._duplicateRows = async function() {
   }
 }
 
+function buildStyleOption(owner, computedRule, optionName) {
+  return ko.computed(() => {
+    if (owner.isDisposed()) { return null; }
+    const rule = computedRule();
+    if (!rule || !rule.style) { return ''; }
+    return rule.style[optionName] || '';
+  });
+}
+
 // Helper to show tooltip over column selection in the full edit mode.
 class HoverColumnTooltip {
   constructor(el) {
@@ -1615,6 +1727,22 @@ class HoverColumnTooltip {
   dispose() {
     this.hide();
   }
+}
+
+// Simple function that calculates good color for zebra stripes.
+function calcZebra(hex) {
+  if (!hex || hex.length !== 7) { return hex; }
+  // HSL: [HUE, SATURATION, LIGHTNESS]
+  const hsl = convert.hex.hsl(hex.substr(1));
+  // For bright color, we will make it darker. Value was picked by hand, to
+  // produce #f8f8f8f out of #ffffff.
+  if (hsl[2] > 50) { hsl[2] -= 2.6; }
+  // For darker color, we will make it brighter. Value was picked by hand to look
+  // good for the darkest colors in our palette.
+  else if (hsl[2] > 1) { hsl[2] += 11; }
+  // For very dark colors
+  else { hsl[2] += 16; }
+  return `#${convert.hsl.hex(hsl)}`;
 }
 
 module.exports = GridView;

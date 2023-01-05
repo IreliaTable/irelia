@@ -1,4 +1,4 @@
-import * as BaseView from 'app/client/components/BaseView';
+import BaseView from 'app/client/components/BaseView';
 import {GristDoc} from 'app/client/components/GristDoc';
 import {consolidateValues, formatPercent, sortByXValues, splitValuesByIndex,
         uniqXValues} from 'app/client/lib/chartUtil';
@@ -6,17 +6,17 @@ import {Delay} from 'app/client/lib/Delay';
 import {Disposable} from 'app/client/lib/dispose';
 import {fromKoSave} from 'app/client/lib/fromKoSave';
 import {loadPlotly, PlotlyType} from 'app/client/lib/imports';
-import * as DataTableModel from 'app/client/models/DataTableModel';
+import DataTableModel from 'app/client/models/DataTableModel';
 import {ColumnRec, ViewFieldRec, ViewSectionRec} from 'app/client/models/DocModel';
 import {reportError} from 'app/client/models/errors';
 import {KoSaveableObservable, ObjObservable, setSaveValue} from 'app/client/models/modelUtil';
 import {SortedRowSet} from 'app/client/models/rowset';
 import {IPageWidget, toPageWidget} from 'app/client/ui/PageWidgetPicker';
-import {cssLabel, cssRow, cssSeparator} from 'app/client/ui/RightPanel';
+import {cssLabel, cssRow, cssSeparator} from 'app/client/ui/RightPanelStyles';
 import {cssFieldEntry, cssFieldLabel, IField, VisibleFieldsConfig } from 'app/client/ui/VisibleFieldsConfig';
 import {IconName} from 'app/client/ui2018/IconList';
 import {squareCheckbox} from 'app/client/ui2018/checkbox';
-import {colors, vars} from 'app/client/ui2018/cssVars';
+import {theme, vars} from 'app/client/ui2018/cssVars';
 import {cssDragger} from 'app/client/ui2018/draggableList';
 import {icon} from 'app/client/ui2018/icons';
 import {IOptionFull, linkSelect, menu, menuItem, menuText, select} from 'app/client/ui2018/menus';
@@ -33,9 +33,12 @@ import debounce = require('lodash/debounce');
 import defaults = require('lodash/defaults');
 import defaultsDeep = require('lodash/defaultsDeep');
 import isNumber = require('lodash/isNumber');
+import merge = require('lodash/merge');
 import sum = require('lodash/sum');
 import union = require('lodash/union');
-import {Annotations, Config, Data, Datum, ErrorBar, Layout, LayoutAxis, Margin} from 'plotly.js';
+import type {Annotations, Config, Datum, ErrorBar, Layout, LayoutAxis, Margin,
+    PlotData as PlotlyPlotData} from 'plotly.js';
+import {makeT} from 'app/client/lib/localization';
 
 
 let Plotly: PlotlyType;
@@ -47,8 +50,14 @@ const DONUT_DEFAULT_TEXT_SIZE = 24;
 
 const testId = makeTestId('test-chart-');
 
+const t = makeT('components.ChartView');
+
 function isPieLike(chartType: string) {
   return ['pie', 'donut'].includes(chartType);
+}
+
+function firstFieldIsLabels(chartType: string) {
+  return ['pie', 'donut', 'kaplan_meier', 'scatter'].includes(chartType);
 }
 
 export function isNumericOnly(chartType: string) {
@@ -118,6 +127,7 @@ function getSeriesName(series: Series, haveMultiple: boolean) {
   }
 }
 
+type Data = Partial<PlotlyPlotData>;
 
 // The output of a ChartFunc. Normally it just returns one or more Data[] series, but sometimes it
 // includes layout information: e.g. a "Scatter Plot" returns a Layout with axis labels.
@@ -219,6 +229,8 @@ export class ChartView extends Disposable {
     this.listenTo(this.sortedRows, 'rowNotify', this._update);
     this.autoDispose(this.sortedRows.getKoArray().subscribe(this._update));
     this.autoDispose(this._formatterComp.subscribe(this._update));
+    this.autoDispose(this.gristDoc.docPageModel.appModel.currentTheme.addListener(() =>
+      this._update()));
   }
 
   public prepareToPrint(onOff: boolean) {
@@ -331,7 +343,7 @@ export class ChartView extends Disposable {
     // meantime and cause error later. So let's check again.
     if (this.isDisposed()) { return; }
 
-    const layout: Partial<Layout> = defaultsDeep(plotData.layout, getPlotlyLayout(options));
+    const layout: Partial<Layout> = defaultsDeep(plotData.layout, this._getPlotlyLayout(options));
     const config: Partial<Config> = {...plotData.config, displayModeBar: false};
     // react() can be used in place of newPlot(), and is faster when updating an existing plot.
     await Plotly.react(this._chartDom, plotData.data, layout, config);
@@ -345,6 +357,50 @@ export class ChartView extends Disposable {
 
   private _isCompatibleSeries(col: ColumnRec) {
     return isNumericOnly(this._chartType.peek()) ? isNumericLike(col) : true;
+  }
+
+  private _getPlotlyLayout(options: ChartOptions): Partial<Layout> {
+    // Note that each call to getPlotlyLayout() creates a new layout object. We are intentionally
+    // avoiding reuse because Plotly caches too many layout calculations when the object is reused.
+    const yaxis: Partial<LayoutAxis> = {automargin: true, title: {standoff: 0}};
+    const xaxis: Partial<LayoutAxis> = {automargin: true, title: {standoff: 0}};
+    if (options.logYAxis) { yaxis.type = 'log'; }
+    if (options.invertYAxis) { yaxis.autorange = 'reversed'; }
+    const layout = {
+      // Margins include labels, titles, legend, and may get auto-expanded beyond this.
+      margin: {
+        l: 50,
+        r: 50,
+        b: 40,  // Space below chart which includes x-axis labels
+        t: 30,  // Space above the chart (doesn't include any text)
+        pad: 4
+      } as Margin,
+      yaxis,
+      xaxis,
+      ...(options.stacked ? {barmode: 'relative'} : {}),
+    };
+    return merge(layout, this._getPlotlyTheme());
+  }
+
+  private _getPlotlyTheme(): Partial<Layout> {
+    const appModel = this.gristDoc.docPageModel.appModel;
+    const {colors} = appModel.currentTheme.get();
+    return {
+      paper_bgcolor: colors['chart-bg'],
+      plot_bgcolor: colors['chart-bg'],
+      xaxis: {
+        color: colors['chart-x-axis'],
+      },
+      yaxis: {
+        color: colors['chart-y-axis'],
+      },
+      font: {
+        color: colors['chart-fg'],
+      },
+      legend: {
+        bgcolor: colors['chart-legend-bg'],
+      },
+    };
   }
 }
 
@@ -417,30 +473,6 @@ function extractErrorBars(series: Series[], options: ChartOptions): Map<Series, 
 // Getting an ES6 class to work with old-style multiple base classes takes a little hacking.
 defaults(ChartView.prototype, BaseView.prototype);
 Object.assign(ChartView.prototype, BackboneEvents);
-
-function getPlotlyLayout(options: ChartOptions): Partial<Layout> {
-  // Note that each call to getPlotlyLayout() creates a new layout object. We are intentionally
-  // avoiding reuse because Plotly caches too many layout calculations when the object is reused.
-  const yaxis: Partial<LayoutAxis> = {};
-  if (options.logYAxis) { yaxis.type = 'log'; }
-  if (options.invertYAxis) { yaxis.autorange = 'reversed'; }
-  return {
-    // Margins include labels, titles, legend, and may get auto-expanded beyond this.
-    margin: {
-      l: 50,
-      r: 50,
-      b: 40,  // Space below chart which includes x-axis labels
-      t: 30,  // Space above the chart (doesn't include any text)
-      pad: 4
-    } as Margin,
-    legend: {
-      // Translucent background, so chart data is still visible if legend overlaps it.
-      bgcolor: "#FFFFFF80",
-    },
-    yaxis,
-    ...(options.stacked ? {barmode: 'relative'} : {}),
-  };
-}
 
 /**
  * The grainjs component for side-pane configuration options for a Chart section.
@@ -535,7 +567,7 @@ export class ChartConfig extends GrainJSDisposable {
 
   // The label to show for the first field in the axis configurator.
   private _firstFieldLabel = Computed.create(this, fromKo(this._section.chartTypeDef), (
-    (_use, chartType) => isPieLike(chartType) ? 'LABEL' : 'X-AXIS'
+    (_use, chartType) => firstFieldIsLabels(chartType) ? 'LABEL' : 'X-AXIS'
   ));
 
   // A computed that returns `this._section.chartTypeDef` and that takes care of removing the group
@@ -623,8 +655,8 @@ export class ChartConfig extends GrainJSDisposable {
           testId('error-bars'),
         ),
         dom.domComputed(this._optionsObj.prop('errorBars'), (value: ChartOptions["errorBars"]) =>
-          value === 'symmetric' ? cssRowHelp('Each Y series is followed by a series for the length of error bars.') :
-          value === 'separate' ? cssRowHelp('Each Y series is followed by two series, for top and bottom error bars.') :
+          value === 'symmetric' ? cssRowHelp(t('EachYFollowedByOne')) :
+          value === 'separate' ? cssRowHelp(t('EachYFollowedByTwo')) :
           null
         ),
       ]),
@@ -637,7 +669,7 @@ export class ChartConfig extends GrainJSDisposable {
           select(this._groupDataColId, this._groupDataOptions),
           testId('group-by-column'),
         ),
-        cssHintRow('Create separate series for each value of the selected column.'),
+        cssHintRow(t('CreateSeparateSeries')),
       ]),
 
       // TODO: user should select x axis before widget reach page
@@ -645,7 +677,7 @@ export class ChartConfig extends GrainJSDisposable {
       cssRow(
         select(
           this._xAxis, this._columnsOptions,
-          { defaultLabel: 'Pick a column' }
+          { defaultLabel: t('PickColumn') }
         ),
         testId('x-axis'),
       ),
@@ -741,7 +773,7 @@ export class ChartConfig extends GrainJSDisposable {
   private async _setGroupDataColumn(colId: string) {
     const viewFields = this._section.viewFields.peek().peek();
 
-    await this._gristDoc.docData.bundleActions('selected new group data columnd', async () => {
+    await this._gristDoc.docData.bundleActions(t('SelectedNewGroupDataColumns'), async () => {
       this._freezeXAxis.set(true);
       this._freezeYAxis.set(true);
       try {
@@ -840,7 +872,7 @@ export class ChartConfig extends GrainJSDisposable {
   private async _setAggregation(val: boolean) {
     try {
       this._freezeXAxis.set(true);
-      await this._gristDoc.docData.bundleActions(`Toggle chart aggregation`, async () => {
+      await this._gristDoc.docData.bundleActions(t("ToggleChartAggregation"), async () => {
         if (val) {
           await this._doAggregation();
         } else {
@@ -1067,12 +1099,12 @@ function basicPlot(series: Series[], options: ChartOptions, dataOptions: Data): 
   return {
     data: dataSeries,
     layout: {
-      [`${axis1}axis`]: series.length > 0 ? {title: series[0].label} : {},
+      [`${axis1}axis`]: {title: series.length > 0 ? {text: series[0].label}: {}},
       // Include yaxis title for a single y-value series only (2 series total);
       // If there are fewer than 2 total series, there is no y-series to display.
       // If there are multiple y-series, a legend will be included instead, and the yaxis title
       // is less meaningful, so omit it.
-      [`${axis2}axis`]: series.length === 2 ? {title: series[1].label} : {},
+      [`${axis2}axis`]: {title: series.length === 2 ? {text: series[1].label} : {}},
     },
   };
 }
@@ -1253,7 +1285,7 @@ const cssRowLabel = styled('div', `
   margin-right: 8px;
 
   font-weight: initial;   /* negate bootstrap */
-  color: ${colors.dark};
+  color: ${theme.text};
   overflow: hidden;
   text-overflow: ellipsis;
   user-select: none;
@@ -1261,7 +1293,7 @@ const cssRowLabel = styled('div', `
 
 const cssRowHelp = styled(cssRow, `
   font-size: ${vars.smallFontSize};
-  color: ${colors.slate};
+  color: ${theme.lightText};
 `);
 
 const cssAddIcon = styled(icon, `
@@ -1271,15 +1303,15 @@ const cssAddIcon = styled(icon, `
 const cssAddYAxis = styled('div', `
   display: flex;
   cursor: pointer;
-  color: ${colors.lightGreen};
-  --icon-color: ${colors.lightGreen};
+  color: ${theme.controlFg};
+  --icon-color: ${theme.controlFg};
 
   &:not(:first-child) {
     margin-top: 8px;
   }
   &:hover, &:focus, &:active {
-    color: ${colors.darkGreen};
-    --icon-color: ${colors.darkGreen};
+    color: ${theme.controlHoverFg};
+    --icon-color: ${theme.controlHoverFg};
   }
 `);
 
@@ -1295,7 +1327,7 @@ const cssRemoveIcon = styled(icon, `
 
 const cssHintRow = styled('div', `
   margin: -4px 16px 8px 16px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
 `);
 
 const cssRangeInput = styled('input', `

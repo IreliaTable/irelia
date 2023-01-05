@@ -1,5 +1,5 @@
 import {transientInput} from 'app/client/ui/transientInput';
-import {colors, mediaSmall, vars} from 'app/client/ui2018/cssVars';
+import {mediaSmall, theme, vars} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {styled} from 'grainjs';
 import {bigBasicButton} from 'app/client/ui2018/buttons';
@@ -8,12 +8,18 @@ import {bigBasicButton} from 'app/client/ui2018/buttons';
 // styles, which gives it priority.
 import 'popweasel';
 
+export const docMenu = styled('div', `
+  flex-grow: 1;
+  max-width: 100%;
+`);
+
 // The "&:after" clause forces some padding below all docs.
 export const docList = styled('div', `
   height: 100%;
   padding: 32px 64px 24px 64px;
   overflow-y: auto;
   position: relative;
+  display: flex;
 
   &:after {
     content: "";
@@ -32,16 +38,34 @@ export const docList = styled('div', `
   }
 `);
 
-export const docListHeader = styled('div', `
+const listHeader = styled('div', `
   min-height: 32px;
   line-height: 32px;
-  margin-bottom: 24px;
-  color: ${colors.dark};
+  color: ${theme.text};
   font-size: ${vars.xxxlargeFontSize};
   font-weight: ${vars.headerControlTextWeight};
 `);
 
-export const templatesHeader = styled(docListHeader, `
+export const docListHeader = styled(listHeader, `
+  margin-bottom: 24px;
+`);
+
+export const templatesHeaderWrap = styled('div', `
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+
+  @media ${mediaSmall} {
+    & {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
+`);
+
+export const templatesHeader = styled(listHeader, `
   cursor: pointer;
 `);
 
@@ -52,13 +76,19 @@ export const featuredTemplatesHeader = styled(docListHeader, `
 
 export const otherSitesHeader = templatesHeader;
 
+export const allDocsTemplates = styled('div', `
+  display: flex;
+`);
+
 export const docBlock = styled('div', `
+  color: ${theme.text};
   max-width: 550px;
   min-width: 300px;
   margin-bottom: 28px;
 
   &-icons {
-    max-width: unset;
+    max-width: max-content;
+    min-width: calc(min(550px, 100%));
   }
 `);
 
@@ -67,6 +97,7 @@ export const templatesDocBlock = styled(docBlock, `
 `);
 
 export const otherSitesBlock = styled('div', `
+  color: ${theme.text};
   margin-bottom: 32px;
 `);
 
@@ -83,16 +114,18 @@ export const siteButton = styled(bigBasicButton, `
   flex: 0 0 auto;
 `);
 
-export const docHeaderIconDark = styled(icon, `
+export const docHeaderIcon = styled(icon, `
   margin-right: 8px;
   margin-top: -3px;
+  --icon-color: ${theme.lightText};
 `);
 
-export const docHeaderIcon = styled(docHeaderIconDark, `
-  --icon-color: ${colors.slate};
+export const pinnedDocsIcon = styled(docHeaderIcon, `
+  --icon-color: ${theme.text};
 `);
 
 export const featuredTemplatesIcon = styled(icon, `
+  --icon-color: ${theme.text};
   margin-right: 8px;
   width: 20px;
   height: 20px;
@@ -112,7 +145,7 @@ const docBlockHeader = `
   line-height: 40px;
   margin-bottom: 8px;
   margin-right: -16px;
-  color: ${colors.dark};
+  color: ${theme.text};
   font-size: ${vars.mediumFontSize};
   font-weight: bold;
   &, &:hover, &:focus {
@@ -127,6 +160,7 @@ export const docBlockHeaderLink = styled('a', docBlockHeader);
 export const templateBlockHeader = styled('div', docBlockHeader);
 
 export const wsLeft = styled('div', `
+  color: ${theme.text};
   flex: 1 0 50%;
   min-width: 0px;
   margin-right: 24px;
@@ -137,11 +171,11 @@ export const docRowWrapper = styled('div', `
   margin: 0px -16px 8px -16px;
   border-radius: 3px;
   font-size: ${vars.mediumFontSize};
-  color: ${colors.dark};
-  --icon-color: ${colors.slate};
+  color: ${theme.text};
+  --icon-color: ${theme.lightText};
 
   &:hover, &.weasel-popup-open, &-renaming {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
   }
 `);
 
@@ -159,7 +193,7 @@ export const docRowLink = styled('a', `
     color: inherit;
   }
   &-no-access, &-no-access:hover, &-no-access:focus {
-    color: ${colors.slate};
+    color: ${theme.disabledText};
     cursor: not-allowed;
   }
 `);
@@ -182,13 +216,13 @@ export const docName = styled('div', `
 export const docPinIcon = styled(icon, `
   flex: none;
   margin-left: 4px;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${theme.accentIcon};
 `);
 
 export const docPublicIcon = styled(icon, `
   flex: none;
   margin-left: auto;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${theme.accentIcon};
 `);
 
 export const docEditorInput = styled(transientInput, `
@@ -202,7 +236,7 @@ export const docEditorInput = styled(transientInput, `
 
 export const docRowUpdatedAt = styled('div', `
   flex: 1 1 50%;
-  color: ${colors.slate};
+  color: ${theme.lightText};
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -218,20 +252,20 @@ export const docMenuTrigger = styled('div', `
   line-height: 0px;
   border-radius: 3px;
   cursor: default;
-  --icon-color: ${colors.darkGrey};
+  --icon-color: ${theme.docMenuDocOptionsFg};
   .${docRowLink.className}:hover > & {
-    --icon-color: ${colors.slate};
+    --icon-color: ${theme.docMenuDocOptionsHoverFg};
   }
   &:hover, &.weasel-popup-open {
-    background-color: ${colors.darkGrey};
-    --icon-color: ${colors.slate};
+    background-color: ${theme.docMenuDocOptionsHoverBg};
+    --icon-color: ${theme.docMenuDocOptionsHoverFg};
   }
 `);
 
 export const moveDocModalBody = styled('div', `
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid ${colors.darkGrey};
+  border-bottom: 1px solid ${theme.modalBorderDark};
   margin: 0 -64px;
   height: 200px;
 `);
@@ -246,11 +280,11 @@ export const moveDocListItem = styled('div', `
   font-size: ${vars.mediumFontSize};
 
   &-selected {
-    background-color: ${colors.lightGreen};
-    color: white;
+    background-color: ${theme.moveDocsSelectedBg};
+    color: ${theme.moveDocsSelectedFg};
   }
   &-disabled {
-    color: ${colors.darkGrey};
+    color: ${theme.moveDocsDisabledFg};
     cursor: default;
   }
 `);
@@ -290,17 +324,32 @@ export const sortSelector = styled('div', `
   line-height: unset;
   align-items: center;
   border-radius: ${vars.controlBorderRadius};
-  color: ${colors.lightGreen};
-  --icon-color: ${colors.lightGreen};
+  color: ${theme.controlFg};
+  --icon-color: ${theme.controlFg};
+  background-color: unset;
 
   &:focus, &:hover {
     outline: none;
     box-shadow: none;
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
   }
   @media ${mediaSmall} {
     & {
       margin-right: 0;
     }
   }
+`);
+
+export const upgradeButton = styled('div', `
+  margin-left: 32px;
+
+  @media ${mediaSmall} {
+    & {
+      margin-left: 8px;
+    }
+  }
+`);
+
+export const upgradeCard = styled('div', `
+  margin-left: 64px;
 `);

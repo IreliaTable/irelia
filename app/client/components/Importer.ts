@@ -9,6 +9,7 @@ import {buildParseOptionsForm, ParseOptionValues} from 'app/client/components/Pa
 import {PluginScreen} from 'app/client/components/PluginScreen';
 import {FocusLayer} from 'app/client/lib/FocusLayer';
 import {ImportSourceElement} from 'app/client/lib/ImportSourceElement';
+import {makeT} from 'app/client/lib/localization';
 import {fetchURL, isDriveUrl, selectFiles, uploadFiles} from 'app/client/lib/uploads';
 import {reportError} from 'app/client/models/AppModel';
 import {ColumnRec, ViewFieldRec, ViewSectionRec} from 'app/client/models/DocModel';
@@ -16,7 +17,7 @@ import {SortedRowSet} from 'app/client/models/rowset';
 import {buildHighlightedCode} from 'app/client/ui/CodeHighlight';
 import {openFilePicker} from 'app/client/ui/FileDialog';
 import {bigBasicButton, bigPrimaryButton} from 'app/client/ui2018/buttons';
-import {colors, testId, vars} from 'app/client/ui2018/cssVars';
+import {testId, theme, vars} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {IOptionFull, linkSelect, menu, menuDivider, menuItem, multiSelect} from 'app/client/ui2018/menus';
 import {cssModalButtons, cssModalTitle} from 'app/client/ui2018/modals';
@@ -34,6 +35,8 @@ import {Computed, dom, DomContents, fromKo, Holder, IDisposable, MultiHolder, Mu
 import {labeledSquareCheckbox} from 'app/client/ui2018/checkbox';
 import {ACCESS_DENIED, AUTH_INTERRUPTED, canReadPrivateFiles, getGoogleCodeForReading} from 'app/client/ui/googleAuth';
 import debounce = require('lodash/debounce');
+
+const t = makeT('components.Importer');
 
 
 // We expect a function for creating the preview GridView, to avoid the need to require the
@@ -182,7 +185,7 @@ export class Importer extends DisposableWithEvents {
   private _destTables = Computed.create<Array<IOptionFull<DestId>>>(this, (use) => [
     {value: NEW_TABLE, label: 'New Table'},
     ...(use(this._sourceInfoArray).length > 1 ? [{value: SKIP_TABLE, label: 'Skip'}] : []),
-    ...use(this._gristDoc.docModel.allTableIds.getObservable()).map((t) => ({value: t, label: t})),
+    ...use(this._gristDoc.docModel.visibleTableIds.getObservable()).map((id) => ({value: id, label: id})),
   ]);
 
   // Source column labels for the selected import source, keyed by column id.
@@ -628,7 +631,7 @@ export class Importer extends DisposableWithEvents {
                   cssMergeOptions(
                     cssMergeOptionsToggle(labeledSquareCheckbox(
                       updateExistingRecords,
-                      'Update existing records',
+                      t('UpdateExistingRecords'),
                       dom.autoDispose(updateRecordsListener),
                       testId('importer-update-existing-records')
                     )),
@@ -643,14 +646,14 @@ export class Importer extends DisposableWithEvents {
 
                       return [
                         cssMergeOptionsMessage(
-                          'Merge rows that match these fields:',
+                          t('MergeRowsThatMatch'),
                           testId('importer-merge-fields-message')
                         ),
                         multiSelect(
                           mergeCols,
                           section.viewFields().peek().map(f => ({label: f.label(), value: f.colId()})) ?? [],
                           {
-                            placeholder: 'Select fields to match on',
+                            placeholder: t("SelectFieldsToMatch"),
                             error: hasInvalidMergeCols
                           },
                           dom.autoDispose(mergeColsListener),
@@ -663,7 +666,7 @@ export class Importer extends DisposableWithEvents {
                     fields && fields.length > 0 ?
                       cssUnmatchedFields(
                         dom('div',
-                          cssGreenText(
+                          cssAccentText(
                             `${fields.length} unmatched ${fields.length > 1 ? 'fields' : 'field'}`
                           ),
                           ' in import:'
@@ -689,7 +692,7 @@ export class Importer extends DisposableWithEvents {
                                 return [
                                   menuItem(
                                     async () => {
-                                      await this._gristDoc.clearColumns([sourceColId]);
+                                      await this._gristDoc.clearColumns([sourceColId], {keepType: true});
                                       await this._updateImportDiff(info);
                                     },
                                     'Skip',
@@ -798,7 +801,8 @@ export class Importer extends DisposableWithEvents {
     const editRow = vsi?.moveEditRowToCursor();
     const editorHolder = openFormulaEditor({
       gristDoc: this._gristDoc,
-      field,
+      column: field.column(),
+      editingFormula: field.editingFormula,
       refElem,
       editRow,
       setupCleanup: this._setupFormulaEditorCleanup.bind(this),
@@ -819,7 +823,7 @@ export class Importer extends DisposableWithEvents {
    * focus.
    */
   private _setupFormulaEditorCleanup(
-    owner: MultiHolder, _doc: GristDoc, field: ViewFieldRec, _saveEdit: () => Promise<unknown>
+    owner: MultiHolder, _doc: GristDoc, editingFormula: ko.Computed<boolean>, _saveEdit: () => Promise<unknown>
   ) {
     const saveEdit = () => _saveEdit().catch(reportError);
 
@@ -828,7 +832,7 @@ export class Importer extends DisposableWithEvents {
 
     owner.onDispose(() => {
       this.off('importer_focus', saveEdit);
-      field.editingFormula(false);
+      editingFormula(false);
     });
   }
 
@@ -938,11 +942,11 @@ const cssActionLink = styled('div', `
   display: inline-flex;
   align-items: center;
   cursor: pointer;
-  color: ${colors.lightGreen};
-  --icon-color: ${colors.lightGreen};
+  color: ${theme.controlFg};
+  --icon-color: ${theme.controlFg};
   &:hover {
-    color: ${colors.darkGreen};
-    --icon-color: ${colors.darkGreen};
+    color: ${theme.controlHoverFg};
+    --icon-color: ${theme.controlHoverFg};
   }
 `);
 
@@ -971,7 +975,7 @@ const cssPreviewWrapper = styled('div', `
 // This partly duplicates cssSectionHeader from HomeLeftPane.ts
 const cssSectionHeader = styled('div', `
   margin-bottom: 8px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
   text-transform: uppercase;
   font-weight: 500;
   font-size: ${vars.xsmallFontSize};
@@ -993,9 +997,9 @@ const cssTableInfo = styled('div', `
   margin: 4px 0px;
   width: 300px;
   border-radius: 3px;
-  border: 1px solid ${colors.darkGrey};
+  border: 1px solid ${theme.importerTableInfoBorder};
   &:hover, &-selected {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
   }
 `);
 
@@ -1008,7 +1012,7 @@ const cssTableLine = styled('div', `
 const cssToFrom = styled('span', `
   flex: none;
   margin-right: 8px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
   text-transform: uppercase;
   font-weight: 500;
   font-size: ${vars.xsmallFontSize};
@@ -1061,11 +1065,11 @@ const cssOverlay = styled('div', `
   height: 100%;
   width: 100%;
   z-index: 10;
-  background: ${colors.mediumGrey};
+  background: ${theme.importerSkippedTableOverlay};
 `);
 
 const cssPreviewGrid = styled(cssPreview, `
-  border: 1px solid ${colors.darkGrey};
+  border: 1px solid ${theme.importerPreviewBorder};
   position: relative;
 `);
 
@@ -1078,7 +1082,7 @@ const cssMergeOptionsToggle = styled('div', `
 `);
 
 const cssMergeOptionsMessage = styled('div', `
-  color: ${colors.slate};
+  color: ${theme.lightText};
   margin-bottom: 8px;
 `);
 
@@ -1098,14 +1102,14 @@ const cssFieldFormula = styled(buildHighlightedCode, `
   cursor: pointer;
   margin-top: 1px;
   padding-left: 4px;
-  --icon-color: ${colors.lightGreen};
+  --icon-color: ${theme.accentIcon};
 `);
 
 const cssColumnMatchIcon = styled(icon, `
   flex-shrink: 0;
   width: 20px;
   height: 32px;
-  background-color: ${colors.darkGrey};
+  background-color: ${theme.importerMatchIcon};
   margin-right: 4px;
 `);
 
@@ -1137,10 +1141,10 @@ const cssDestinationFieldSettings = styled('div', `
   line-height: 0px;
   border-radius: 3px;
   cursor: pointer;
-  --icon-color: ${colors.slate};
+  --icon-color: ${theme.lightText};
 
   &:hover, &.weasel-popup-open {
-    background-color: ${colors.mediumGrey};
+    background-color: ${theme.hover};
   }
 `);
 
@@ -1153,9 +1157,9 @@ const cssUnmatchedFieldsList = styled('div', `
   text-overflow: ellipsis;
   overflow: hidden;
   padding-right: 16px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
 `);
 
-const cssGreenText = styled('span', `
-  color: ${colors.lightGreen};
+const cssAccentText = styled('span', `
+  color: ${theme.accentText};
 `);

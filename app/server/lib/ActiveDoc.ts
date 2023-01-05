@@ -4,41 +4,52 @@
  * change events.
  */
 
-import {getEnvContent, LocalActionBundle, SandboxActionBundle, UserActionBundle} from 'app/common/ActionBundle';
+import {ACLRuleCollection} from 'app/common/ACLRuleCollection';
+import {
+  getEnvContent,
+  LocalActionBundle,
+  SandboxActionBundle,
+  SandboxRequest,
+  UserActionBundle
+} from 'app/common/ActionBundle';
 import {ActionGroup, MinimalActionGroup} from 'app/common/ActionGroup';
 import {ActionSummary} from "app/common/ActionSummary";
 import {
+  AclResources,
+  AclTableDescription,
+  ApplyUAExtendedOptions,
   ApplyUAOptions,
   ApplyUAResult,
   DataSourceTransformed,
   ForkResult,
   ImportOptions,
   ImportResult,
+  ISuggestionWithValue,
   MergeOptions,
   PermissionDataWithExtraUsers,
   QueryResult,
   ServerQuery,
+  TableFetchResult,
   TransformRule
 } from 'app/common/ActiveDocAPI';
 import {ApiError} from 'app/common/ApiError';
 import {mapGetOrSet, MapWithTTL} from 'app/common/AsyncCreate';
+import {AttachmentColumns, gatherAttachmentIds, getAttachmentColumns} from 'app/common/AttachmentColumns';
 import {
+  BulkAddRecord,
   BulkRemoveRecord,
   BulkUpdateRecord,
   CellValue,
   DocAction,
+  getTableId,
+  isSchemaAction,
   TableDataAction,
   TableRecordValue,
   toTableDataAction,
   UserAction
 } from 'app/common/DocActions';
 import {DocData} from 'app/common/DocData';
-import {
-  getDataLimitRatio,
-  getDataLimitStatus,
-  getSeverity,
-  LimitExceededError,
-} from 'app/common/DocLimits';
+import {getDataLimitRatio, getDataLimitStatus, getSeverity, LimitExceededError} from 'app/common/DocLimits';
 import {DocSnapshots} from 'app/common/DocSnapshot';
 import {DocumentSettings} from 'app/common/DocumentSettings';
 import {
@@ -48,22 +59,26 @@ import {
   DocUsageSummary,
   FilteredDocUsageSummary,
   getUsageRatio,
+  RowCounts,
 } from 'app/common/DocUsage';
 import {normalizeEmail} from 'app/common/emails';
-import {Features} from 'app/common/Features';
+import {Product} from 'app/common/Features';
 import {FormulaProperties, getFormulaProperties} from 'app/common/GranularAccessClause';
 import {parseUrlId} from 'app/common/gristUrls';
 import {byteString, countIf, retryOnce, safeJsonParse} from 'app/common/gutil';
 import {InactivityTimer} from 'app/common/InactivityTimer';
+import {Interval} from 'app/common/Interval';
+import * as roles from 'app/common/roles';
 import {schema, SCHEMA_VERSION} from 'app/common/schema';
-import {MetaRowRecord} from 'app/common/TableData';
+import {MetaRowRecord, SingleCell} from 'app/common/TableData';
+import {UIRowId} from 'app/common/UIRowId';
 import {FetchUrlOptions, UploadResult} from 'app/common/uploads';
 import {DocReplacementOptions, DocState, DocStateComparison} from 'app/common/UserAPI';
 import {convertFromColumn} from 'app/common/ValueConverter';
 import {guessColInfoWithDocData} from 'app/common/ValueGuesser';
 import {parseUserAction} from 'app/common/ValueParser';
 import {ParseOptions} from 'app/plugin/FileParserAPI';
-import {GristDocAPI} from 'app/plugin/GristAPI';
+import {AccessTokenOptions, AccessTokenResult, GristDocAPI} from 'app/plugin/GristAPI';
 import {compileAclFormula} from 'app/server/lib/ACLFormula';
 import {Authorizer} from 'app/server/lib/Authorizer';
 import {checksumFile} from 'app/server/lib/checksumFile';
@@ -71,23 +86,25 @@ import {Client} from 'app/server/lib/Client';
 import {DEFAULT_CACHE_TTL, DocManager} from 'app/server/lib/DocManager';
 import {ICreateActiveDocOptions} from 'app/server/lib/ICreate';
 import {makeForkIds} from 'app/server/lib/idUtils';
-import {IRELIA_DOC_SQL, IRELIA_DOC_WITH_TABLE1_SQL} from 'app/server/lib/initialDocSql';
+import {GRIST_DOC_SQL, GRIST_DOC_WITH_TABLE1_SQL} from 'app/server/lib/initialDocSql';
 import {ISandbox} from 'app/server/lib/ISandbox';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {LogMethods} from "app/server/lib/LogMethods";
+import {DocRequests} from 'app/server/lib/Requests';
 import {shortDesc} from 'app/server/lib/shortDesc';
 import {TableMetadataLoader} from 'app/server/lib/TableMetadataLoader';
 import {DocTriggers} from "app/server/lib/Triggers";
 import {fetchURL, FileUploadInfo, globalUploadSet, UploadInfo} from 'app/server/lib/uploads';
-import * as assert from 'assert';
+import assert from 'assert';
 import {Mutex} from 'async-mutex';
 import * as bluebird from 'bluebird';
 import {EventEmitter} from 'events';
 import {IMessage, MsgType} from 'grain-rpc';
-import * as imageSize from 'image-size';
+import imageSize from 'image-size';
 import * as moment from 'moment-timezone';
 import fetch from 'node-fetch';
-import * as tmp from 'tmp';
+import {createClient, RedisClient} from 'redis';
+import tmp from 'tmp';
 
 import {ActionHistory} from './ActionHistory';
 import {ActionHistoryImpl} from './ActionHistoryImpl';
@@ -96,12 +113,13 @@ import {DocClients} from './DocClients';
 import {DocPluginManager} from './DocPluginManager';
 import {
   DocSession,
+  getDocSessionAccess,
   getDocSessionUser,
   getDocSessionUserId,
   makeExceptionalDocSession,
   OptDocSession
 } from './DocSession';
-import {createAttachmentsIndex, DocStorage} from './DocStorage';
+import {createAttachmentsIndex, DocStorage, REMOVE_UNUSED_ATTACHMENTS_DELAY} from './DocStorage';
 import {expandQuery} from './ExpandedQuery';
 import {GranularAccess, GranularAccessForBundle} from './GranularAccess';
 import {OnDemandActions} from './OnDemandActions';
@@ -109,6 +127,7 @@ import {getLogMetaFromDocSession, timeoutReached} from './serverUtils';
 import {findOrAddAllEnvelope, Sharing} from './Sharing';
 import cloneDeep = require('lodash/cloneDeep');
 import flatten = require('lodash/flatten');
+import pick = require('lodash/pick');
 import remove = require('lodash/remove');
 import sum = require('lodash/sum');
 import without = require('lodash/without');
@@ -119,7 +138,7 @@ bluebird.promisifyAll(tmp);
 const MAX_RECENT_ACTIONS = 100;
 
 const DEFAULT_TIMEZONE = (process.versions as any).electron ? moment.tz.guess() : "UTC";
-const DEFAULT_LOCALE = "en-US";
+const DEFAULT_LOCALE = process.env.GRIST_DEFAULT_LOCALE || "en-US";
 
 // Number of seconds an ActiveDoc is retained without any clients.
 // In dev environment, it is convenient to keep this low for quick tests.
@@ -129,19 +148,26 @@ const ACTIVEDOC_TIMEOUT = (process.env.NODE_ENV === 'production') ? 30 : 5;
 // We'll wait this long between re-measuring sandbox memory.
 const MEMORY_MEASUREMENT_INTERVAL_MS = 60 * 1000;
 
-// Cleanup expired attachments every hour (also happens when shutting down)
-const REMOVE_UNUSED_ATTACHMENTS_INTERVAL_MS = 60 * 60 * 1000;
-
 // Apply the UpdateCurrentTime user action every hour
-const UPDATE_CURRENT_TIME_INTERVAL_MS = 60 * 60 * 1000;
+const UPDATE_CURRENT_TIME_DELAY = {delayMs: 60 * 60 * 1000, varianceMs: 30 * 1000};
+
+// Measure and broadcast data size every 5 minutes
+const UPDATE_DATA_SIZE_DELAY = {delayMs: 5 * 60 * 1000, varianceMs: 30 * 1000};
 
 // A hook for dependency injection.
 export const Deps = {ACTIVEDOC_TIMEOUT};
 
+interface UpdateUsageOptions {
+  // Whether usage should be synced to the home database. Defaults to true.
+  syncUsageToDatabase?: boolean;
+  // Whether usage should be broadcast to all doc clients. Defaults to true.
+  broadcastUsageToClients?: boolean;
+}
+
 /**
  * Represents an active document with the given name. The document isn't actually open until
  * either .loadDoc() or .createEmptyDoc() is called.
- * @param {String} docName - The document's filename, without the '.irelia' extension.
+ * @param {String} docName - The document's filename, without the '.grist' extension.
  */
 export class ActiveDoc extends EventEmitter {
   /**
@@ -156,7 +182,7 @@ export class ActiveDoc extends EventEmitter {
   }
 
   public readonly docStorage: DocStorage;
-  public readonly docPluginManager: DocPluginManager;
+  public readonly docPluginManager: DocPluginManager|null;
   public readonly docClients: DocClients;               // Only exposed for Sharing.ts
   public docData: DocData|null = null;
 
@@ -169,8 +195,9 @@ export class ActiveDoc extends EventEmitter {
   // result).
   protected _modificationLock: Mutex = new Mutex();
 
-  private _log = new LogMethods('ActiveDoc ', (s: OptDocSession) => this.getLogMeta(s));
+  private _log = new LogMethods('ActiveDoc ', (s: OptDocSession | null) => this.getLogMeta(s));
   private _triggers: DocTriggers;
+  private _requests: DocRequests;
   private _dataEngine: Promise<ISandbox>|undefined;
   private _activeDocImport: ActiveDocImport;
   private _onDemandActions: OnDemandActions;
@@ -184,29 +211,49 @@ export class ActiveDoc extends EventEmitter {
                                     // initialized.  True on success.
   private _fullyLoaded: boolean = false;  // Becomes true once all columns are loaded/computed.
   private _lastMemoryMeasurement: number = 0;    // Timestamp when memory was last measured.
-  private _lastDataSizeMeasurement: number = 0;  // Timestamp when dbstat data size was last measured.
-  private _lastDataLimitStatus?: DataLimitStatus;
   private _fetchCache = new MapWithTTL<string, Promise<TableDataAction>>(DEFAULT_CACHE_TTL);
   private _docUsage: DocumentUsage|null = null;
-  private _productFeatures?: Features;
+  private _product?: Product;
   private _gracePeriodStart: Date|null = null;
   private _isForkOrSnapshot: boolean = false;
+  private _onlyAllowMetaDataActionsOnDb: boolean = false;
+  // Cache of which columns are attachment columns.
+  private _attachmentColumns?: AttachmentColumns;
+
+  // Client watching for 'product changed' event published by Billing to update usage
+  private _redisSubscriber?: RedisClient;
 
   // Timer for shutting down the ActiveDoc a bit after all clients are gone.
   private _inactivityTimer = new InactivityTimer(() => this.shutdown(), Deps.ACTIVEDOC_TIMEOUT * 1000);
   private _recoveryMode: boolean = false;
   private _shuttingDown: boolean = false;
 
-  // Intervals to clear on shutdown
+  /**
+   * In cases where large numbers of documents are restarted simultaneously
+   * (like during deployments), there's a tendency for scheduled intervals to
+   * execute at roughly the same moment in time, which causes spikes in load.
+   *
+   * To mitigate this, we use randomized intervals that re-compute their delay
+   * in-between calls, with a variance of 30 seconds.
+   */
   private _intervals = [
-    // Cleanup expired attachments every hour (also happens when shutting down)
-    setInterval(
+    // Cleanup expired attachments every hour (also happens when shutting down).
+    new Interval(
       () => this.removeUnusedAttachments(true),
-      REMOVE_UNUSED_ATTACHMENTS_INTERVAL_MS,
+      REMOVE_UNUSED_ATTACHMENTS_DELAY,
+      {onError: (e) => this._log.error(null, 'failed to remove expired attachments', e)},
     ),
-    setInterval(
-      () => this._applyUserActions(makeExceptionalDocSession('system'), [["UpdateCurrentTime"]]),
-      UPDATE_CURRENT_TIME_INTERVAL_MS,
+    // Update the time in formulas every hour.
+    new Interval(
+      () => this._applyUserActions(makeExceptionalDocSession('system'), [['UpdateCurrentTime']]),
+      UPDATE_CURRENT_TIME_DELAY,
+      {onError: (e) => this._log.error(null, 'failed to update current time', e)},
+    ),
+    // Measure and broadcast data size every 5 minutes.
+    new Interval(
+      () => this._checkDataSizeLimitRatio(makeExceptionalDocSession('system')),
+      UPDATE_DATA_SIZE_DELAY,
+      {onError: (e) => this._log.error(null, 'failed to update data size', e)},
     ),
   ];
 
@@ -217,8 +264,20 @@ export class ActiveDoc extends EventEmitter {
     if (_options?.safeMode) { this._recoveryMode = true; }
     if (_options?.doc) {
       const {gracePeriodStart, workspace, usage} = _options.doc;
-      this._productFeatures = workspace.org.billingAccount?.product.features;
+      const billingAccount = workspace.org.billingAccount;
+      this._product = billingAccount?.product;
       this._gracePeriodStart = gracePeriodStart;
+
+      if (process.env.REDIS_URL && billingAccount) {
+        const channel = `billingAccount-${billingAccount.id}-product-changed`;
+        this._redisSubscriber = createClient(process.env.REDIS_URL);
+        this._redisSubscriber.subscribe(channel);
+        this._redisSubscriber.on("message", async () => {
+          // A product change has just happened in Billing.
+          // Reload the doc (causing connected clients to reload) to ensure everyone sees the effect of the change.
+          await this.reloadDoc();
+        });
+      }
 
       if (!this._isForkOrSnapshot) {
         /* Note: We don't currently persist usage for forks or snapshots anywhere, so
@@ -234,7 +293,6 @@ export class ActiveDoc extends EventEmitter {
          *
          * TODO: Revisit this later and patch up the loophole. */
         this._docUsage = usage;
-        this._lastDataLimitStatus = this.dataLimitStatus;
       }
     }
     this._docManager = docManager;
@@ -242,9 +300,11 @@ export class ActiveDoc extends EventEmitter {
     this.docStorage = new DocStorage(docManager.storageManager, docName);
     this.docClients = new DocClients(this);
     this._triggers = new DocTriggers(this);
+    this._requests = new DocRequests(this);
     this._actionHistory = new ActionHistoryImpl(this.docStorage);
-    this.docPluginManager = new DocPluginManager(docManager.pluginManager.getPlugins(),
-      docManager.pluginManager.appRoot!, this, this._docManager.gristServer);
+    this.docPluginManager = docManager.pluginManager ?
+      new DocPluginManager(docManager.pluginManager.getPlugins(),
+                           docManager.pluginManager.appRoot!, this, this._docManager.gristServer) : null;
     this._tableMetadataLoader = new TableMetadataLoader({
       decodeBuffer: this.docStorage.decodeMarshalledData.bind(this.docStorage),
       fetchTable: this.docStorage.fetchTable.bind(this.docStorage),
@@ -270,6 +330,10 @@ export class ActiveDoc extends EventEmitter {
     // unscheduled. If not (e.g. abandoned import, network problems after creating a doc), then
     // the ActiveDoc will get cleaned up.
     this._inactivityTimer.enable();
+
+    for (const interval of this._intervals) {
+      interval.enable();
+    }
   }
 
   public get docName(): string { return this._docName; }
@@ -281,26 +345,26 @@ export class ActiveDoc extends EventEmitter {
 
   public get rowLimitRatio(): number {
     return getUsageRatio(
-      this._docUsage?.rowCount,
-      this._productFeatures?.baseMaxRowsPerDocument
+      this._docUsage?.rowCount?.total,
+      this._product?.features.baseMaxRowsPerDocument
     );
   }
 
   public get dataSizeLimitRatio(): number {
     return getUsageRatio(
       this._docUsage?.dataSizeBytes,
-      this._productFeatures?.baseMaxDataSizePerDocument
+      this._product?.features.baseMaxDataSizePerDocument
     );
   }
 
   public get dataLimitRatio(): number {
-    return getDataLimitRatio(this._docUsage, this._productFeatures);
+    return getDataLimitRatio(this._docUsage, this._product?.features);
   }
 
   public get dataLimitStatus(): DataLimitStatus {
     return getDataLimitStatus({
       docUsage: this._docUsage,
-      productFeatures: this._productFeatures,
+      productFeatures: this._product?.features,
       gracePeriodStart: this._gracePeriodStart,
     });
   }
@@ -440,32 +504,40 @@ export class ActiveDoc extends EventEmitter {
 
       this._triggers.shutdown();
 
+      this._redisSubscriber?.quitAsync()
+        .catch(e => this._log.warn(docSession, "Failed to quit redis subscriber", e));
+
       // Clear the MapWithTTL to remove all timers from the event loop.
       this._fetchCache.clear();
 
       for (const interval of this._intervals) {
-        clearInterval(interval);
+        await interval.disableAndFinish();
       }
+      // We'll defer syncing usage until everything is calculated.
+      const usageOptions = {syncUsageToDatabase: false, broadcastUsageToClients: false};
 
-      // Remove expired attachments, i.e. attachments that were soft deleted a while ago. This
-      // needs to happen periodically, and doing it here means we can guarantee that it happens
-      // even if the doc is only ever opened briefly, without having to slow down startup.
-      const removeAttachmentsPromise = this.removeUnusedAttachments(true, {syncUsageToDatabase: false});
+      // This cleanup requires docStorage, which may have failed to start up.
+      // We don't want to log pointless errors in that case.
+      if (this.docStorage.isInitialized()) {
+        // Remove expired attachments, i.e. attachments that were soft deleted a while ago. This
+        // needs to happen periodically, and doing it here means we can guarantee that it happens
+        // even if the doc is only ever opened briefly, without having to slow down startup.
+        const removeAttachmentsPromise = this.removeUnusedAttachments(true, usageOptions);
 
-      // Update data size as well. We'll schedule a sync to the database once both this and the
-      // above promise settle.
-      const updateDataSizePromise = this._updateDataSize({syncUsageToDatabase: false});
+        // Update data size; we'll be syncing both it and attachments size to the database soon.
+        const updateDataSizePromise = this._updateDataSize(usageOptions);
 
-      try {
-        await removeAttachmentsPromise;
-      } catch (e) {
-        this._log.error(docSession, "Failed to remove expired attachments", e);
-      }
+        try {
+          await removeAttachmentsPromise;
+        } catch (e) {
+          this._log.error(docSession, "Failed to remove expired attachments", e);
+        }
 
-      try {
-        await updateDataSizePromise;
-      } catch (e) {
-        this._log.error(docSession, "Failed to update data size", e);
+        try {
+          await updateDataSizePromise;
+        } catch (e) {
+          this._log.error(docSession, "Failed to update data size", e);
+        }
       }
 
       this._syncDocUsageToDatabase(true);
@@ -488,7 +560,7 @@ export class ActiveDoc extends EventEmitter {
         }
         await Promise.all([
           this.docStorage.shutdown(),
-          this.docPluginManager.shutdown(),
+          this.docPluginManager?.shutdown(),
           dataEngine?.shutdown()
         ]);
         // The this.waitForInitialization promise may not yet have resolved, but
@@ -504,6 +576,12 @@ export class ActiveDoc extends EventEmitter {
       await options.afterShutdown?.();
     } finally {
       this._docManager.removeActiveDoc(this);
+    }
+    try {
+      await this._granularAccess.close();
+    } catch (err) {
+      // This should not happen.
+      this._log.error(docSession, "failed to shutdown granular access", err);
     }
     this._log.debug(docSession, "shutdown complete");
   }
@@ -535,7 +613,7 @@ export class ActiveDoc extends EventEmitter {
     await this._initDoc(docSession);
     await this._tableMetadataLoader.clean();
     // Makes sure docPluginManager is ready in case new doc is used to import new data
-    await this.docPluginManager.ready;
+    await this.docPluginManager?.ready;
     this._fullyLoaded = true;
     return this;
   }
@@ -544,10 +622,13 @@ export class ActiveDoc extends EventEmitter {
    * Create a new blank document (no "Table1"), used as a stub when importing.
    */
   @ActiveDoc.keepDocOpen
-  public async createEmptyDoc(docSession: OptDocSession): Promise<ActiveDoc> {
-    await this.loadDoc(docSession, {forceNew: true, skipInitialTable: true});
+  public async createEmptyDoc(docSession: OptDocSession,
+                              options?: { useExisting?: boolean }): Promise<ActiveDoc> {
+    await this.loadDoc(docSession, {forceNew: true,
+                                    skipInitialTable: true,
+                                    ...options});
     // Makes sure docPluginManager is ready in case new doc is used to import new data
-    await this.docPluginManager.ready;
+    await this.docPluginManager?.ready;
     this._fullyLoaded = true;
     return this;
   }
@@ -562,13 +643,18 @@ export class ActiveDoc extends EventEmitter {
   public async loadDoc(docSession: OptDocSession, options?: {
     forceNew?: boolean,          // If set, document will be created.
     skipInitialTable?: boolean,  // If set, and document is new, "Table1" will not be added.
+    useExisting?: boolean,       // If set, document can be created as an overlay on
+                                 // an existing sqlite file.
   }): Promise<ActiveDoc> {
     const startTime = Date.now();
     this._log.debug(docSession, "loadDoc");
     try {
       const isNew: boolean = options?.forceNew || await this._docManager.storageManager.prepareLocalDoc(this.docName);
       if (isNew) {
-        await this._createDocFile(docSession, {skipInitialTable: options?.skipInitialTable});
+        await this._createDocFile(docSession, {
+          skipInitialTable: options?.skipInitialTable,
+          useExisting: options?.useExisting,
+        });
       } else {
         await this.docStorage.openFile({
           beforeMigration: async (currentVersion, newVersion) => {
@@ -592,6 +678,8 @@ export class ActiveDoc extends EventEmitter {
         });
       });
     } catch (err) {
+      const level = err.status === 404 ? "warn" : "error";
+      this._log.log(level, docSession, "Failed to load document", err);
       await this.shutdown();
       throw err;
     }
@@ -604,10 +692,13 @@ export class ActiveDoc extends EventEmitter {
    * shut it down, and unlist it via the DocManager.  A fresh ActiveDoc can be acquired via the
    * DocManager.
    */
-  public async replace(source: DocReplacementOptions) {
+  public async replace(docSession: OptDocSession, source: DocReplacementOptions) {
     // During replacement, it is important for all hands to be off the document. So we
     // ask the shutdown method to do the replacement when the ActiveDoc is shutdown but
     // before a new one could be opened.
+    if (!await this._granularAccess.isOwner(docSession)) {
+      throw new ApiError('Only owners can replace a document.', 403);
+    }
     return this.shutdown({
       afterShutdown: () => this._docManager.storageManager.replace(this.docName, source)
     });
@@ -623,7 +714,7 @@ export class ActiveDoc extends EventEmitter {
                                                 this._recoveryMode);
 
     await this._actionHistory.initialize();
-    this._granularAccess = new GranularAccess(this.docData, this.docClients, (query) => {
+    this._granularAccess = new GranularAccess(this.docData, this.docStorage, this.docClients, (query) => {
       return this._fetchQueryFromDB(query, false);
     }, this.recoveryMode, this.getHomeDbManager(), this.docName);
     await this._granularAccess.update();
@@ -761,10 +852,13 @@ export class ActiveDoc extends EventEmitter {
       );
       const userActions: UserAction[] = await Promise.all(
         upload.files.map(file => this._prepAttachment(docSession, file)));
-      const result = await this.applyUserActions(docSession, userActions);
+      const result = await this._applyUserActionsWithExtendedOptions(docSession, userActions, {
+        attachment: true,
+      });
       this._updateAttachmentsSize().catch(e => {
         this._log.warn(docSession, 'failed to update attachments size', e);
       });
+      await this._granularAccess.noteUploads(docSession, result.retValues);
       return result.retValues;
     } finally {
       await globalUploadSet.cleanup(uploadId);
@@ -775,14 +869,12 @@ export class ActiveDoc extends EventEmitter {
    * Returns the record from _grist_Attachments table for the given attachment ID,
    * or throws an error if not found.
    */
-  public getAttachmentMetadata(attId: number|string): MetaRowRecord<'_grist_Attachments'> {
+  public getAttachmentMetadata(attId: number): MetaRowRecord<'_grist_Attachments'> {
     // docData should always be available after loadDoc() or createDoc().
     if (!this.docData) {
       throw new Error("No doc data");
     }
-    // Parse strings into numbers to make more convenient to call from route handlers.
-    const attachmentId: number = (typeof attId === 'string') ? parseInt(attId, 10) : attId;
-    const attRecord = this.docData.getMetaTable('_grist_Attachments').getRecord(attachmentId);
+    const attRecord = this.docData.getMetaTable('_grist_Attachments').getRecord(attId);
     if (!attRecord) {
       throw new ApiError(`Attachment not found: ${attId}`, 404);
     }
@@ -790,16 +882,42 @@ export class ActiveDoc extends EventEmitter {
   }
 
   /**
-   * Given the fileIdent of an attachment, returns a promise for the attachment data.
-   * @param {String} fileIdent: The unique identifier of the attachment (as stored in fileIdent
-   *    field of the _grist_Attachments table).
+   * Given a _gristAttachments record, returns a promise for the attachment data.
+   * Can optionally take a cell in which the attachment is expected to be
+   * referenced, and/or a `maybeNew` flag which, when set, specifies that the
+   * attachment may be a recent upload that is not yet referenced in the document.
    * @returns {Promise<Buffer>} Promise for the data of this attachment; rejected on error.
    */
-  public async getAttachmentData(docSession: OptDocSession, fileIdent: string): Promise<Buffer> {
-    // We don't know for sure whether the attachment is available via a table the user
-    // has access to, but at least they are presenting a SHA1 checksum of the file content,
-    // and they have at least view access to the document to get to this point.  So we go ahead
-    // and serve the attachment.
+  public async getAttachmentData(docSession: OptDocSession, attRecord: MetaRowRecord<"_grist_Attachments">,
+                                 options?: {
+                                   cell?: SingleCell,
+                                   maybeNew?: boolean,
+                                 }): Promise<Buffer> {
+    const attId = attRecord.id;
+    const fileIdent = attRecord.fileIdent;
+    const cell = options?.cell;
+    const maybeNew = options?.maybeNew;
+    if (
+      await this._granularAccess.canReadEverything(docSession) ||
+      await this.canDownload(docSession)
+    ) {
+      // Do not need to sweat over access to attachments if user can
+      // read everything or download everything.
+    } else {
+      if (maybeNew && await this._granularAccess.isAttachmentUploadedByUser(docSession, attId)) {
+        // Fine, this is an attachment the user uploaded (recently).
+      } else if (cell) {
+        // Only provide the download if the user has access to the cell
+        // they specified, and that cell is in an attachment column,
+        // and the cell contains the specified attachment.
+        await this._granularAccess.assertAttachmentAccess(docSession, cell, attId);
+      } else {
+        if (!await this._granularAccess.findAttachmentCellForUser(docSession, attId)) {
+          // We found no reason to allow this user to access the attachment.
+          throw new ApiError('Cannot access attachment', 403);
+        }
+      }
+    }
     const data = await this.docStorage.getFileData(fileIdent);
     if (!data) { throw new ApiError("Invalid attachment identifier", 404); }
     this._log.info(docSession, "getAttachment: %s -> %s bytes", fileIdent, data.length);
@@ -858,7 +976,7 @@ export class ActiveDoc extends EventEmitter {
    *      form of the form ["TableData", table_id, row_ids, column_values].
    */
   public async fetchTable(docSession: OptDocSession, tableId: string,
-                          waitForFormulas: boolean = false): Promise<TableDataAction> {
+                          waitForFormulas: boolean = false): Promise<TableFetchResult> {
     return this.fetchQuery(docSession, {tableId, filters: {}}, waitForFormulas);
   }
 
@@ -870,7 +988,7 @@ export class ActiveDoc extends EventEmitter {
    * special "pending" values may be returned.
    */
   public async fetchQuery(docSession: OptDocSession, query: ServerQuery,
-                          waitForFormulas: boolean = false): Promise<TableDataAction> {
+                          waitForFormulas: boolean = false): Promise<TableFetchResult> {
     this._inactivityTimer.ping();     // The doc is in active use; ping it to stay open longer.
 
     // If user does not have rights to access what this query is asking for, fail.
@@ -887,8 +1005,8 @@ export class ActiveDoc extends EventEmitter {
       // table.  So we pick out the table we want from fetchMetaTables (which has applied
       // filtering).
       const tables = await this.fetchMetaTables(docSession);
-      const table = tables[query.tableId];
-      if (table) { return table; }
+      const tableData = tables[query.tableId];
+      if (tableData) { return {tableData}; }
       // If table not found, continue, to give a consistent error for a table not found.
     }
 
@@ -924,9 +1042,23 @@ export class ActiveDoc extends EventEmitter {
       data = cloneDeep(data!);  // Clone since underlying fetch may be cached and shared.
       await this._granularAccess.filterData(docSession, data);
     }
+
+    // Consider whether we need to add attachment metadata.
+    // TODO: it might be desirable to always send attachment data, or allow
+    // this to be an option in api calls related to fetching.
+    let attachments: BulkAddRecord | undefined;
+    const attachmentColumns = this._getCachedAttachmentColumns();
+    if (attachmentColumns?.size && await this._granularAccess.needAttachmentControl(docSession)) {
+      const attIds = gatherAttachmentIds(attachmentColumns, data!);
+      if (attIds.size > 0) {
+        attachments = this.docData!.getMetaTable('_grist_Attachments')
+          .getBulkAddRecord([...attIds]);
+      }
+    }
+
     this._log.info(docSession, "fetchQuery -> %d rows, cols: %s",
              data![2].length, Object.keys(data![3]).join(", "));
-    return data!;
+    return {tableData: data!, ...(attachments && {attachments})};
   }
 
   /**
@@ -959,8 +1091,8 @@ export class ActiveDoc extends EventEmitter {
     // - Subscription should not be affected by renames (so don't hold on to query/tableId/colIds)
     // - Table/column deletion should make subscription inactive, and unsubscribing an inactive
     //   subscription should not produce an error.
-    const tableData: TableDataAction = await this.fetchQuery(docSession, query);
-    return {querySubId: 0, tableData};
+    const tableFetchResult = await this.fetchQuery(docSession, query);
+    return {querySubId: 0, ...tableFetchResult};
   }
 
   /**
@@ -1035,7 +1167,9 @@ export class ActiveDoc extends EventEmitter {
    */
   public async getFormulaError(docSession: DocSession, tableId: string, colId: string,
                                rowId: number): Promise<CellValue> {
-    if (!await this._granularAccess.hasTableAccess(docSession, tableId)) { return null; }
+    // Throw an error if the user doesn't have access to read this cell.
+    await this._granularAccess.getCellValue(docSession, {tableId, colId, rowId});
+
     this._log.info(docSession, "getFormulaError(%s, %s, %s, %s)",
       docSession, tableId, colId, rowId);
     await this.waitForInitialization();
@@ -1053,24 +1187,9 @@ export class ActiveDoc extends EventEmitter {
    *                                          actionGroup.
    */
   public async applyUserActions(docSession: OptDocSession, actions: UserAction[],
-                                options?: ApplyUAOptions): Promise<ApplyUAResult> {
-    assert(Array.isArray(actions), "`actions` parameter should be an array.");
-    // Be careful not to sneak into user action queue before Calculate action, otherwise
-    // there'll be a deadlock.
-    await this.waitForInitialization();
-
-    if (
-      this.dataLimitStatus === "deleteOnly" &&
-      !actions.every(action => [
-          'RemoveTable', 'RemoveColumn', 'RemoveRecord', 'BulkRemoveRecord',
-          'RemoveViewSection', 'RemoveView', 'ApplyUndoActions',
-        ].includes(action[0] as string))
-    ) {
-      throw new Error("Document is in delete-only mode");
-    }
-
-    // Granular access control implemented in _applyUserActions.
-    return await this._applyUserActions(docSession, actions, options);
+                                unsanitizedOptions?: ApplyUAOptions): Promise<ApplyUAResult> {
+    const options = sanitizeApplyUAOptions(unsanitizedOptions);
+    return this._applyUserActionsWithExtendedOptions(docSession, actions, options);
   }
 
   /**
@@ -1088,12 +1207,25 @@ export class ActiveDoc extends EventEmitter {
                                     actionNums: number[],
                                     actionHashes: string[],
                                     undo: boolean,
-                                    options?: ApplyUAOptions): Promise<ApplyUAResult> {
+                                    unsanitizedOptions?: ApplyUAOptions): Promise<ApplyUAResult> {
+    const options = sanitizeApplyUAOptions(unsanitizedOptions);
     const actionBundles = await this._actionHistory.getActions(actionNums);
+    let fromOwnHistory: boolean = true;
+    const user = getDocSessionUser(docSession);
+    let oldestSource: number = Date.now();
     for (const [index, bundle] of actionBundles.entries()) {
       const actionNum = actionNums[index];
       const actionHash = actionHashes[index];
       if (!bundle) { throw new Error(`Could not find actionNum ${actionNum}`); }
+      const info = bundle.info[1];
+      const bundleEmail = info.user || '';
+      const sessionEmail = user?.email || '';
+      if (normalizeEmail(sessionEmail) !== normalizeEmail(bundleEmail)) {
+        fromOwnHistory = false;
+      }
+      if (info.time && info.time < oldestSource) {
+        oldestSource = info.time;
+      }
       if (actionHash !== bundle.actionHash) {
         throw new Error(`Hash mismatch for actionNum ${actionNum}: ` +
                         `expected ${actionHash} but got ${bundle.actionHash}`);
@@ -1109,7 +1241,10 @@ export class ActiveDoc extends EventEmitter {
     // It could be that error cases and timing etc leak some info prior to this
     // point.
     // Undos are best effort now by default.
-    return this.applyUserActions(docSession, actions, {bestEffort: undo, ...(options||{})});
+    return this._applyUserActionsWithExtendedOptions(
+      docSession, actions, {bestEffort: undo,
+                            oldestSource,
+                            fromOwnHistory, ...(options||{})});
   }
 
   /**
@@ -1125,6 +1260,9 @@ export class ActiveDoc extends EventEmitter {
       const indexes = this._onDemandActions.getDesiredIndexes();
       await this.docStorage.updateIndexes(indexes);
       // TODO: should probably add indexes for user attribute tables.
+    }
+    if (docActions.some(docAction => isSchemaAction(docAction))) {
+      this._attachmentColumns = undefined;
     }
   }
 
@@ -1165,12 +1303,14 @@ export class ActiveDoc extends EventEmitter {
     docSession.linkId = 0;
   }
 
-  public async autocomplete(docSession: DocSession, txt: string, tableId: string, columnId: string): Promise<string[]> {
+  public async autocomplete(
+    docSession: DocSession, txt: string, tableId: string, columnId: string, rowId: UIRowId
+  ): Promise<ISuggestionWithValue[]> {
     // Autocompletion can leak names of tables and columns.
     if (!await this._granularAccess.canScanData(docSession)) { return []; }
     await this.waitForInitialization();
     const user = await this._granularAccess.getCachedUser(docSession);
-    return this._pyCall('autocomplete', txt, tableId, columnId, user.toJSON());
+    return this._pyCall('autocomplete', txt, tableId, columnId, rowId, user.toJSON());
   }
 
   public fetchURL(docSession: DocSession, url: string, options?: FetchUrlOptions): Promise<UploadResult> {
@@ -1181,6 +1321,7 @@ export class ActiveDoc extends EventEmitter {
     if (await this._granularAccess.hasNuancedAccess(docSession)) {
       throw new Error('cannot confirm access to plugin');
     }
+    if (!this.docPluginManager) { throw new Error('no plugin manager available'); }
     const pluginRpc = this.docPluginManager.plugins[pluginId].rpc;
     switch (msg.mtype) {
       case MsgType.RpcCall: return pluginRpc.forwardCall(msg);
@@ -1194,6 +1335,7 @@ export class ActiveDoc extends EventEmitter {
    */
   public async reloadPlugins(docSession: DocSession) {
     // refresh the list plugins found on the system
+    if (!this._docManager.pluginManager || !this.docPluginManager) { return; }
     await this._docManager.pluginManager.reloadPlugins();
     const plugins = this._docManager.pluginManager.getPlugins();
     // reload found plugins
@@ -1260,6 +1402,33 @@ export class ActiveDoc extends EventEmitter {
     return forkIds;
   }
 
+  public async getAccessToken(docSession: OptDocSession, options: AccessTokenOptions): Promise<AccessTokenResult> {
+    const tokens = this._docManager.gristServer.getAccessTokens();
+    const userId = getDocSessionUserId(docSession);
+    const docId = this.docName;
+    const access = getDocSessionAccess(docSession);
+    // If we happen to be using a "readOnly" connection, max out at "readOnly"
+    // even if user could do more.
+    if (roles.getStrongestRole('viewers', access) === 'viewers') {
+      options.readOnly = true;
+    }
+    // Return a token that can be used to authorize as the given user.
+    if (!userId) { throw new Error('creating access token requires a user'); }
+    const token = await tokens.sign({
+      readOnly: options.readOnly,
+      userId,  // definitely do not want userId overridable by options.
+      docId,   // likewise for docId.
+    });
+    const ttlMsecs = tokens.getNominalTTLInMsec();
+    const baseUrl = this._options?.docApiUrl;
+    if (!baseUrl) { throw new Error('cannot create token without URLs'); }
+    return {
+      token,
+      baseUrl,
+      ttlMsecs,
+    };
+  }
+
   /**
    * Check if an ACL formula is valid. If not, will throw an error with an explanation.
    */
@@ -1280,25 +1449,42 @@ export class ActiveDoc extends EventEmitter {
   }
 
   /**
-   * Returns the full set of tableIds, with the list of colIds for each table. This is intended
+   * Returns the full set of tableIds, with basic metadata for each table. This is intended
    * for editing ACLs. It is only available to users who can edit ACLs, and lists all resources
    * regardless of rules that may block access to them.
+   *
+   * Also returns information about resources mentioned in rules that no longer
+   * exist.
    */
-  public async getAclResources(docSession: DocSession): Promise<{[tableId: string]: string[]}> {
+  public async getAclResources(docSession: DocSession): Promise<AclResources> {
     if (!this.docData || !await this._granularAccess.hasAccessRulesPermission(docSession)) {
       throw new Error('Cannot list ACL resources');
     }
-    const result: {[tableId: string]: string[]} = {};
+    const result: {[tableId: string]: AclTableDescription} = {};
     const tables = this.docData.getMetaTable('_grist_Tables');
-    for (const tableId of tables.getColValues('tableId')) {
-      result[tableId] = ['id'];
-    }
+    const sections = this.docData.getMetaTable('_grist_Views_section');
     const columns = this.docData.getMetaTable('_grist_Tables_column');
+    for (const table of tables.getRecords()) {
+      const sourceTable = table.summarySourceTable ? tables.getRecord(table.summarySourceTable)! : table;
+      const rawSection = sections.getRecord(sourceTable.rawViewSectionRef)!;
+      result[table.tableId] = {
+        title: rawSection.title || sourceTable.tableId,
+        colIds: ['id'],
+        groupByColLabels: table.summarySourceTable ? [] : null,
+      };
+    }
     for (const col of columns.getRecords()) {
       const tableId = tables.getValue(col.parentId, 'tableId')!;
-      result[tableId].push(col.colId);
+      result[tableId].colIds.push(col.colId);
+      if (col.summarySourceCol) {
+        const sourceCol = columns.getRecord(col.summarySourceCol)!;
+        result[tableId].groupByColLabels!.push(sourceCol.label);
+      }
     }
-    return result;
+    const ruleCollection = new ACLRuleCollection();
+    await ruleCollection.update(this.docData, {log});
+    const problems = ruleCollection.findRuleProblems(this.docData);
+    return {tables: result, problems};
   }
 
   /**
@@ -1361,6 +1547,7 @@ export class ActiveDoc extends EventEmitter {
   }
 
   public getGristDocAPI(): GristDocAPI {
+    if (!this.docPluginManager) { throw new Error('no plugin manager available'); }
     return this.docPluginManager.gristDocAPI;
   }
 
@@ -1388,6 +1575,10 @@ export class ActiveDoc extends EventEmitter {
       }
       const user = docSession ? await this._granularAccess.getCachedUser(docSession) : undefined;
       sandboxActionBundle = await this._rawPyCall('apply_user_actions', normalActions, user?.toJSON());
+      const {requests} = sandboxActionBundle;
+      if (requests) {
+        this._requests.handleRequestsBatchFromUserActions(requests).catch(e => console.error(e));
+      }
       await this._reportDataEngineMemory();
     } else {
       // Create default SandboxActionBundle to use if the data engine is not called.
@@ -1440,11 +1631,14 @@ export class ActiveDoc extends EventEmitter {
    * @param expiredOnly: if true, only delete attachments that were soft-deleted sufficiently long ago.
    * @param options.syncUsageToDatabase: if true, schedule an update to the usage column of the docs table, if
    * any unused attachments were soft-deleted. defaults to true.
+   * @param options.broadcastUsageToClients: if true, broadcast updated doc usage to all clients, if
+   * any unused attachments were soft-deleted. defaults to true.
    */
-  public async removeUnusedAttachments(expiredOnly: boolean, options: {syncUsageToDatabase?: boolean} = {}) {
-    const {syncUsageToDatabase = true} = options;
+  public async removeUnusedAttachments(expiredOnly: boolean, options?: UpdateUsageOptions) {
     const hadChanges = await this.updateUsedAttachmentsIfNeeded();
-    if (hadChanges) { await this._updateAttachmentsSize({syncUsageToDatabase}); }
+    if (hadChanges) {
+      await this._updateAttachmentsSize(options);
+    }
     const rowIds = await this.docStorage.getSoftDeletedAttachmentIds(expiredOnly);
     if (rowIds.length) {
       const action: BulkRemoveRecord = ["BulkRemoveRecord", "_grist_Attachments", rowIds];
@@ -1463,8 +1657,10 @@ export class ActiveDoc extends EventEmitter {
     this._inactivityTimer.ping();
   }
 
-  public async getSnapshots(skipMetadataCache?: boolean): Promise<DocSnapshots> {
-    // Assume any viewer can access this list.
+  public async getSnapshots(docSession: OptDocSession, skipMetadataCache?: boolean): Promise<DocSnapshots> {
+    if (await this._granularAccess.hasNuancedAccess(docSession)) {
+      throw new Error('cannot confirm access to snapshots');
+    }
     return this._docManager.storageManager.getSnapshots(this.docName, skipMetadataCache);
   }
 
@@ -1495,6 +1691,27 @@ export class ActiveDoc extends EventEmitter {
   }
 
   /**
+   * Apply actions that have already occurred in the data engine to the
+   * database also.
+   */
+  public async applyStoredActionsToDocStorage(docActions: DocAction[]): Promise<void> {
+    // When "gristifying" an sqlite database, we may take create tables and
+    // columns in the data engine that already exist in the sqlite database.
+    // During that process, _onlyAllowMetaDataActionsOnDb will be turned on,
+    // and we silently swallow any non-metadata actions.
+    if (this._onlyAllowMetaDataActionsOnDb) {
+      docActions = docActions.filter(a => getTableId(a).startsWith('_grist'));
+    }
+    await this.docStorage.applyStoredActions(docActions);
+  }
+
+  // Set a flag that controls whether user data can be changed in the database,
+  // or only grist-managed tables (those whose names start with _grist)
+  public onlyAllowMetaDataActionsOnDb(flag: boolean) {
+    this._onlyAllowMetaDataActionsOnDb = flag;
+  }
+
+  /**
    * Called by Sharing manager when working on modifying the document.
    * Called when DocActions have been produced from UserActions, but
    * before those DocActions have been applied to the DB. GranularAccessBundle
@@ -1502,42 +1719,42 @@ export class ActiveDoc extends EventEmitter {
    * granular access rules.
    */
   public getGranularAccessForBundle(docSession: OptDocSession, docActions: DocAction[], undo: DocAction[],
-                                    userActions: UserAction[], isDirect: boolean[]): GranularAccessForBundle {
-    this._granularAccess.getGranularAccessForBundle(docSession, docActions, undo, userActions, isDirect);
+                                    userActions: UserAction[], isDirect: boolean[],
+                                    options: ApplyUAOptions|null): GranularAccessForBundle {
+    this._granularAccess.getGranularAccessForBundle(docSession, docActions, undo, userActions, isDirect, options);
     return this._granularAccess;
   }
 
-  public async updateRowCount(rowCount: number, docSession: OptDocSession | null) {
-    this._updateDocUsage({rowCount});
-    log.rawInfo('Sandbox row count', {...this.getLogMeta(docSession), rowCount});
+  public async updateRowCount(rowCount: RowCounts, docSession: OptDocSession | null) {
+    // Up-to-date row counts are included in every DocUserAction, so we can skip broadcasting here.
+    await this._updateDocUsage({rowCount}, {broadcastUsageToClients: false});
+    log.rawInfo('Sandbox row count', {...this.getLogMeta(docSession), rowCount: rowCount.total});
     await this._checkDataLimitRatio();
 
-    // Calculating data size is potentially expensive, so by default measure it at most once every 5 minutes.
-    // Measure it after every change if the user is currently being warned specifically about
-    // approaching or exceeding the data size limit but not the row count limit,
-    // because we don't need to warn about both limits at the same time.
-    let checkDataSizePeriod = 5 * 60;
+    // Calculating data size is potentially expensive, so skip calculating it unless the
+    // user is currently being warned specifically about approaching or exceeding the data
+    // size limit, but not the row count limit; we don't need to warn about both limits at
+    // the same time.
     if (
       this.dataSizeLimitRatio > APPROACHING_LIMIT_RATIO && this.rowLimitRatio <= APPROACHING_LIMIT_RATIO ||
       this.dataSizeLimitRatio > 1.0 && this.rowLimitRatio <= 1.0
     ) {
-      checkDataSizePeriod = 0;
+      await this._checkDataSizeLimitRatio(docSession);
     }
+  }
 
-    const now = Date.now();
-    if (now - this._lastDataSizeMeasurement > checkDataSizePeriod * 1000) {
-      this._lastDataSizeMeasurement = now;
+  /**
+   * Clears all outgoing webhook requests queued for this document.
+   */
+  public async clearWebhookQueue() {
+    await this._triggers.clearWebhookQueue();
+  }
 
-      // When the data size isn't critically high so we're only measuring it infrequently,
-      // do it in the background so we don't delay responding to the client.
-      // When it's being measured after every change, wait for it to finish to avoid race conditions
-      // from multiple measurements and updates happening concurrently.
-      if (checkDataSizePeriod === 0) {
-        await this._checkDataSizeLimitRatio(docSession);
-      } else {
-        this._checkDataSizeLimitRatio(docSession).catch(e => console.error(e));
-      }
-    }
+  /**
+   * Returns the list of outgoing webhook for a table in this document.
+   */
+  public async webhooksSummary() {
+    return this._triggers.summary();
   }
 
   /**
@@ -1616,7 +1833,7 @@ export class ActiveDoc extends EventEmitter {
    */
   @ActiveDoc.keepDocOpen
   protected async _applyUserActions(docSession: OptDocSession, actions: UserAction[],
-                                    options: ApplyUAOptions = {}): Promise<ApplyUAResult> {
+                                    options: ApplyUAExtendedOptions = {}): Promise<ApplyUAResult> {
 
     const client = docSession.client;
     this._log.debug(docSession, "_applyUserActions(%s, %s)%s", client, shortDesc(actions),
@@ -1628,13 +1845,14 @@ export class ActiveDoc extends EventEmitter {
     }
 
     if (options?.bestEffort) {
-      actions = await this._granularAccess.prefilterUserActions(docSession, actions);
+      actions = await this._granularAccess.prefilterUserActions(docSession, actions, options);
     }
-    await this._granularAccess.assertCanMaybeApplyUserActions(docSession, actions);
+    await this._granularAccess.checkUserActions(docSession, actions);
 
     // Create the UserActionBundle.
     const action: UserActionBundle = {
       info: this._makeInfo(docSession, options),
+      options,
       userActions: actions,
     };
 
@@ -1650,17 +1868,40 @@ export class ActiveDoc extends EventEmitter {
     return result;
   }
 
+  private async _applyUserActionsWithExtendedOptions(docSession: OptDocSession, actions: UserAction[],
+                                                     options?: ApplyUAExtendedOptions): Promise<ApplyUAResult> {
+    assert(Array.isArray(actions), "`actions` parameter should be an array.");
+    // Be careful not to sneak into user action queue before Calculate action, otherwise
+    // there'll be a deadlock.
+    await this.waitForInitialization();
+
+    if (
+      this.dataLimitStatus === "deleteOnly" &&
+      !actions.every(action => [
+          'RemoveTable', 'RemoveColumn', 'RemoveRecord', 'BulkRemoveRecord',
+          'RemoveViewSection', 'RemoveView', 'ApplyUndoActions', 'RespondToRequests',
+        ].includes(action[0] as string))
+    ) {
+      throw new Error("Document is in delete-only mode");
+    }
+
+    // Granular access control implemented in _applyUserActions.
+    return await this._applyUserActions(docSession, actions, options);
+  }
+
   /**
    * Create a new document file without using or initializing the data engine.
    */
   @ActiveDoc.keepDocOpen
   private async _createDocFile(docSession: OptDocSession, options?: {
     skipInitialTable?: boolean,  // If set, "Table1" will not be added.
+    useExisting?: boolean,       // If set, an existing sqlite db is permitted.
+                                 // Useful for "gristifying" an existing db.
   }): Promise<void> {
     this._log.debug(docSession, "createDoc");
     await this._docManager.storageManager.prepareToCreateDoc(this.docName);
-    await this.docStorage.createFile();
-    const sql = options?.skipInitialTable ? IRELIA_DOC_SQL : IRELIA_DOC_WITH_TABLE1_SQL;
+    await this.docStorage.createFile(options);
+    const sql = options?.skipInitialTable ? GRIST_DOC_SQL : GRIST_DOC_WITH_TABLE1_SQL;
     await this.docStorage.exec(sql);
     const timezone = docSession.browserSettings?.timezone ?? DEFAULT_TIMEZONE;
     const locale = docSession.browserSettings?.locale ?? DEFAULT_LOCALE;
@@ -1692,41 +1933,41 @@ export class ActiveDoc extends EventEmitter {
 
   /**
    * Applies all metrics from `usage` to the current document usage state.
-   * Syncs updated usage to the home database by default, unless
-   * `options.syncUsageToDatabase` is set to false.
+   *
+   * Allows specifying `options` for toggling whether usage is synced to
+   * the home database and/or broadcast to clients.
    */
-  private _updateDocUsage(
-    usage: Partial<DocumentUsage>,
-    options: {
-      syncUsageToDatabase?: boolean
-    } = {}
-  ) {
-    const {syncUsageToDatabase = true} = options;
+  private async _updateDocUsage(usage: Partial<DocumentUsage>, options: UpdateUsageOptions = {}) {
+    const {syncUsageToDatabase = true, broadcastUsageToClients = true} = options;
+    const oldStatus = this.dataLimitStatus;
     this._docUsage = {...(this._docUsage || {}), ...usage};
-    if (this._lastDataLimitStatus === this.dataLimitStatus) {
-      // If status is unchanged, there's no need to sync usage to the database, as it currently
-      // won't result in any noticeable difference to site usage banners. On shutdown, we'll
-      // still schedule a sync so that the latest usage is persisted.
-      return;
+    if (syncUsageToDatabase) {
+      /* If status decreased, we'll update usage in the database with minimal delay, so site usage
+       * banners show up-to-date statistics. If status increased or stayed the same, we'll schedule
+       * a delayed update, since it's less critical for banners to update immediately. */
+      const didStatusDecrease = getSeverity(this.dataLimitStatus) < getSeverity(oldStatus);
+      this._syncDocUsageToDatabase(didStatusDecrease);
     }
-
-    const lastStatus = this._lastDataLimitStatus;
-    this._lastDataLimitStatus = this.dataLimitStatus;
-    if (!syncUsageToDatabase) { return; }
-
-    // If status decreased, we'll want to update usage in the DB with minimal delay, so that site
-    // usage banners show up-to-date statistics. If status increased or stayed the same, we'll
-    // schedule a delayed update, since it's less critical for such banners to update quickly
-    // when usage grows.
-    const didStatusDecrease = (
-      lastStatus !== undefined &&
-      getSeverity(this.dataLimitStatus) < getSeverity(lastStatus)
-    );
-    this._syncDocUsageToDatabase(didStatusDecrease);
+    if (broadcastUsageToClients) {
+      await this._broadcastDocUsageToClients();
+    }
   }
 
   private _syncDocUsageToDatabase(minimizeDelay = false) {
     this._docManager.storageManager.scheduleUsageUpdate(this._docName, this._docUsage, minimizeDelay);
+  }
+
+  private async _broadcastDocUsageToClients() {
+    if (this.muted || this.docClients.clientCount() === 0) { return; }
+
+    await this.docClients.broadcastDocMessage(
+      null,
+      'docUsage',
+      {docUsage: this.getDocUsageSummary(), product: this._product},
+      async (session, data) => {
+        return {...data, docUsage: await this.getFilteredDocUsageSummary(session)};
+      },
+    );
   }
 
   private async _updateGracePeriodStart(gracePeriodStart: Date | null) {
@@ -1758,15 +1999,14 @@ export class ActiveDoc extends EventEmitter {
   }
 
   /**
-   * Calculates the total data size in bytes and sets it in _docUsage. Schedules
-   * a sync to the database, unless `options.syncUsageToDatabase` is set to false.
+   * Calculates the total data size in bytes, sets it in _docUsage, and returns it.
    *
-   * Returns the calculated data size.
+   * Allows specifying `options` for toggling whether usage is synced to
+   * the home database and/or broadcast to clients.
    */
-  private async _updateDataSize(options: {syncUsageToDatabase?: boolean} = {}): Promise<number> {
-    const {syncUsageToDatabase = true} = options;
+  private async _updateDataSize(options?: UpdateUsageOptions): Promise<number> {
     const dataSizeBytes = await this.docStorage.getDataSize();
-    this._updateDocUsage({dataSizeBytes}, {syncUsageToDatabase});
+    await this._updateDocUsage({dataSizeBytes}, options);
     return dataSizeBytes;
   }
 
@@ -1775,7 +2015,7 @@ export class ActiveDoc extends EventEmitter {
    */
   private async _prepAttachment(docSession: OptDocSession, fileData: FileUploadInfo): Promise<UserAction> {
     // Check that upload size is within the configured limits.
-    const limit = (Number(process.env.IRELIA_MAX_UPLOAD_ATTACHMENT_MB) * 1024 * 1024) || Infinity;
+    const limit = (Number(process.env.GRIST_MAX_UPLOAD_ATTACHMENT_MB) * 1024 * 1024) || Infinity;
     if (fileData.size > limit) {
       throw new ApiError(`Attachments must not exceed ${byteString(limit)}`, 413);
     }
@@ -1914,9 +2154,7 @@ export class ActiveDoc extends EventEmitter {
         num_on_demand_tables: onDemandNames.length,
       });
 
-      if (this._options?.docUrl) {
-        await this._pyCall('set_doc_url', this._options.docUrl);
-      }
+      await this._pyCall('initialize', this._options?.docUrl);
 
       // Calculations are not associated specifically with the user opening the document.
       // TODO: be careful with which users can create formulas.
@@ -1930,7 +2168,7 @@ export class ActiveDoc extends EventEmitter {
       const closeTimeout = Math.max(loadMs, 1000) * Deps.ACTIVEDOC_TIMEOUT;
       this._inactivityTimer.setDelay(closeTimeout);
       this._log.debug(docSession, `loaded in ${loadMs} ms, InactivityTimer set to ${closeTimeout} ms`);
-      this._initializeDocUsageIfNeeded(docSession);
+      void this._initializeDocUsage(docSession);
     } catch (err) {
       this._fullyLoaded = true;
       if (!this._shuttingDown) {
@@ -1971,18 +2209,24 @@ export class ActiveDoc extends EventEmitter {
     }
   }
 
-  private _initializeDocUsageIfNeeded(docSession: OptDocSession) {
-    // TODO: Broadcast a message to clients after usage is fully calculated.
+  private async _initializeDocUsage(docSession: OptDocSession) {
+    const promises: Promise<unknown>[] = [];
+    // We'll defer syncing/broadcasting usage until everything is calculated.
+    const options = {syncUsageToDatabase: false, broadcastUsageToClients: false};
     if (this._docUsage?.dataSizeBytes === undefined) {
-      this._updateDataSize().catch(e => {
-        this._log.warn(docSession, 'failed to update data size', e);
-      });
+      promises.push(this._updateDataSize(options));
     }
-
     if (this._docUsage?.attachmentsSizeBytes === undefined) {
-      this._updateAttachmentsSize().catch(e => {
-        this._log.warn(docSession, 'failed to update attachments size', e);
-      });
+      promises.push(this._updateAttachmentsSize(options));
+    }
+    if (promises.length === 0) { return; }
+
+    try {
+      await Promise.all(promises);
+      this._syncDocUsageToDatabase();
+      await this._broadcastDocUsageToClients();
+    } catch (e) {
+      this._log.warn(docSession, 'failed to initialize doc usage', e);
     }
   }
 
@@ -2062,6 +2306,7 @@ export class ActiveDoc extends EventEmitter {
       preferredPythonVersion,
       sandboxOptions: {
         exports: {
+          request: (key: string, args: SandboxRequest) => this._requests.handleSingleRequestWithCache(key, args),
           guessColInfo: (values: Array<string | null>) =>
             guessColInfoWithDocData(values, this.docData!),
           convertFromColumn: (...args: Parameters<ReturnType<typeof convertFromColumn>>) =>
@@ -2089,7 +2334,7 @@ export class ActiveDoc extends EventEmitter {
    * limits to be exceeded.
    */
   private async _isUploadSizeBelowLimit(uploadSizeBytes: number): Promise<boolean> {
-    const maxSize = this._productFeatures?.baseMaxAttachmentsBytesPerDocument;
+    const maxSize = this._product?.features.baseMaxAttachmentsBytesPerDocument;
     if (!maxSize) { return true; }
 
     let currentSize = this._docUsage?.attachmentsSizeBytes;
@@ -2098,16 +2343,23 @@ export class ActiveDoc extends EventEmitter {
   }
 
   /**
-   * Calculates the total attachments size in bytes and sets it in _docUsage. Schedules
-   * a sync to the database, unless `options.syncUsageToDatabase` is set to false.
+   * Calculates the total attachments size in bytes, sets it in _docUsage, and returns it.
    *
-   * Returns the calculated attachments size.
+   * Allows specifying `options` for toggling whether usage is synced to
+   * the home database and/or broadcast to clients.
    */
-  private async _updateAttachmentsSize(options: {syncUsageToDatabase?: boolean} = {}): Promise<number> {
-    const {syncUsageToDatabase = true} = options;
+  private async _updateAttachmentsSize(options?: UpdateUsageOptions): Promise<number> {
     const attachmentsSizeBytes = await this.docStorage.getTotalAttachmentFileSizes();
-    this._updateDocUsage({attachmentsSizeBytes}, {syncUsageToDatabase});
+    await this._updateDocUsage({attachmentsSizeBytes}, options);
     return attachmentsSizeBytes;
+  }
+
+  private _getCachedAttachmentColumns(): AttachmentColumns {
+    if (!this.docData) { return new Map(); }
+    if (!this._attachmentColumns) {
+      this._attachmentColumns = getAttachmentColumns(this.docData);
+    }
+    return this._attachmentColumns;
   }
 }
 
@@ -2120,7 +2372,7 @@ function createEmptySandboxActionBundle(): SandboxActionBundle {
     calc: [],
     undo: [],
     retValues: [],
-    rowCount: 0,
+    rowCount: {total: 0},
   };
 }
 
@@ -2132,4 +2384,8 @@ export function tableIdToRef(metaTables: { [p: string]: TableDataAction }, table
     throw new ApiError(`Table not found "${tableId}"`, 404);
   }
   return tableRefs[tableRowIndex];
+}
+
+export function sanitizeApplyUAOptions(options?: ApplyUAOptions): ApplyUAOptions {
+  return pick(options||{}, ['desc', 'otherId', 'linkId', 'parseStrings']);
 }

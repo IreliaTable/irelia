@@ -10,13 +10,14 @@ import {configForUser, getGristConfig} from 'test/gen-server/testUtils';
 import {createDocTools} from 'test/server/docTools';
 import {openClient} from 'test/server/gristClient';
 import * as testUtils from 'test/server/testUtils';
-import * as uuidv4 from 'uuid/v4';
+import uuidv4 from 'uuid/v4';
 
 let serverUrl: string;
 let server: FlexServer;
 let dbManager: HomeDBManager;
 
 async function activateServer(home: FlexServer, docManager: DocManager) {
+  await home.loadConfig();
   await home.initHomeDBManager();
   home.addHosts();
   home.addDocWorkerMap();
@@ -50,9 +51,8 @@ describe('Authorizer', function() {
 
   testUtils.setTmpLogLevel('fatal');
 
-  server = new FlexServer(0, 'test docWorker');
   const docTools = createDocTools({persistAcrossCases: true, useFixturePlugins: false,
-                                   server});
+                                   server: () => (server = new FlexServer(0, 'test docWorker'))});
   const docs: {[name: string]: {id: string}} = {};
 
   // Loads the fixtures documents so that they are available to the doc worker under the correct
@@ -74,7 +74,7 @@ describe('Authorizer', function() {
     this.timeout(5000);
     setUpDB(this);
     oldEnv = new testUtils.EnvironmentSnapshot();
-    process.env.IRELIA_PROXY_AUTH_HEADER = 'X-email';
+    process.env.GRIST_PROXY_AUTH_HEADER = 'X-email';
     await createInitialDb();
     await activateServer(server, docTools.getDocManager());
     await loadFixtureDocs();
@@ -270,7 +270,7 @@ describe('Authorizer', function() {
     assert.equal(parts.forkUserId, undefined);
   });
 
-  it("can set user via IRELIA_PROXY_AUTH_HEADER", async function() {
+  it("can set user via GRIST_PROXY_AUTH_HEADER", async function() {
     // User can access a doc by setting header.
     const docUrl = `${serverUrl}/o/pr/api/docs/sample_6`;
     const resp = await axios.get(docUrl, {

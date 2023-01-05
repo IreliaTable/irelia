@@ -1,5 +1,4 @@
-import {DocUsageBanner} from 'app/client/components/DocUsageBanner';
-import {SiteUsageBanner} from 'app/client/components/SiteUsageBanner';
+import {buildDocumentBanners, buildHomeBanners} from 'app/client/components/Banners';
 import {domAsync} from 'app/client/lib/domAsync';
 import {loadBillingPage} from 'app/client/lib/imports';
 import {createSessionObs, isBoolean, isNumber} from 'app/client/lib/sessionObs';
@@ -105,7 +104,8 @@ function pagePanelsHome(owner: IDisposableOwner, appModel: AppModel, app: App) {
     },
     headerMain: createTopBarHome(appModel),
     contentMain: createDocMenu(pageModel),
-    contentTop: dom.create(SiteUsageBanner, pageModel),
+    contentTop: buildHomeBanners(appModel),
+    testId,
   });
 }
 
@@ -129,6 +129,10 @@ function pagePanelsDoc(owner: IDisposableOwner, appModel: AppModel, appObj: App)
 
   // Set document title to strings like "DocName - Grist"
   owner.autoDispose(subscribe(pageModel.currentDocTitle, (use, docName) => {
+    // If the document hasn't loaded yet, don't update the title; since the HTML document already has
+    // a title element with the document's name, there's no need for further action.
+    if (!pageModel.currentDoc.get()) { return; }
+
     document.title = `${docName}${getPageTitleSuffix(getGristConfig())}`;
   }));
 
@@ -155,7 +159,7 @@ function pagePanelsDoc(owner: IDisposableOwner, appModel: AppModel, appObj: App)
     contentMain: dom.maybe(pageModel.gristDoc, (gristDoc) => gristDoc.buildDom()),
     onResize,
     testId,
-    contentTop: dom.create(DocUsageBanner, pageModel),
+    contentTop: buildDocumentBanners(pageModel),
     contentBottom: dom.create(createBottomBarDoc, pageModel, leftPanelOpen, rightPanelOpen),
   });
 }

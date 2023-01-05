@@ -4,7 +4,7 @@
 
 // Some definitions have moved to be part of plugin API.
 import { BulkColValues, CellValue, RowRecord } from 'app/plugin/GristData';
-export { BulkColValues, CellValue, RowRecord } from 'app/plugin/GristData';
+export type { BulkColValues, CellValue, RowRecord };
 
 // Part of a special CellValue used for comparisons, embedding several versions of a CellValue.
 export interface AllCellVersions {
@@ -31,7 +31,7 @@ export type TableDataAction = ['TableData', string, number[], BulkColValues];
 export type AddColumn = ['AddColumn', string, string, ColInfo];
 export type RemoveColumn = ['RemoveColumn', string, string];
 export type RenameColumn = ['RenameColumn', string, string, string];
-export type ModifyColumn = ['ModifyColumn', string, string, ColInfo];
+export type ModifyColumn = ['ModifyColumn', string, string, Partial<ColInfo>];
 
 export type AddTable = ['AddTable', string, ColInfoWithId[]];
 export type RemoveTable = ['RemoveTable', string];
@@ -79,7 +79,6 @@ export function isRenameTable(act: DocAction): act is RenameTable { return act[0
 const SCHEMA_ACTIONS = new Set(['AddTable', 'RemoveTable', 'RenameTable', 'AddColumn',
   'RemoveColumn', 'RenameColumn', 'ModifyColumn']);
 
-// Maps each data action to whether it's a bulk action.
 const DATA_ACTIONS = new Set(['AddRecord', 'RemoveRecord', 'UpdateRecord', 'BulkAddRecord',
   'BulkRemoveRecord', 'BulkUpdateRecord', 'ReplaceTableData', 'TableData']);
 
@@ -144,6 +143,9 @@ export interface TableRecordValue {
 
 export type UserAction = Array<string|number|object|boolean|null|undefined>;
 
+// Actions that trigger formula calculations in the data engine
+export const CALCULATING_USER_ACTIONS = new Set(['Calculate', 'UpdateCurrentTime', 'RespondToRequests']);
+
 /**
  * Gives a description for an action which involves setting values to a selection.
  * @param {Array} action - The (Bulk)AddRecord/(Bulk)UpdateRecord action to describe.
@@ -170,15 +172,18 @@ export function getNumRows(action: DocAction): number {
 export function toTableDataAction(tableId: string, colValues: TableColValues): TableDataAction {
   const colData = {...colValues};   // Make a copy to avoid changing passed-in arguments.
   const rowIds: number[] = colData.id;
-  delete colData.id;
+  delete (colData as BulkColValues).id;
   return ['TableData', tableId, rowIds, colData];
 }
 
 // Convert from TableDataAction (used mainly by the sandbox) to TableColValues (used by DocStorage
 // and external APIs).
-export function fromTableDataAction(tableData: TableDataAction): TableColValues {
-  const rowIds: number[] = tableData[2];
-  const colValues: BulkColValues = tableData[3];
+// Also accepts a TableDataAction nested as a tableData member of a larger structure,
+// for convenience in dealing with the result of fetches.
+export function fromTableDataAction(tableData: TableDataAction|{tableData: TableDataAction}): TableColValues {
+  const data = ('tableData' in tableData) ? tableData.tableData : tableData;
+  const rowIds: number[] = data[2];
+  const colValues: BulkColValues = data[3];
   return {id: rowIds, ...colValues};
 }
 
@@ -186,7 +191,7 @@ export function fromTableDataAction(tableData: TableDataAction): TableColValues 
  * Convert a list of rows into an object with columns of values, used for
  * BulkAddRecord/BulkUpdateRecord actions.
  */
-export function getColValues(records: RowRecord[]): BulkColValues {
+export function getColValues(records: Partial<RowRecord>[]): BulkColValues {
   const colIdSet = new Set<string>();
   for (const r of records) {
     for (const c of Object.keys(r)) {
@@ -197,7 +202,37 @@ export function getColValues(records: RowRecord[]): BulkColValues {
   }
   const result: BulkColValues = {};
   for (const colId of colIdSet) {
-    result[colId] = records.map(r => r[colId]);
+    result[colId] = records.map(r => r[colId]!);
   }
   return result;
+}
+
+/**
+ * Extract the col ids mentioned in a record-related DocAction as a list
+ * (even if the action is not a bulk action). Returns undefined if no col ids
+ * mentioned.
+ */
+export function getColIdsFromDocAction(docActions: RemoveRecord | BulkRemoveRecord | AddRecord |
+  BulkAddRecord | UpdateRecord | BulkUpdateRecord | ReplaceTableData |
+  TableDataAction): string[] | undefined {
+  if (docActions[3]) { return Object.keys(docActions[3]); }
+  return undefined;
+}
+
+/**
+ * Extract column values for a particular column as CellValue[] from a
+ * record-related DocAction. Undefined if absent.
+ */
+export function getColValuesFromDocAction(docAction: RemoveRecord | BulkRemoveRecord | AddRecord |
+  BulkAddRecord | UpdateRecord | BulkUpdateRecord | ReplaceTableData |
+  TableDataAction, colId: string): CellValue[]|undefined {
+  const colValues = docAction[3];
+  if (!colValues) { return undefined; }
+  const cellValues = colValues[colId];
+  if (!cellValues) { return undefined; }
+  if (Array.isArray(docAction[2])) {
+    return cellValues as CellValue[];
+  } else {
+    return [cellValues as CellValue];
+  }
 }

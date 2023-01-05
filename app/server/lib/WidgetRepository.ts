@@ -1,8 +1,8 @@
 import {ICustomWidget} from 'app/common/CustomWidget';
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import fetch from 'node-fetch';
 import {ApiError} from 'app/common/ApiError';
-import * as LRUCache from 'lru-cache';
+import LRUCache from 'lru-cache';
 
 /**
  * Widget Repository returns list of available Custom Widgets.
@@ -12,7 +12,7 @@ export interface IWidgetRepository {
 }
 
 // Static url for StaticWidgetRepository
-const STATIC_URL = process.env.IRELIA_WIDGET_LIST_URL;
+const STATIC_URL = process.env.GRIST_WIDGET_LIST_URL;
 
 /**
  * Default repository that gets list of available widgets from a static URL.
@@ -31,7 +31,7 @@ export class WidgetRepositoryImpl implements IWidgetRepository {
     if (!this._staticUrl) {
       log.warn(
         'WidgetRepository: Widget repository is not configured.' + !STATIC_URL
-          ? ' Missing IRELIA_WIDGET_LIST_URL environmental variable.'
+          ? ' Missing GRIST_WIDGET_LIST_URL environmental variable.'
           : ''
       );
       return [];

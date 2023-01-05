@@ -12,7 +12,7 @@
 }
 
 .fieldbuilder_settings {
-  background-color: #e8e8e8;
+  background-color: var(--grist-theme-right-panel-field-settings-bg, #e8e8e8);
   margin: 1rem -1px -4px -1px;
   padding-bottom: 1px;
 }
@@ -28,5 +28,20 @@
   float: right;
   padding: 0 1rem;
   border-radius: 5px;
-  background-color: lightgrey;
+  background-color: var(--grist-theme-right-panel-field-settings-button-bg, lightgrey);
+}
+
+.field-comment-indicator {
+  display: none;
+}
+
+.field-with-comments .field-comment-indicator {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 11px solid var(--grist-color-orange);
+  border-left: 11px solid transparent;
 }

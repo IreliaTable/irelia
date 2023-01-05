@@ -2,7 +2,7 @@ import {docUrl, urlState} from 'app/client/models/gristUrlState';
 import {getTimeFromNow, HomeModel} from 'app/client/models/HomeModel';
 import {makeDocOptionsMenu, makeRemovedDocOptionsMenu} from 'app/client/ui/DocMenu';
 import {transientInput} from 'app/client/ui/transientInput';
-import {colors, vars} from 'app/client/ui2018/cssVars';
+import {colors, theme, vars} from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
 import {menu} from 'app/client/ui2018/menus';
 import * as roles from 'app/common/roles';
@@ -115,11 +115,16 @@ const pinnedDocWrapper = styled('div', `
   position: relative;
   width: 210px;
   margin: 16px 24px 16px 0;
-  border: 1px solid ${colors.mediumGrey};
+  border: 1px solid ${theme.pinnedDocBorder};
   border-radius: 1px;
   vertical-align: top;
   &:hover {
-    border: 1px solid ${colors.slate};
+    border: 1px solid ${theme.pinnedDocBorderHover};
+  }
+
+  /* TODO: Specify a gap on flexbox parents of pinnedDocWrapper instead. */
+  &:last-child {
+    margin-right: 0px;
   }
 `);
 
@@ -127,16 +132,16 @@ const pinnedDoc = styled('a', `
   display: flex;
   flex-direction: column;
   width: 100%;
-  color: black;
+  color: ${theme.text};
   text-decoration: none;
   cursor: pointer;
 
   &:hover {
-    color: black;
+    color: ${theme.text};
     text-decoration: none;
   }
   &-no-access, &-no-access:hover {
-    color: ${colors.slate};
+    color: ${theme.disabledText};
     cursor: not-allowed;
   }
 `);
@@ -169,7 +174,7 @@ const pinnedDocThumbnail = styled('div', `
   bottom: 20px;
   height: 48px;
   width: 48px;
-  background-image: url("ui-icons/Logo/ThumbPreview2.svg");
+  background-image: var(--icon-ThumbPreview);
   background-size: 48px 48px;
   background-repeat: no-repeat;
   background-position: center;
@@ -180,14 +185,13 @@ const cssDocInitials = styled('div', `
   left: 20px;
   bottom: 20px;
   font-size: 32px;
-  border: 1px solid ${colors.lightGrey};
+  border: 1px solid ${colors.lightGreen};
   color: ${colors.mediumGreyOpaque};
   border-radius: 3px;
   padding: 4px 0;
   width: 48px;
   height: 48px;
   text-align: center;
-  overflow: hidden;
 `);
 
 const pinnedDocOptions = styled('div', `
@@ -212,6 +216,7 @@ const pinnedDocOptions = styled('div', `
 const pinnedDocFooter = styled('div', `
   width: 100%;
   font-size: ${vars.mediumFontSize};
+  background-color: ${theme.pinnedDocFooterBg};
 `);
 
 const pinnedDocTitle = styled('div', `
@@ -234,17 +239,18 @@ const pinnedDocEditorInput = styled(transientInput, `
   padding: 0;
   border: none;
   outline: none;
-  background-color: ${colors.mediumGrey};
+  color: ${theme.text};
+  background-color: ${theme.pinnedDocEditorBg};
 `);
 
 const cssPinnedDocTimestamp = styled('div', `
   margin: 8px 16px 16px 16px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
 `);
 
 const cssPinnedDocDesc = styled(cssPinnedDocTimestamp, `
   margin: 8px 16px 16px 16px;
-  color: ${colors.slate};
+  color: ${theme.lightText};
   height: 48px;
   line-height: 16px;
   -webkit-box-orient: vertical;
@@ -267,5 +273,5 @@ const cssPublicIcon = styled(icon, `
   position: absolute;
   top: 16px;
   left: 16px;
-  --icon-color: ${colors.lightGrey};
+  --icon-color: ${theme.accentIcon};
 `);

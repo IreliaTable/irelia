@@ -4,7 +4,7 @@ import { FormulaTransform } from 'app/client/components/FormulaTransform';
 import { GristDoc } from 'app/client/components/GristDoc';
 import { addColTypeSuffix } from 'app/client/components/TypeConversion';
 import { TypeTransform } from 'app/client/components/TypeTransform';
-import * as dom from 'app/client/lib/dom';
+import dom from 'app/client/lib/dom';
 import { KoArray } from 'app/client/lib/koArray';
 import * as kd from 'app/client/lib/koDom';
 import * as kf from 'app/client/lib/koForm';
@@ -14,14 +14,16 @@ import { DataRowModel } from 'app/client/models/DataRowModel';
 import { ColumnRec, DocModel, ViewFieldRec } from 'app/client/models/DocModel';
 import { SaveableObjObservable, setSaveValue } from 'app/client/models/modelUtil';
 import { CombinedStyle, Style } from 'app/client/models/Styles';
+import { COMMENTS } from 'app/client/models/features';
 import { FieldSettingsMenu } from 'app/client/ui/FieldMenus';
-import { cssBlockedCursor, cssLabel, cssRow } from 'app/client/ui/RightPanel';
-import { buttonSelect } from 'app/client/ui2018/buttonSelect';
-import { colors } from 'app/client/ui2018/cssVars';
+import { cssBlockedCursor, cssLabel, cssRow } from 'app/client/ui/RightPanelStyles';
+import { buttonSelect, cssButtonSelect } from 'app/client/ui2018/buttonSelect';
+import { theme } from 'app/client/ui2018/cssVars';
 import { IOptionFull, menu, select } from 'app/client/ui2018/menus';
 import { DiffBox } from 'app/client/widgets/DiffBox';
 import { buildErrorDom } from 'app/client/widgets/ErrorDom';
 import { FieldEditor, saveWithoutEditor, setupEditorCleanup } from 'app/client/widgets/FieldEditor';
+import { CellDiscussionPopup, EmptyCell } from 'app/client/widgets/DiscussionEditor';
 import { openFormulaEditor } from 'app/client/widgets/FormulaEditor';
 import { NewAbstractWidget } from 'app/client/widgets/NewAbstractWidget';
 import { NewBaseEditor } from "app/client/widgets/NewBaseEditor";
@@ -31,11 +33,13 @@ import * as gristTypes from 'app/common/gristTypes';
 import { getReferencedTableId, isFullReferencingType } from 'app/common/gristTypes';
 import { CellValue } from 'app/plugin/GristData';
 import { Computed, Disposable, fromKo, dom as grainjsDom,
-         Holder, IDisposable, makeTestId, styled, toKo } from 'grainjs';
+         Holder, IDisposable, makeTestId, MultiHolder, styled, toKo } from 'grainjs';
 import * as ko from 'knockout';
 import * as _ from 'underscore';
 
 const testId = makeTestId('test-fbuilder-');
+
+
 
 // Creates a FieldBuilder object for each field in viewFields
 export function createAllFieldWidgets(gristDoc: GristDoc, viewFields: ko.Computed<KoArray<ViewFieldRec>>,
@@ -55,6 +59,7 @@ function getTypeDefinition(type: string | false) {
 }
 
 type ComputedStyle = {style?: Style; error?: true} | null | undefined;
+
 /**
  * Builds a font option computed property.
  */
@@ -62,12 +67,13 @@ function buildFontOptions(
   builder: FieldBuilder,
   computedRule: ko.Computed<ComputedStyle>,
   optionName: keyof Style) {
-  return koUtil.withKoUtils(ko.computed(function() {
+
+  return koUtil.withKoUtils(ko.computed(() => {
     if (builder.isDisposed()) { return false; }
     const style = computedRule()?.style;
-    const styleFlag = style?.[optionName] || this.field[optionName]();
+    const styleFlag = style?.[optionName] || builder.field[optionName]();
     return styleFlag;
-  }, builder)).onlyNotifyUnequal();
+  })).onlyNotifyUnequal();
 }
 
 /**
@@ -97,6 +103,8 @@ export class FieldBuilder extends Disposable {
   private readonly _widgetCons: ko.Computed<{create: (...args: any[]) => NewAbstractWidget}>;
   private readonly _docModel: DocModel;
   private readonly _readonly: Computed<boolean>;
+  private readonly _comments: ko.Computed<boolean>;
+  private readonly _showRefConfigPopup: ko.Observable<boolean>;
 
   public constructor(public readonly gristDoc: GristDoc, public readonly field: ViewFieldRec,
                      private _cursor: Cursor, private _options: { isPreview?: boolean } = {}) {
@@ -105,6 +113,7 @@ export class FieldBuilder extends Disposable {
     this._docModel = gristDoc.docModel;
     this.origColumn = field.column();
     this.options = field.widgetOptionsJson;
+    this._comments = ko.pureComputed(() => toKo(ko, COMMENTS())());
 
     this._readOnlyPureType = ko.pureComputed(() => this.field.column().pureType());
 
@@ -131,9 +140,9 @@ export class FieldBuilder extends Disposable {
     });
 
     // Observable which evaluates to a *function* that decides if a value is valid.
-    this._isRightType = ko.pureComputed(function() {
+    this._isRightType = ko.pureComputed<(value: CellValue, options?: any) => boolean>(() => {
       return gristTypes.isRightType(this._readOnlyPureType()) || _.constant(false);
-    }, this);
+    });
 
     // Returns a boolean indicating whether the column is type Reference or ReferenceList.
     this._isRef = this.autoDispose(ko.computed(() => {
@@ -154,22 +163,7 @@ export class FieldBuilder extends Disposable {
       }
     }));
 
-    this.widget = ko.pureComputed({
-      owner: this,
-      read() { return this.options().widget; },
-      write(widget) {
-        // Reset the entire JSON, so that all options revert to their defaults.
-
-        const previous = this.options.peek();
-        this.options.setAndSave({
-          widget,
-          // Persists color settings across widgets (note: we cannot use `field.fillColor` to get the
-          // current value because it returns a default value for `undefined`. Same for `field.textColor`.
-          fillColor: previous.fillColor,
-          textColor: previous.textColor,
-        }).catch(reportError);
-      }
-    });
+    this.widget = ko.pureComputed(() => this.field.widget());
 
     // Whether there is a pending call that transforms column.
     this.isCallPending = ko.observable(false);
@@ -196,10 +190,10 @@ export class FieldBuilder extends Disposable {
     this._rowMap = new Map();
 
     // Returns the constructor for the widget, and only notifies subscribers on changes.
-    this._widgetCons = this.autoDispose(koUtil.withKoUtils(ko.computed(function() {
+    this._widgetCons = this.autoDispose(koUtil.withKoUtils(ko.computed(() => {
       return UserTypeImpl.getWidgetConstructor(this.options().widget,
                                                this._readOnlyPureType());
-    }, this)).onlyNotifyUnequal());
+    })).onlyNotifyUnequal());
 
     // Computed builder for the widget.
     this.widgetImpl = this.autoDispose(koUtil.computedBuilder(() => {
@@ -209,6 +203,8 @@ export class FieldBuilder extends Disposable {
     }, this).extend({ deferred: true }));
 
     this.diffImpl = this.autoDispose(DiffBox.create(this.field));
+
+    this._showRefConfigPopup = ko.observable(false);
   }
 
   public buildSelectWidgetDom() {
@@ -219,11 +215,36 @@ export class FieldBuilder extends Disposable {
         value: label,
         icon: typeWidgets[label].icon
       }));
-      return widgetOptions.length <= 1 ? null : [
+      if (widgetOptions.length <= 1) { return null; }
+      // Here we need to accommodate the fact that the widget can be null, which
+      // won't be visible on a select component when disabled.
+      const defaultWidget = Computed.create(null, use => {
+        if (widgetOptions.length <= 2) {
+          return;
+        }
+        const value = use(this.field.config.widget);
+        return value;
+      });
+      defaultWidget.onWrite((value) => this.field.config.widget(value));
+      const disabled = Computed.create(null, use => !use(this.field.config.sameWidgets));
+      return [
         cssLabel('CELL FORMAT'),
         cssRow(
-          widgetOptions.length <= 2 ? buttonSelect(fromKo(this.widget), widgetOptions) :
-            select(fromKo(this.widget), widgetOptions),
+          grainjsDom.autoDispose(defaultWidget),
+          widgetOptions.length <= 2 ?
+            buttonSelect(
+              fromKo(this.field.config.widget),
+              widgetOptions,
+              cssButtonSelect.cls("-disabled", disabled),
+            ) :
+            select(
+              defaultWidget,
+              widgetOptions,
+              {
+                disabled,
+                defaultLabel: 'Mixed format'
+              }
+            ),
           testId('widget-select')
         )
       ];
@@ -234,21 +255,62 @@ export class FieldBuilder extends Disposable {
    * Build the type change dom.
    */
   public buildSelectTypeDom() {
-    const selectType = Computed.create(null, (use) => use(fromKo(this._readOnlyPureType)));
-    selectType.onWrite(newType => newType === this._readOnlyPureType.peek() || this._setType(newType));
+    const holder = new MultiHolder();
+    const commonType = Computed.create(holder, use => use(use(this.field.viewSection).columnsType));
+    const selectType = Computed.create(holder, (use) => {
+      const myType = use(fromKo(this._readOnlyPureType));
+      return use(commonType) === 'mixed' ? '' : myType;
+    });
+    selectType.onWrite(newType => {
+      const sameType = newType === this._readOnlyPureType.peek();
+      if (!sameType || commonType.get() === 'mixed') {
+        if (['Ref', 'RefList'].includes(newType)) {
+          this._showRefConfigPopup(true);
+        }
+        return this._setType(newType);
+      }
+    });
     const onDispose = () => (this.isDisposed() || selectType.set(this.field.column().pureType()));
-
+    const allFormulas = Computed.create(holder, use => use(use(this.field.viewSection).columnsAllIsFormula));
     return [
       cssRow(
-        grainjsDom.autoDispose(selectType),
+        grainjsDom.autoDispose(holder),
         select(selectType, this._availableTypes, {
-          disabled: (use) => use(this._isTransformingFormula) || use(this.origColumn.disableModifyBase) ||
+          disabled: (use) =>
+            // If we are transforming column at this moment (applying a formula to change data),
+            use(this._isTransformingFormula) ||
+            // If this is a summary column
+            use(this.origColumn.disableModifyBase) ||
+            // If there are multiple column selected, but all have different type than Any.
+            (use(this.field.config.multiselect) && !use(allFormulas)) ||
+            // If we are waiting for a server response
             use(this.isCallPending),
           menuCssClass: cssTypeSelectMenu.className,
+          defaultLabel: 'Mixed types',
+          renderOptionArgs: (op) => {
+            if (['Ref', 'RefList'].includes(selectType.get())) {
+              // Don't show tip if a reference column type is already selected.
+              return;
+            }
+
+            if (op.label === 'Reference') {
+              return this.gristDoc.behavioralPrompts.attachTip('referenceColumns', {
+                popupOptions: {
+                  attach: `.${cssTypeSelectMenu.className}`,
+                  placement: 'left-start',
+                }
+              });
+            } else {
+              return null;
+            }
+          }
         }),
         testId('type-select'),
         grainjsDom.cls('tour-type-selector'),
-        grainjsDom.cls(cssBlockedCursor.className, this.origColumn.disableModifyBase)
+        grainjsDom.cls(cssBlockedCursor.className, use =>
+          use(this.origColumn.disableModifyBase) ||
+          (use(this.field.config.multiselect) && !use(allFormulas))
+        ),
       ),
       grainjsDom.maybe((use) => use(this._isRef) && !use(this._isTransformingType), () => this._buildRefTableSelect()),
       grainjsDom.maybe(this._isTransformingType, () => {
@@ -271,9 +333,19 @@ export class FieldBuilder extends Disposable {
   public _setType(newType: string): Promise<unknown>|undefined {
     if (this.origColumn.isFormula()) {
       // Do not type transform a new/empty column or a formula column. Just make a best guess for
-      // the full type, and set it.
+      // the full type, and set it. If multiple columns are selected (and all are formulas/empty),
+      // then we will set the type for all of them using full type guessed from the first column.
       const column = this.field.column();
-      column.type.setAndSave(addColTypeSuffix(newType, column, this._docModel)).catch(reportError);
+      const calculatedType = addColTypeSuffix(newType, column, this._docModel);
+      // If we selected multiple empty/formula columns, make the change for all of them.
+      if (this.field.viewSection.peek().selectedFields.peek().length > 1 &&
+          ['formula', 'empty'].indexOf(this.field.viewSection.peek().columnsBehavior.peek())) {
+        return this.gristDoc.docData.bundleActions("Changing multiple column types", () =>
+          Promise.all(this.field.viewSection.peek().selectedFields.peek().map(f =>
+            f.column.peek().type.setAndSave(calculatedType)
+        ))).catch(reportError);
+      }
+      column.type.setAndSave(calculatedType).catch(reportError);
     } else if (!this.columnTransform) {
       this.columnTransform = TypeTransform.create(null, this.gristDoc, this);
       return this.columnTransform.prepare(newType);
@@ -287,20 +359,34 @@ export class FieldBuilder extends Disposable {
   // Builds the reference type table selector. Built when the column is type reference.
   public _buildRefTableSelect() {
     const allTables = Computed.create(null, (use) =>
-                                      use(this._docModel.allTableIds.getObservable()).map(tableId => ({
-                                        value: tableId,
-                                        label: tableId,
+                                      use(this._docModel.visibleTables.getObservable()).map(tableRec => ({
+                                        value: use(tableRec.tableId),
+                                        label: use(tableRec.tableNameDef),
                                         icon: 'FieldTable' as const
                                       }))
                                      );
+    const isDisabled = Computed.create(null, use => {
+      return use(this.origColumn.disableModifyBase) || use(this.field.config.multiselect);
+    });
     return [
-      cssLabel('DATA FROM TABLE'),
+      cssLabel('DATA FROM TABLE',
+        !this._showRefConfigPopup.peek() ? null : this.gristDoc.behavioralPrompts.attachTip(
+          'referenceColumnsConfig',
+          {
+            onDispose: () => this._showRefConfigPopup(false),
+            popupOptions: {
+              placement: 'left-start',
+            },
+          }
+        ),
+      ),
       cssRow(
         dom.autoDispose(allTables),
+        dom.autoDispose(isDisabled),
         select(fromKo(this._refTableId), allTables, {
           // Disallow changing the destination table when the column should not be modified
           // (specifically when it's a group-by column of a summary table).
-          disabled: this.origColumn.disableModifyBase,
+          disabled: isDisabled,
         }),
         testId('ref-table-select')
       )
@@ -355,39 +441,58 @@ export class FieldBuilder extends Disposable {
     // the dom created by the widgetImpl to get out of sync.
     return dom('div',
       kd.maybe(() => !this._isTransformingType() && this.widgetImpl(), (widget: NewAbstractWidget) =>
-        dom('div',
-            widget.buildConfigDom(),
-            cssSeparator(),
-            widget.buildColorConfigDom(this.gristDoc),
+        dom('div', widget.buildConfigDom(), cssSeparator())
+      )
+    );
+  }
 
-            // If there is more than one field for this column (i.e. present in multiple views).
-            kd.maybe(() => this.origColumn.viewFields().all().length > 1, () =>
-                     dom('div.fieldbuilder_settings',
-                         kf.row(
-                           kd.toggleClass('fieldbuilder_settings_header', true),
-                           kf.label(
-                             dom('div.fieldbuilder_settings_button',
-                                 dom.testId('FieldBuilder_settings'),
-                                 kd.text(() => this.field.useColOptions() ? 'Common' : 'Separate'), ' ▾',
-                                 menu(() => FieldSettingsMenu(
-                                   this.field.useColOptions(),
-                                   this.field.viewSection().isRaw(),
-                                   {
-                                     useSeparate: () => this.fieldSettingsUseSeparate(),
-                                     saveAsCommon: () => this.fieldSettingsSaveAsCommon(),
-                                     revertToCommon: () => this.fieldSettingsRevertToCommon(),
-                                   },
-                                 )),
-                                ),
-                             'Field in ',
-                             kd.text(() => this.origColumn.viewFields().all().length),
-                             ' views'
-                           )
-                         )
-                        )
-                    )
+  public buildColorConfigDom() {
+    // NOTE: adding a grainjsDom .maybe here causes the disposable order of the widgetImpl and
+    // the dom created by the widgetImpl to get out of sync.
+    return dom('div',
+      kd.maybe(() => !this._isTransformingType() && this.widgetImpl(), (widget: NewAbstractWidget) =>
+        dom('div', widget.buildColorConfigDom(this.gristDoc))
+      )
+    );
+  }
+
+  /**
+   * Builds the FieldBuilder Options Config DOM. Calls the buildConfigDom function of its widgetImpl.
+   */
+  public buildSettingOptions() {
+    // NOTE: adding a grainjsDom .maybe here causes the disposable order of the widgetImpl and
+    // the dom created by the widgetImpl to get out of sync.
+    return dom('div',
+      kd.maybe(() => !this._isTransformingType() && this.widgetImpl(), (widget: NewAbstractWidget) =>
+        dom('div',
+          // If there is more than one field for this column (i.e. present in multiple views).
+          kd.maybe(() => this.origColumn.viewFields().all().length > 1, () =>
+            dom('div.fieldbuilder_settings',
+              kf.row(
+                kd.toggleClass('fieldbuilder_settings_header', true),
+                kf.label(
+                  dom('div.fieldbuilder_settings_button',
+                      dom.testId('FieldBuilder_settings'),
+                      kd.text(() => this.field.useColOptions() ? 'Common' : 'Separate'), ' ▾',
+                      menu(() => FieldSettingsMenu(
+                        this.field.useColOptions(),
+                        this.field.viewSection().isRaw(),
+                        {
+                          useSeparate: () => this.fieldSettingsUseSeparate(),
+                          saveAsCommon: () => this.fieldSettingsSaveAsCommon(),
+                          revertToCommon: () => this.fieldSettingsRevertToCommon(),
+                        },
+                      )),
+                    ),
+                  'Field in ',
+                  kd.text(() => this.origColumn.viewFields().all().length),
+                  ' views'
+                )
               )
+            )
+          )
         )
+      )
     );
   }
 
@@ -434,7 +539,7 @@ export class FieldBuilder extends Disposable {
    * Builds the cell and editor DOM for the chosen UserType. Calls the buildDom and
    *  buildEditorDom functions of its widgetImpl.
    */
-  public buildDomWithCursor(row: DataRowModel, isActive: boolean, isSelected: boolean) {
+  public buildDomWithCursor(row: DataRowModel, isActive: ko.Computed<boolean>, isSelected: ko.Computed<boolean>) {
     const computedFlags = koUtil.withKoUtils(ko.pureComputed(() => {
       return this.field.rulesColsIds().map(colRef => row.cells[colRef]?.() ?? false);
     }, this).extend({ deferred: true }));
@@ -467,36 +572,30 @@ export class FieldBuilder extends Disposable {
       return { style : new CombinedStyle(styles, flags) };
     }, this).extend({ deferred: true })).previousOnUndefined();
 
-    const widgetObs = koUtil.withKoUtils(ko.computed(function() {
+    const widgetObs = koUtil.withKoUtils(ko.computed(() => {
       // TODO: Accessing row values like this doesn't always work (row and field might not be updated
       // simultaneously).
       if (this.isDisposed()) { return null; }   // Work around JS errors during field removal.
       const value = row.cells[this.field.colId()];
       const cell = value && value();
-      if (value && this._isRightType()(cell, this.options) || row._isAddRow.peek()) {
+      if ((value) && this._isRightType()(cell, this.options) || row._isAddRow.peek()) {
         return this.widgetImpl();
       } else if (gristTypes.isVersions(cell)) {
         return this.diffImpl;
       } else {
         return null;
       }
-    }, this).extend({ deferred: true })).onlyNotifyUnequal();
+    }).extend({ deferred: true })).onlyNotifyUnequal();
 
-    const textColor = koUtil.withKoUtils(ko.computed(function() {
+    const ruleText = koUtil.withKoUtils(ko.computed(() => {
       if (this.isDisposed()) { return null; }
-      const fromRules = computedRule()?.style?.textColor;
-      return fromRules || this.field.textColor() || '';
-    }, this)).onlyNotifyUnequal();
+      return computedRule()?.style?.textColor || '';
+    })).onlyNotifyUnequal();
 
-    const fillColor = koUtil.withKoUtils(ko.computed(function() {
+    const ruleFill = koUtil.withKoUtils(ko.computed(() => {
       if (this.isDisposed()) { return null; }
-      const fromRules = computedRule()?.style?.fillColor;
-      let fill = fromRules || this.field.fillColor();
-      // If user set white color - remove it to play nice with zebra strips.
-      // If there is no color we are using fully transparent white color (for tests mainly).
-      fill = fill ? fill.toUpperCase() : fill;
-      return (fill === '#FFFFFF' ? '' : fill) || '#FFFFFF00';
-    }, this)).onlyNotifyUnequal();
+      return notTransparent(computedRule()?.style?.fillColor || '');
+    })).onlyNotifyUnequal();
 
     const fontBold = buildFontOptions(this, computedRule, 'fontBold');
     const fontItalic = buildFontOptions(this, computedRule, 'fontItalic');
@@ -505,20 +604,48 @@ export class FieldBuilder extends Disposable {
 
     const errorInStyle = ko.pureComputed(() => Boolean(computedRule()?.error));
 
+    const cellText = ko.pureComputed(() => this.field.textColor() || '');
+    const cellFill = ko.pureComputed(() => notTransparent(this.field.fillColor() || ''));
+
+    const hasComment = koUtil.withKoUtils(ko.computed(() => {
+      if (this.isDisposed()) { return false; }   // Work around JS errors during field removal.
+      if (!this._comments()) { return false; }
+      if (this.gristDoc.isReadonlyKo()) { return false; }
+      const rowId = row.id();
+      const discussion = this.field.column().cells().all()
+        .find(d =>
+          d.rowId() === rowId
+          && !d.resolved()
+          && d.type() === gristTypes.CellInfoType.COMMENT
+          && !d.hidden()
+          && d.root());
+      return Boolean(discussion);
+    }).extend({ deferred: true })).onlyNotifyUnequal();
+
+    const domHolder = new MultiHolder();
+    domHolder.autoDispose(hasComment);
+    domHolder.autoDispose(widgetObs);
+    domHolder.autoDispose(computedFlags);
+    domHolder.autoDispose(errorInStyle);
+    domHolder.autoDispose(cellText);
+    domHolder.autoDispose(cellFill);
+    domHolder.autoDispose(computedRule);
+    domHolder.autoDispose(fontBold);
+    domHolder.autoDispose(fontItalic);
+    domHolder.autoDispose(fontUnderline);
+    domHolder.autoDispose(fontStrikethrough);
+
     return (elem: Element) => {
       this._rowMap.set(row, elem);
       dom(elem,
-          dom.autoDispose(widgetObs),
-          dom.autoDispose(computedFlags),
-          dom.autoDispose(errorInStyle),
-          dom.autoDispose(textColor),
-          dom.autoDispose(computedRule),
-          dom.autoDispose(fillColor),
-          dom.autoDispose(fontBold),
-          dom.autoDispose(fontItalic),
-          dom.autoDispose(fontUnderline),
-          dom.autoDispose(fontStrikethrough),
+          dom.autoDispose(domHolder),
+          kd.style('--grist-cell-color', cellText),
+          kd.style('--grist-cell-background-color', cellFill),
+          kd.style('--grist-rule-color', ruleText),
+          kd.style('--grist-column-rule-background-color', ruleFill),
           this._options.isPreview ? null : kd.cssClass(this.field.formulaCssClass),
+          kd.toggleClass('field-with-comments', hasComment),
+          kd.maybe(hasComment, () => dom('div.field-comment-indicator')),
           kd.toggleClass("readonly", toKo(ko, this._readonly)),
           kd.maybe(isSelected, () => dom('div.selected_cursor',
                                          kd.toggleClass('active_cursor', isActive)
@@ -531,9 +658,7 @@ export class FieldBuilder extends Disposable {
                        kd.toggleClass('font-bold', fontBold),
                        kd.toggleClass('font-underline', fontUnderline),
                        kd.toggleClass('font-italic', fontItalic),
-                       kd.toggleClass('font-strikethrough', fontStrikethrough),
-                       kd.style('--grist-cell-color', textColor),
-                       kd.style('--grist-cell-background-color', fillColor));
+                       kd.toggleClass('font-strikethrough', fontStrikethrough));
           })
          );
     };
@@ -605,6 +730,43 @@ export class FieldBuilder extends Disposable {
     this.gristDoc.activeEditor.set(fieldEditor);
   }
 
+  public buildDiscussionPopup(editRow: DataRowModel, mainRowModel: DataRowModel, discussionId?: number) {
+    const owner = this.gristDoc.fieldEditorHolder;
+    const cellElem: Element = this._rowMap.get(mainRowModel)!;
+    if (this.columnTransform) {
+      this.columnTransform.finalize().catch(reportError);
+      return;
+    }
+    if (editRow._isAddRow.peek() || this._readonly.get()) {
+      return;
+    }
+
+    const cell = editRow.cells[this.field.colId()];
+    const value = cell && cell();
+    if (gristTypes.isCensored(value)) {
+      this._fieldEditorHolder.clear();
+      return;
+    }
+
+    const tableRef = this.field.viewSection.peek()!.tableRef.peek()!;
+
+    // Reuse fieldEditor holder to make sure only one popup/editor is attached to the cell.
+    const discussionHolder = MultiHolder.create(owner);
+    const discussions = EmptyCell.create(discussionHolder, {
+      gristDoc: this.gristDoc,
+      tableRef,
+      column: this.field.column.peek(),
+      rowId: editRow.id.peek(),
+    });
+    CellDiscussionPopup.create(discussionHolder, {
+      domEl: cellElem,
+      topic: discussions,
+      discussionId,
+      gristDoc: this.gristDoc,
+      closeClicked: () => owner.clear()
+    });
+  }
+
   public isEditorActive() {
     return !this._fieldEditorHolder.isEmpty();
   }
@@ -620,7 +782,8 @@ export class FieldBuilder extends Disposable {
     onCancel?: () => void) {
     const editorHolder = openFormulaEditor({
       gristDoc: this.gristDoc,
-      field: this.field,
+      column: this.field.column(),
+      editingFormula: this.field.editingFormula,
       setupCleanup: setupEditorCleanup,
       editRow,
       refElem,
@@ -638,6 +801,24 @@ const cssTypeSelectMenu = styled('div', `
 `);
 
 const cssSeparator = styled('div', `
-  border-bottom: 1px solid ${colors.mediumGrey};
+  border-bottom: 1px solid ${theme.pagePanelsBorder};
   margin-top: 16px;
 `);
+
+// Simple helper that removes transparency from a HEX or rgba color.
+// User can set a transparent fill color using doc actions, but we don't want to show it well
+// when a column is frozen.
+function notTransparent(color: string): string {
+  if (!color) {
+    return color;
+  } else if (color.startsWith('#') && color.length === 9) {
+    return color.substring(0, 7);
+  } else if (color.startsWith('rgba')) {
+    // rgba(255, 255, 255)
+    // rgba(255, 255, 255, 0.5)
+    // rgba(255 255 255 / 0.5)
+    // rgba(255 255 255 / 50%)
+    return color.replace(/^rgba\((\d+)[,\s]+(\d+)[,\s]+(\d+)[/,\s]+([\d.%]+)\)$/i, 'rgb($1, $2, $3)');
+  }
+  return color;
+}

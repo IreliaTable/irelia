@@ -1,5 +1,7 @@
+import {makeT} from 'app/client/lib/localization';
 import {GristDoc} from 'app/client/components/GristDoc';
 import {loadSearch} from 'app/client/lib/imports';
+import type * as searchModule from 'app/client/ui2018/search';
 import {AppModel, reportError} from 'app/client/models/AppModel';
 import {DocPageModel} from 'app/client/models/DocPageModel';
 import {workspaceName} from 'app/client/models/WorkspaceInfo';
@@ -7,14 +9,18 @@ import {AccountWidget} from 'app/client/ui/AccountWidget';
 import {buildNotifyMenuButton} from 'app/client/ui/NotifyUI';
 import {manageTeamUsersApp} from 'app/client/ui/OpenUserManager';
 import {buildShareMenuButton} from 'app/client/ui/ShareMenu';
+import {hoverTooltip} from 'app/client/ui/tooltips';
 import {cssHoverCircle, cssTopBarBtn} from 'app/client/ui/TopBarCss';
 import {docBreadcrumbs} from 'app/client/ui2018/breadcrumbs';
 import {basicButton} from 'app/client/ui2018/buttons';
-import {colors, cssHideForNarrowScreen, testId} from 'app/client/ui2018/cssVars';
+import {cssHideForNarrowScreen, testId, theme} from 'app/client/ui2018/cssVars';
 import {IconName} from 'app/client/ui2018/IconList';
-import {waitGrainObs} from 'app/common/gutil';
+import {menuAnnotate} from 'app/client/ui2018/menus';
+import {COMMENTS} from 'app/client/models/features';
 import * as roles from 'app/common/roles';
 import {Computed, dom, DomElementArg, makeTestId, MultiHolder, Observable, styled} from 'grainjs';
+
+const t = makeT('TopBar');
 
 export function createTopBarHome(appModel: AppModel) {
   return [
@@ -23,7 +29,7 @@ export function createTopBarHome(appModel: AppModel) {
     (appModel.isTeamSite && roles.canEditAccess(appModel.currentOrg?.access || null) ?
       [
         basicButton(
-          'Manage Team',
+          t('ManageTeam'),
           dom.on('click', () => manageTeamUsersApp(appModel)),
           testId('topbar-manage-team')
         ),
@@ -42,14 +48,25 @@ export function createTopBarDoc(owner: MultiHolder, appModel: AppModel, pageMode
   const renameDoc = (val: string) => pageModel.renameDoc(val);
   const displayNameWs = Computed.create(owner, pageModel.currentWorkspace,
     (use, ws) => ws ? {...ws, name: workspaceName(appModel, ws)} : ws);
-  const searchBarContent = Observable.create<HTMLElement|null>(owner, null);
 
-  loadSearch()
-    .then(async module => {
-      const model = module.SearchModelImpl.create(owner, (await waitGrainObs(pageModel.gristDoc))!);
-      searchBarContent.set(module.searchBar(model, makeTestId('test-tb-search-')));
-    })
-    .catch(reportError);
+  const moduleObs = Observable.create<typeof searchModule|null>(owner, null);
+  loadSearch().then(module => moduleObs.set(module)).catch(reportError);
+
+  // Observable to decide whether to include the searchBar into this page. It doesn't work on
+  // 'code' and 'acl' pages, so it's better to omit it, and let the browser's native search work.
+  const enabledObs = Computed.create(owner, pageModel.gristDoc, (use, gristDoc) => {
+    const viewId = gristDoc ? use(gristDoc.activeViewId) : null;
+    return viewId !== null && viewId !== 'code' && viewId !== 'acl';
+  });
+
+  const searchModelObs = Computed.create(owner,
+    moduleObs, pageModel.gristDoc, enabledObs,
+    (use, module, gristDoc, enabled) => {
+      if (!module || !gristDoc || !enabled) {
+        return null;
+      }
+      return module.SearchModelImpl.create(use.owner, gristDoc);
+    });
 
   return [
     // TODO Before gristDoc is loaded, we could show doc-name without the page. For now, we delay
@@ -78,19 +95,32 @@ export function createTopBarDoc(owner: MultiHolder, appModel: AppModel, pageMode
     dom.maybe(pageModel.undoState, (state) => [
       topBarUndoBtn('Undo',
         dom.on('click', () => state.isUndoDisabled.get() || allCommands.undo.run()),
+        hoverTooltip('Undo', {key: 'topBarBtnTooltip'}),
         cssHoverCircle.cls('-disabled', state.isUndoDisabled),
         testId('undo')
       ),
       topBarUndoBtn('Redo',
         dom.on('click', () => state.isRedoDisabled.get() || allCommands.redo.run()),
+        hoverTooltip('Redo', {key: 'topBarBtnTooltip'}),
         cssHoverCircle.cls('-disabled', state.isRedoDisabled),
         testId('redo')
       ),
       cssSpacer(),
     ]),
-    dom.domComputed(searchBarContent),
+    dom.domComputed((use) => {
+      const model = use(searchModelObs);
+      return model && use(moduleObs)?.searchBar(model, makeTestId('test-tb-search-'));
+    }),
 
     buildShareMenuButton(pageModel),
+
+    dom.maybe(use =>
+      (
+        use(pageModel.gristDoc)
+        && !use(use(pageModel.gristDoc)!.isReadonly)
+        && use(COMMENTS())
+      ),
+      () => buildShowDiscussionButton(pageModel)),
 
     dom.update(
       buildNotifyMenuButton(appModel.notifier, appModel),
@@ -100,6 +130,23 @@ export function createTopBarDoc(owner: MultiHolder, appModel: AppModel, pageMode
     dom('div', dom.create(AccountWidget, appModel, pageModel))
   ];
 }
+
+function buildShowDiscussionButton(pageModel: DocPageModel) {
+  return cssHoverCircle({ style: `margin: 5px; position: relative;` },
+    cssTopBarBtn('Chat', dom.cls('tour-share-icon')),
+    cssBeta('Beta'),
+    hoverTooltip('Comments', {key: 'topBarBtnTooltip'}),
+    testId('open-discussion'),
+    dom.on('click', () => pageModel.gristDoc.get()!.showTool('discussion'))
+  );
+}
+
+const cssBeta = styled(menuAnnotate, `
+  position: absolute;
+  top: 4px;
+  right: -9px;
+  font-weight: bold;
+`);
 
 // Given the GristDoc instance, returns a rename function for the current active page.
 // If the current page is not able to be renamed or the new name is invalid, the function is a noop.
@@ -129,14 +176,14 @@ function topBarUndoBtn(iconName: IconName, ...domArgs: DomElementArg[]): Element
 }
 
 const cssTopBarUndoBtn = styled(cssTopBarBtn, `
-  background-color: ${colors.slate};
+  background-color: ${theme.topBarButtonSecondaryFg};
 
   .${cssHoverCircle.className}:hover & {
-    background-color: ${colors.lightGreen};
+    background-color: ${theme.topBarButtonPrimaryFg};
   }
 
   .${cssHoverCircle.className}-disabled:hover & {
-    background-color: ${colors.darkGrey};
+    background-color: ${theme.topBarButtonDisabledFg};
     cursor: default;
   }
 `);

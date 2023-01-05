@@ -1,9 +1,11 @@
 import {parsePermissions} from 'app/common/ACLPermissions';
+import {AclRuleProblem} from 'app/common/ActiveDocAPI';
 import {ILogger} from 'app/common/BaseAPI';
 import {DocData} from 'app/common/DocData';
 import {AclMatchFunc, ParsedAclFormula, RulePart, RuleSet, UserAttributeRule} from 'app/common/GranularAccessClause';
 import {getSetMapValue} from 'app/common/gutil';
 import {MetaRowRecord} from 'app/common/TableData';
+import {decodeObject} from 'app/plugin/objtypes';
 import sortBy = require('lodash/sortBy');
 
 const defaultMatchFunc: AclMatchFunc = () => true;
@@ -231,6 +233,20 @@ export class ACLRuleCollection {
    * Check that all references to table and column IDs in ACL rules are valid.
    */
   public checkDocEntities(docData: DocData) {
+    const problems = this.findRuleProblems(docData);
+    if (problems.length === 0) { return; }
+    throw new Error(problems[0].comment);
+  }
+
+  /**
+   * Enumerate rule problems caused by table and column IDs that are not valid.
+   * Problems include:
+   *   - Rules for a table that does not exist
+   *   - Rules for columns that include a column that does not exist
+   *   - User attributes links to a column that does not exist
+   */
+  public findRuleProblems(docData: DocData): AclRuleProblem[] {
+    const problems: AclRuleProblem[] = [];
     const tablesTable = docData.getMetaTable('_grist_Tables');
     const columnsTable = docData.getMetaTable('_grist_Tables_column');
 
@@ -238,7 +254,12 @@ export class ACLRuleCollection {
     const validTableIds = new Set(tablesTable.getColValues('tableId'));
     const invalidTables = this.getAllTableIds().filter(t => !validTableIds.has(t));
     if (invalidTables.length > 0) {
-      throw new Error(`Invalid tables in rules: ${invalidTables.join(', ')}`);
+      problems.push({
+        tables: {
+          tableIds: invalidTables,
+        },
+        comment: `Invalid tables in rules: ${invalidTables.join(', ')}`,
+      });
     }
 
     // Collect valid columns, grouped by tableRef (rowId of table record).
@@ -248,15 +269,22 @@ export class ACLRuleCollection {
       getSetMapValue(validColumns, colTableRefs[i], () => new Set()).add(colId);
     }
 
-    // For each table, check that any explicitly mentioned columns are valid.
+    // For each valid table, check that any explicitly mentioned columns are valid.
     for (const tableId of this.getAllTableIds()) {
+      if (!validTableIds.has(tableId)) { continue; }
       const tableRef = tablesTable.findRow('tableId', tableId);
       const validTableCols = validColumns.get(tableRef);
       for (const ruleSet of this.getAllColumnRuleSets(tableId)) {
         if (Array.isArray(ruleSet.colIds)) {
           const invalidColIds = ruleSet.colIds.filter(c => !validTableCols?.has(c));
           if (invalidColIds.length > 0) {
-            throw new Error(`Invalid columns in rules for table ${tableId}: ${invalidColIds.join(', ')}`);
+            problems.push({
+              columns: {
+                tableId,
+                colIds: invalidColIds,
+              },
+              comment: `Invalid columns in rules for table ${tableId}: ${invalidColIds.join(', ')}`,
+            });
           }
         }
       }
@@ -264,16 +292,25 @@ export class ACLRuleCollection {
 
     // Check for valid tableId/lookupColId combinations in UserAttribute rules.
     const invalidUAColumns: string[] = [];
+    const names: string[] = [];
     for (const rule of this.getUserAttributeRules().values()) {
       const tableRef = tablesTable.findRow('tableId', rule.tableId);
       const colRef = columnsTable.findMatchingRowId({parentId: tableRef, colId: rule.lookupColId});
       if (!colRef) {
         invalidUAColumns.push(`${rule.tableId}.${rule.lookupColId}`);
+        names.push(rule.name);
       }
     }
     if (invalidUAColumns.length > 0) {
-      throw new Error(`Invalid columns in User Attribute rules: ${invalidUAColumns.join(', ')}`);
+      problems.push({
+        userAttributes: {
+          invalidUAColumns,
+          names,
+        },
+        comment: `Invalid columns in User Attribute rules: ${invalidUAColumns.join(', ')}`,
+      });
     }
+    return problems;
   }
 
   private _safeReadAclRules(docData: DocData, options: ReadAclOptions): ReadAclResults {
@@ -290,6 +327,11 @@ export class ACLRuleCollection {
 export interface ReadAclOptions {
   log: ILogger;     // For logging warnings during rule processing.
   compile?: (parsed: ParsedAclFormula) => AclMatchFunc;
+  // If true, call addHelperCols to add helper columns of restricted columns to rule sets.
+  // Used in the server for extra filtering, but not in the client, because:
+  // 1. They would show in the UI
+  // 2. They would be saved back after editing, causing them to accumulate
+  includeHelperCols?: boolean;
 }
 
 export interface ReadAclResults {
@@ -298,10 +340,65 @@ export interface ReadAclResults {
 }
 
 /**
+ * For each column in colIds, return the colIds of any hidden helper columns it has,
+ * i.e. display columns of references, and conditional formatting rule columns.
+ */
+function getHelperCols(docData: DocData, tableId: string, colIds: string[], log: ILogger): string[] {
+  const tablesTable = docData.getMetaTable('_grist_Tables');
+  const columnsTable = docData.getMetaTable('_grist_Tables_column');
+  const fieldsTable = docData.getMetaTable('_grist_Views_section_field');
+
+  const tableRef = tablesTable.findRow('tableId', tableId);
+  if (!tableRef) {
+    return [];
+  }
+
+  const result: string[] = [];
+  for (const colId of colIds) {
+    const [column] = columnsTable.filterRecords({parentId: tableRef, colId});
+    if (!column) {
+      continue;
+    }
+
+    function addColsFromRefs(colRefs: unknown) {
+      if (!Array.isArray(colRefs)) {
+        return;
+      }
+      for (const colRef of colRefs) {
+        if (typeof colRef !== 'number') {
+          continue;
+        }
+        const extraCol = columnsTable.getRecord(colRef);
+        if (!extraCol) {
+          continue;
+        }
+        if (extraCol.colId.startsWith("gristHelper_") && extraCol.parentId === tableRef) {
+          result.push(extraCol.colId);
+        } else {
+          log.error(`Invalid helper column ${extraCol.colId} of ${tableId}:${colId}`);
+        }
+      }
+    }
+
+    function addColsFromMetaRecord(rec: MetaRowRecord<'_grist_Tables_column' | '_grist_Views_section_field'>) {
+      addColsFromRefs([rec.displayCol]);
+      addColsFromRefs(decodeObject(rec.rules));
+    }
+
+    addColsFromMetaRecord(column);
+    for (const field of fieldsTable.filterRecords({colRef: column.id})) {
+      addColsFromMetaRecord(field);
+    }
+  }
+  return result;
+}
+
+
+/**
  * Parse all ACL rules in the document from DocData into a list of RuleSets and of
  * UserAttributeRules. This is used by both client-side code and server-side.
  */
-function readAclRules(docData: DocData, {log, compile}: ReadAclOptions): ReadAclResults {
+function readAclRules(docData: DocData, {log, compile, includeHelperCols}: ReadAclOptions): ReadAclResults {
   const resourcesTable = docData.getMetaTable('_grist_ACLResources');
   const rulesTable = docData.getMetaTable('_grist_ACLRules');
 
@@ -328,6 +425,10 @@ function readAclRules(docData: DocData, {log, compile}: ReadAclOptions): ReadAcl
     const tableId = resourceRec.tableId;
     const colIds = resourceRec.colIds === '*' ? '*' : resourceRec.colIds.split(',');
 
+    if (includeHelperCols && Array.isArray(colIds)) {
+      colIds.push(...getHelperCols(docData, tableId, colIds, log));
+    }
+
     const body: RulePart[] = [];
     for (const rule of rules) {
       if (rule.userAttributes) {
@@ -353,7 +454,7 @@ function readAclRules(docData: DocData, {log, compile}: ReadAclOptions): ReadAcl
           origRecord: rule,
           aclFormula: String(rule.aclFormula),
           matchFunc: rule.aclFormula ? compile?.(aclFormulaParsed) : defaultMatchFunc,
-          memo: aclFormulaParsed && aclFormulaParsed[0] === 'Comment' && aclFormulaParsed[2],
+          memo: rule.memo,
           permissions: parsePermissions(String(rule.permissionsText)),
           permissionsText: String(rule.permissionsText),
         });

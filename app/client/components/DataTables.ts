@@ -1,32 +1,43 @@
 import {GristDoc} from 'app/client/components/GristDoc';
 import {copyToClipboard} from 'app/client/lib/copyToClipboard';
-import {localStorageObs} from 'app/client/lib/localStorageObs';
 import {setTestState} from 'app/client/lib/testState';
 import {TableRec} from 'app/client/models/DocModel';
 import {docListHeader, docMenuTrigger} from 'app/client/ui/DocMenuCss';
+import {duplicateTable, DuplicateTableResponse} from 'app/client/ui/DuplicateTable';
 import {showTransientTooltip} from 'app/client/ui/tooltips';
 import {buildTableName} from 'app/client/ui/WidgetTitle';
-import {buttonSelect, cssButtonSelect} from 'app/client/ui2018/buttonSelect';
 import * as css from 'app/client/ui2018/cssVars';
 import {icon} from 'app/client/ui2018/icons';
+import {loadingDots} from 'app/client/ui2018/loaders';
 import {menu, menuItem, menuText} from 'app/client/ui2018/menus';
 import {confirmModal} from 'app/client/ui2018/modals';
 import {Computed, Disposable, dom, fromKo, makeTestId, Observable, styled} from 'grainjs';
+import {makeT} from 'app/client/lib/localization';
 
 const testId = makeTestId('test-raw-data-');
 
+const t = makeT('components.DataTables');
+
 export class DataTables extends Disposable {
   private _tables: Observable<TableRec[]>;
-  private _view: Observable<string | null>;
+
+  private readonly _rowCount = Computed.create(
+    this, this._gristDoc.docPageModel.currentDocUsage, (_use, usage) => {
+      return usage?.rowCount;
+    }
+  );
+
+  // TODO: Update this whenever the rest of the UI is internationalized.
+  private readonly _rowCountFormatter = new Intl.NumberFormat('en-US');
+
   constructor(private _gristDoc: GristDoc) {
     super();
-    // Remove tables that we don't have access to. ACL will remove tableId from those tables.
-    this._tables = Computed.create(this, use =>
-      use(_gristDoc.docModel.rawTables.getObservable())
-      .filter(t => Boolean(use(t.tableId))));
-    // Get the user id, to remember selected layout on the next visit.
-    const userId = this._gristDoc.app.topAppModel.appObs.get()?.currentUser?.id ?? 0;
-    this._view = this.autoDispose(localStorageObs(`u=${userId}:raw:viewType`, "list"));
+    this._tables = Computed.create(this, use => {
+      const dataTables = use(_gristDoc.docModel.rawDataTables.getObservable());
+      const summaryTables = use(_gristDoc.docModel.rawSummaryTables.getObservable());
+      // Remove tables that we don't have access to. ACL will remove tableId from those tables.
+      return [...dataTables, ...summaryTables].filter(table => Boolean(use(table.tableId)));
+    });
   }
 
   public buildDom() {
@@ -34,70 +45,38 @@ export class DataTables extends Disposable {
       cssTableList(
         /***************  List section **********/
         testId('list'),
-        cssBetween(
-          docListHeader('Raw data tables'),
-          cssSwitch(
-            buttonSelect<any>(
-              this._view,
-              [
-                {value: 'card', icon: 'TypeTable'},
-                {value: 'list', icon: 'TypeCardList'},
-              ],
-              css.testId('view-mode'),
-              cssButtonSelect.cls("-light")
-            )
-          )
-        ),
+        cssHeader(t('RawDataTables')),
         cssList(
-          cssList.cls(use => `-${use(this._view)}`),
           dom.forEach(this._tables, tableRec =>
             cssItem(
               testId('table'),
               cssLeft(
-                dom.domComputed(tableRec.tableId, (tableId) =>
-                  cssGreenIcon(
-                    'TypeTable',
-                    testId(`table-id-${tableId}`)
-                  )
-                ),
+                dom.domComputed((use) => cssTableTypeIcon(
+                  use(tableRec.summarySourceTable) !== 0 ? 'PivotLight' : 'TypeTable',
+                  testId(`table-id-${use(tableRec.tableId)}`)
+                )),
               ),
               cssMiddle(
-                css60(
-                  testId('table-title'),
-                  dom.domComputed(fromKo(tableRec.rawViewSectionRef), vsRef => {
-                    if (!vsRef) {
-                      // Some very old documents might not have rawViewSection.
-                      return dom('span', dom.text(tableRec.tableNameDef));
-                    } else {
-                      return dom('div', // to disable flex grow in the widget
-                        dom.domComputed(fromKo(tableRec.rawViewSection), vs =>
-                          dom.update(
-                            buildTableName(vs, testId('widget-title')),
-                            dom.on('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); }),
-                          )
-                        )
-                      );
-                    }
-                  }),
-                ),
-                css40(
-                  cssIdHoverWrapper(
-                    cssUpperCase("Table id: "),
+                cssTitleRow(cssTableTitle(this._tableTitle(tableRec), testId('table-title'))),
+                cssDetailsRow(
+                  cssTableIdWrapper(cssHoverWrapper(
+                    cssUpperCase("Table ID: "),
                     cssTableId(
                       testId('table-id'),
                       dom.text(tableRec.tableId),
                     ),
-                    { title : 'Click to copy' },
-                    dom.on('click', async (e, t) => {
+                    { title : t('ClickToCopy') },
+                    dom.on('click', async (e, d) => {
                       e.stopImmediatePropagation();
                       e.preventDefault();
-                      showTransientTooltip(t, 'Table id copied to clipboard', {
+                      showTransientTooltip(d, t('TableIDCopied'), {
                         key: 'copy-table-id'
                       });
                       await copyToClipboard(tableRec.tableId.peek());
                       setTestState({clipboard: tableRec.tableId.peek()});
                     })
-                  )
+                  )),
+                  this._tableRows(tableRec),
                 ),
               ),
               cssRight(
@@ -122,28 +101,82 @@ export class DataTables extends Disposable {
     );
   }
 
+  private _tableTitle(table: TableRec) {
+    return dom.domComputed((use) => {
+      const rawViewSectionRef = use(fromKo(table.rawViewSectionRef));
+      const isSummaryTable = use(table.summarySourceTable) !== 0;
+      if (!rawViewSectionRef || isSummaryTable) {
+        // Some very old documents might not have a rawViewSection, and raw summary
+        // tables can't currently be renamed.
+        const tableName = [
+          use(table.tableNameDef), isSummaryTable ? use(table.groupDesc) : ''
+        ].filter(p => Boolean(p?.trim())).join(' ');
+        return cssTableName(tableName);
+      } else {
+        return dom('div', // to disable flex grow in the widget
+          dom.domComputed(fromKo(table.rawViewSection), vs =>
+            buildTableName(vs, testId('widget-title'))
+          )
+        );
+      }
+    });
+  }
+
   private _menuItems(table: TableRec) {
     const {isReadonly, docModel} = this._gristDoc;
     return [
+      menuItem(
+        () => this._duplicateTable(table),
+        t('DuplicateTable'),
+        testId('menu-duplicate-table'),
+        dom.cls('disabled', use =>
+          use(isReadonly) ||
+          use(table.isHidden) ||
+          use(table.summarySourceTable) !== 0
+        ),
+      ),
       menuItem(
         () => this._removeTable(table),
         'Remove',
         testId('menu-remove'),
         dom.cls('disabled', use => use(isReadonly) || (
-          // Can't delete last user table, unless it is a hidden table.
-          use(docModel.allTables.getObservable()).length <= 1 && !use(table.isHidden)
+          // Can't delete last visible table, unless it is a hidden table.
+          use(docModel.visibleTables.getObservable()).length <= 1 && !use(table.isHidden)
         ))
       ),
-      dom.maybe(isReadonly, () => menuText('You do not have edit access to this document')),
+      dom.maybe(isReadonly, () => menuText(t("NoEditAccess"))),
     ];
   }
 
-  private _removeTable(t: TableRec) {
+  private _duplicateTable(r: TableRec) {
+    duplicateTable(this._gristDoc, r.tableId(), {
+      onSuccess: ({raw_section_id}: DuplicateTableResponse) =>
+        this._gristDoc.viewModel.activeSectionId(raw_section_id),
+    });
+  }
+
+  private _removeTable(r: TableRec) {
     const {docModel} = this._gristDoc;
     function doRemove() {
-      return docModel.docData.sendAction(['RemoveTable', t.tableId.peek()]);
+      return docModel.docData.sendAction(['RemoveTable', r.tableId()]);
     }
-    confirmModal(`Delete ${t.tableId()} data, and remove it from all pages?`, 'Delete', doRemove);
+    confirmModal(t("DeleteData", {formattedTableName : r.formattedTableName()}), 'Delete', doRemove);
+  }
+
+  private _tableRows(table: TableRec) {
+    return dom.maybe(this._rowCount, (rowCounts) => {
+      if (rowCounts === 'hidden') { return null; }
+
+      return cssTableRowsWrapper(
+        cssUpperCase("Rows: "),
+        rowCounts === 'pending' ? cssLoadingDots() : cssTableRows(
+          rowCounts[table.getRowId()] !== undefined
+            ? this._rowCountFormatter.format(rowCounts[table.getRowId()])
+            : '',
+          testId('table-rows'),
+        )
+      );
+    });
   }
 }
 
@@ -152,38 +185,14 @@ const container = styled('div', `
   position: relative;
 `);
 
-const cssBetween = styled('div', `
-  display: flex;
-  justify-content: space-between;
-`);
-
-// Below styles makes the list view look like a card view
-// on smaller screens.
-
-const cssSwitch = styled('div', `
-  @media ${css.mediaXSmall} {
-    & {
-      display: none;
-    }
-  }
+const cssHeader = styled(docListHeader, `
+  display: inline-block;
 `);
 
 const cssList = styled('div', `
   display: flex;
-  &-list {
-    flex-direction: column;
-    gap: 8px;
-  }
-  &-card {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 24px;
-  }
-  @media ${css.mediaSmall} {
-    & {
-      gap: 12px !important;
-    }
-  }
+  flex-direction: column;
+  gap: 12px;
 `);
 
 const cssItem = styled('div', `
@@ -191,28 +200,12 @@ const cssItem = styled('div', `
   align-items: center;
   cursor: pointer;
   border-radius: 3px;
+  width: 100%;
+  height: calc(1em * 56/13); /* 56px for 13px font */
   max-width: 750px;
-  border: 1px solid ${css.colors.mediumGrey};
+  border: 1px solid ${css.theme.rawDataTableBorder};
   &:hover {
-    border-color: ${css.colors.slate};
-  }
-  .${cssList.className}-list & {
-    min-height: calc(1em * 40/13); /* 40px for 13px font */
-  }
-  .${cssList.className}-card & {
-    width: 300px;
-    height: calc(1em * 56/13); /* 56px for 13px font */
-  }
-  @media ${css.mediaSmall} {
-    .${cssList.className}-card & {
-      width: calc(50% - 12px);
-    }
-  }
-  @media ${css.mediaXSmall} {
-    & {
-      width: 100% !important;
-      height: calc(1em * 56/13) !important; /* 56px for 13px font */
-    }
+    border-color: ${css.theme.rawDataTableBorderHover};
   }
 `);
 
@@ -233,21 +226,17 @@ const cssMiddle = styled('div', `
   flex-wrap: wrap;
   margin-top: 6px;
   margin-bottom: 4px;
-  .${cssList.className}-card & {
-    margin: 0px:
-  }
 `);
 
-const css60 = styled('div', `
-  min-width: min(240px, 100%);
-  display: flex;
-  flex: 6;
+const cssTitleRow = styled('div', `
+  min-width: 100%;
+  margin-right: 4px;
 `);
 
-const css40 = styled('div', `
-  min-width: min(240px, 100%);
-  flex: 4;
+const cssDetailsRow = styled('div', `
+  min-width: 100%;
   display: flex;
+  gap: 8px;
 `);
 
 
@@ -260,8 +249,8 @@ const cssRight = styled('div', `
   flex: none;
 `);
 
-const cssGreenIcon = styled(icon, `
-  --icon-color: ${css.colors.lightGreen};
+const cssTableTypeIcon = styled(icon, `
+  --icon-color: ${css.theme.accentIcon};
 `);
 
 const cssLine = styled('span', `
@@ -270,27 +259,46 @@ const cssLine = styled('span', `
   overflow: hidden;
 `);
 
-const cssIdHoverWrapper = styled('div', `
+const cssTableIdWrapper = styled('div', `
+  display: flex;
+  flex-grow: 1;
+  min-width: 0;
+`);
+
+const cssTableRowsWrapper = styled('div', `
+  display: flex;
+  flex-shrink: 0;
+  width: 80px;
+  overflow: hidden;
+  align-items: baseline;
+  color: ${css.theme.lightText};
+  line-height: 18px;
+  padding: 0px 2px;
+`);
+
+const cssHoverWrapper = styled('div', `
   display: flex;
   overflow: hidden;
   cursor: default;
   align-items: baseline;
-  color: ${css.colors.slate};
+  color: ${css.theme.lightText};
   transition: background 0.05s;
-  padding: 1px 2px;
+  padding: 0px 2px;
   line-height: 18px;
   &:hover {
-    background: ${css.colors.lightGrey};
-  }
-  @media ${css.mediaSmall} {
-    & {
-      padding: 0px 2px !important;
-    }
+    background: ${css.theme.lightHover};
   }
 `);
 
 const cssTableId = styled(cssLine, `
   font-size: ${css.vars.smallFontSize};
+`);
+
+const cssTableRows = cssTableId;
+
+const cssTableTitle = styled('div', `
+  color: ${css.theme.text};
+  white-space: nowrap;
 `);
 
 const cssUpperCase = styled('span', `
@@ -307,4 +315,12 @@ const cssTableList = styled('div', `
   overflow-y: auto;
   position: relative;
   margin-bottom: 56px;
+`);
+
+const cssLoadingDots = styled(loadingDots, `
+  --dot-size: 6px;
+`);
+
+const cssTableName = styled('span', `
+  color: ${css.theme.text};
 `);

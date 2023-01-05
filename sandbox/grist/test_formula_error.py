@@ -54,12 +54,33 @@ else:
                               TypeError, 'SQRT() takes exactly 1 argument (2 given)',
                               r"TypeError: SQRT\(\) takes exactly 1 argument \(2 given\)")
     else:
-      self.assertFormulaError(self.engine.get_formula_error('Math', 'excel_formula', 3),
-                              TypeError, 'SQRT() takes 1 positional argument but 2 were given',
-                              r"TypeError: SQRT\(\) takes 1 positional argument but 2 were given")
+      self.assertFormulaError(
+        self.engine.get_formula_error('Math', 'excel_formula', 3), TypeError,
+        'SQRT() takes 1 positional argument but 2 were given\n\n'
+        'A `TypeError` is usually caused by trying\n'
+        'to combine two incompatible types of objects,\n'
+        'by calling a function with the wrong type of object,\n'
+        'or by trying to do an operation not allowed on a given type of object.\n\n'
+        'You apparently have called the function `SQRT` with\n'
+        '2 positional argument(s) while it requires 1\n'
+        'such positional argument(s).',
+        r"TypeError: SQRT\(\) takes 1 positional argument but 2 were given",
+      )
 
+    int_not_iterable_message = "'int' object is not iterable"
+    if six.PY3:
+      int_not_iterable_message += (
+        '\n\n'
+        'A `TypeError` is usually caused by trying\n'
+        'to combine two incompatible types of objects,\n'
+        'by calling a function with the wrong type of object,\n'
+        'or by trying to do an operation not allowed on a given type of object.\n\n'
+        'An iterable is an object capable of returning its members one at a time.\n'
+        'Python containers (`list, tuple, dict`, etc.) are iterables.\n'
+        'An iterable is required here.'
+      )
     self.assertFormulaError(self.engine.get_formula_error('Math', 'built_in_formula', 3),
-                            TypeError, "'int' object is not iterable",
+                            TypeError, int_not_iterable_message,
                             textwrap.dedent(
                               r"""
                                 File "usercode", line \d+, in built_in_formula
@@ -68,8 +89,21 @@ else:
                               """
                             ))
 
+    if six.PY2:
+      message = "invalid syntax (usercode, line 5)"
+    else:
+      message = textwrap.dedent(
+        """\
+        invalid syntax
+
+        A `SyntaxError` occurs when Python cannot understand your code.
+
+        I am guessing that you wrote `:` by mistake.
+        Removing it and writing `return 0` seems to fix the error.
+
+         (usercode, line 5)""")
     self.assertFormulaError(self.engine.get_formula_error('Math', 'syntax_err', 3),
-                            SyntaxError, "invalid syntax (usercode, line 5)",
+                            SyntaxError, message,
                             textwrap.dedent(
                               r"""
                                 File "usercode", line 5
@@ -88,6 +122,7 @@ else:
         IndentationError: unexpected indent
         """
       )
+      message = 'unexpected indent (usercode, line 2)'
     else:
       traceback_regex = textwrap.dedent(
         r"""
@@ -96,12 +131,21 @@ else:
         IndentationError: unexpected indent
         """
       )
+      message = textwrap.dedent(
+        """\
+        unexpected indent
+
+        An `IndentationError` occurs when a given line of code is
+        not indented (aligned vertically with other lines) as expected.
+
+        Line `2` identified above is more indented than expected.
+
+         (usercode, line 2)""")
     self.assertFormulaError(self.engine.get_formula_error('Math', 'indent_err', 3),
-                            IndentationError, 'unexpected indent (usercode, line 2)',
-                            traceback_regex)
+                            IndentationError, message, traceback_regex)
 
     self.assertFormulaError(self.engine.get_formula_error('Math', 'other_err', 3),
-                            TypeError, "'int' object is not iterable",
+                            TypeError, int_not_iterable_message,
                             textwrap.dedent(
                               r"""
                                 File "usercode", line \d+, in other_err
@@ -113,6 +157,81 @@ else:
     self.assertFormulaError(self.engine.get_formula_error('Math', 'custom_err', 3),
                             Exception, "hello")
 
+  def test_missing_all_attribute(self):
+    # Test that `Table.Col` raises a helpful AttributeError suggesting to use `Table.all.Col`.
+    sample = testutil.parse_test_sample({
+      "SCHEMA": [
+        [1, "Table", [
+          [11, "A", "Any", True, "Table.id", "", ""],
+          [12, "B", "Any", True, "Table.id2", "", ""],
+        ]]
+      ],
+      "DATA": {
+        "Table": [
+          ["id"],
+          [1],
+        ]
+      }
+    })
+
+    self.load_sample(sample)
+
+    # `Table.id` gives a custom message because `id` is an existing column.
+    self.assertFormulaError(
+      self.engine.get_formula_error('Table', 'A', 1),
+      AttributeError,
+        'To retrieve all values in a column, use `Table.all.id`. '
+        "Tables have no attribute 'id'"
+        + six.PY3 * (
+          "\n\nAn `AttributeError` occurs when the code contains something like\n"
+          "    `object.x`\n"
+          "and `x` is not a method or attribute (variable) belonging to `object`."
+        )
+    )
+
+    # `Table.id2` gives a standard message because `id2` is not an existing column.
+    error = self.engine.get_formula_error('Table', 'B', 1).error
+    message = str(error)
+    self.assertNotIn('Table.all', message)
+    self.assertIn("'UserTable' object has no attribute 'id2'", message)
+
+  def test_missing_all_iteration(self):
+    sample = testutil.parse_test_sample({
+      "SCHEMA": [
+        [1, "MyTable", [
+          [11, "A", "Any", True, "list(MyTable)", "", ""],
+          [12, "B", "Any", True, "list(MyTable.all)", "", ""],
+        ]]
+      ],
+      "DATA": {
+        "MyTable": [
+          ["id"],
+          [1],
+        ]
+      }
+    })
+
+    self.load_sample(sample)
+
+    # `list(MyTable)` gives a custom message suggesting `.all`.
+    self.assertFormulaError(
+      self.engine.get_formula_error('MyTable', 'A', 1),
+      TypeError,
+        "To iterate (loop) over all records in a table, use `MyTable.all`. "
+        "Tables are not directly iterable."
+        + six.PY3 * (
+          '\n\nA `TypeError` is usually caused by trying\n'
+          'to combine two incompatible types of objects,\n'
+          'by calling a function with the wrong type of object,\n'
+          'or by trying to do an operation not allowed on a given type of object.'
+        )
+    )
+
+    # `list(MyTable.all)` works correctly.
+    self.assertTableData('MyTable', data=[
+      ['id', 'A', 'B'],
+      [ 1,   objtypes.RaisedException(TypeError()), [objtypes.RecordStub('MyTable', 1)]],
+    ])
 
   def test_lookup_state(self):
     # Bug https://phab.getgrist.com/T297 was caused by lookup maps getting corrupted while
@@ -350,9 +469,11 @@ else:
                             AttributeError, "Table 'AttrTest' has no column 'AA'",
                             r"AttributeError: Table 'AttrTest' has no column 'AA'")
     cell_error = self.engine.get_formula_error('AttrTest', 'C', 1)
-    self.assertFormulaError(cell_error,
-                            objtypes.CellError, "AttributeError in referenced cell AttrTest[1].B",
-                            r"CellError: AttributeError in referenced cell AttrTest\[1\].B")
+    self.assertFormulaError(
+      cell_error, objtypes.CellError,
+      "Table 'AttrTest' has no column 'AA'\n(in referenced cell AttrTest[1].B)",
+      r"CellError: AttributeError in referenced cell AttrTest\[1\].B",
+    )
     self.assertEqual(
       objtypes.encode_object(cell_error),
       ['E',

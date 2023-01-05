@@ -1,5 +1,7 @@
-// Letter codes for CellValue types encoded as [code, args...] tuples.
-export const enum GristObjCode {
+/**
+ * Letter codes for CellValue types encoded as [code, args...] tuples.
+ */
+export enum GristObjCode {
   List            = 'L',
   LookUp          = 'l',
   Dict            = 'O',
@@ -15,6 +17,9 @@ export const enum GristObjCode {
   Versions        = 'V',
 }
 
+/**
+ * Possible types of cell content.
+ */
 export type CellValue = number|string|boolean|null|[GristObjCode, ...unknown[]];
 export interface BulkColValues { [colId: string]: CellValue[]; }
 

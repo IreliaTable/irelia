@@ -1,6 +1,8 @@
 # pylint: disable=unused-argument
 
 from __future__ import absolute_import
+
+import datetime
 import math as _math
 import operator
 import os
@@ -15,18 +17,16 @@ from functions.info import ISNUMBER, ISLOGICAL
 from functions.unimplemented import unimplemented
 import roman
 
-if os.environ.get("DETERMINISTIC_MODE"):
-  random.seed(1)
-
-
 # Iterates through elements of iterable arguments, or through individual args when not iterable.
 def _chain(*values_or_iterables):
   for v in values_or_iterables:
     try:
-      for x in v:
-        yield x
+      v = iter(v)
     except TypeError:
       yield v
+    else:
+      for x in v:
+        yield x
 
 
 # Iterates through iterable or other arguments, skipping non-numeric ones.
@@ -40,6 +40,13 @@ def _chain_numeric(*values_or_iterables):
 def _chain_numeric_a(*values_or_iterables):
   for v in _chain(*values_or_iterables):
     yield int(v) if ISLOGICAL(v) else v if ISNUMBER(v) else 0
+
+
+# Iterates through iterable or other arguments, only including numbers, dates, and datetimes.
+def _chain_numeric_or_date(*values_or_iterables):
+  for v in _chain(*values_or_iterables):
+    if ISNUMBER(v) and not ISLOGICAL(v) or isinstance(v, (datetime.date, datetime.datetime)):
+      yield v
 
 
 def _round_toward_zero(value):
@@ -867,7 +874,14 @@ def UUID():
   This would only calculate UUID() once and freeze the calculated value. By contrast, a regular formula
   may get recalculated any time the document is reloaded, producing a different value for UUID() each time.
   """
-  if six.PY2:
-    return str(uuid.UUID(bytes=[chr(random.randrange(0, 256)) for _ in xrange(0, 16)], version=4))
-  else:
-    return str(uuid.UUID(bytes=bytes([random.randrange(0, 256) for _ in range(0, 16)]), version=4))
+  try:
+    uid = uuid.uuid4()
+  except Exception:
+    # Pynbox doesn't support the above because it doesn't support `os.urandom()`.
+    # Using the `random` module is less secure but should be OK.
+    if six.PY2:
+      byts = [chr(random.randrange(0, 256)) for _ in xrange(0, 16)]
+    else:
+      byts = bytes([random.randrange(0, 256) for _ in range(0, 16)])
+    uid = uuid.UUID(bytes=byts, version=4)
+  return str(uid)

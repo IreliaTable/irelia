@@ -1,8 +1,10 @@
 import { DocAction } from 'app/common/DocActions';
+import { DocData } from 'app/common/DocData';
+import { SchemaTypes } from 'app/common/schema';
 import { FlexServer } from 'app/server/lib/FlexServer';
 import axios from 'axios';
 import pick = require('lodash/pick');
-import * as WebSocket from 'ws';
+import WebSocket from 'ws';
 
 interface GristRequest {
   reqId: number;
@@ -28,6 +30,7 @@ export class GristClient {
 
   private _requestId: number = 0;
   private _pending: Array<GristResponse|GristMessage> = [];
+  private _docData?: DocData;  // accumulate tabular info like a real client.
   private _consumer: () => void;
   private _ignoreTrivialActions: boolean = false;
 
@@ -41,6 +44,17 @@ export class GristClient {
         return;
       }
       this._pending.push(msg);
+      if (msg.data?.doc) {
+        this._docData = new DocData(() => {
+          throw new Error('no fetches');
+        }, msg.data.doc);
+      }
+      if (this._docData && msg.type === 'docUserAction') {
+        const docActions = msg.data?.docActions || [];
+        for (const docAction of docActions) {
+          this._docData.receiveAction(docAction);
+        }
+      }
       if (this._consumer) { this._consumer(); }
     };
   }
@@ -63,6 +77,15 @@ export class GristClient {
 
   public count() {
     return this._pending.length;
+  }
+
+  public get docData() {
+    if (!this._docData) { throw new Error('no DocData'); }
+    return this._docData;
+  }
+
+  public getMetaRecords(tableId: keyof SchemaTypes) {
+    return this.docData.getMetaTable(tableId).getRecords();
   }
 
   public async read(): Promise<any> {
@@ -95,6 +118,11 @@ export class GristClient {
       }
       return result;
     }
+  }
+
+  public waitForServer() {
+    // send an arbitrary failing message and wait for response.
+    return this.send('ping');
   }
 
   // Helper to read the next docUserAction ignoring anything else (e.g. a duplicate clientConnect).
@@ -143,7 +171,7 @@ export async function openClient(server: FlexServer, email: string, org: string,
     if (email !== 'anon@getgrist.com') {
       const cid = decodeURIComponent(cookie.split('=')[1].split(';')[0]);
       const comm = server.getComm();
-      const sessionId = comm.getSessionIdFromCookie(cid);
+      const sessionId = comm.getSessionIdFromCookie(cid)!;
       const scopedSession = comm.getOrCreateSession(sessionId, {org});
       const profile = { email, email_verified: true, name: "Someone" };
       await scopedSession.updateUserProfile({} as any, profile);
@@ -155,6 +183,7 @@ export async function openClient(server: FlexServer, email: string, org: string,
   const ws = new WebSocket('ws://localhost:' + server.getOwnPort() + `/o/${org}`, {
     headers
   });
+  const client = new GristClient(ws);
   await new Promise(function(resolve, reject) {
     ws.on('open', function() {
       resolve(ws);
@@ -163,5 +192,5 @@ export async function openClient(server: FlexServer, email: string, org: string,
       reject(err);
     });
   });
-  return new GristClient(ws);
+  return client;
 }

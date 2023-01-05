@@ -66,28 +66,14 @@ class TestSummary(test_engine.EngineTestCase):
   #----------------------------------------------------------------------
 
   def test_encode_summary_table_name(self):
-    self.assertEqual(summary.encode_summary_table_name("Foo"), "GristSummary_3_Foo")
-    self.assertEqual(summary.encode_summary_table_name("Foo2"), "GristSummary_4_Foo2")
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_3_Foo"), "Foo")
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_4_Foo2"), "Foo2")
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_3_Foo2"), "Foo")
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_4_Foo2_2"), "Foo2")
-    # Test that underscore in the name is OK.
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_5_Foo_234"), "Foo_2")
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_4_Foo_234"), "Foo_")
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_6__Foo_234"), "_Foo_2")
-    # Test that we return None for invalid values.
-    self.assertEqual(summary.decode_summary_table_name("Foo2"), None)
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_3Foo"), None)
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_4_Foo"), None)
-    self.assertEqual(summary.decode_summary_table_name("GristSummary_3X_Foo"), None)
-    self.assertEqual(summary.decode_summary_table_name("_5_Foo_234"), None)
-    self.assertEqual(summary.decode_summary_table_name("_GristSummary_3_Foo"), None)
-    self.assertEqual(summary.decode_summary_table_name("gristsummary_3_Foo"), None)
-    self.assertEqual(summary.decode_summary_table_name("GristSummary3_Foo"), None)
+    self.assertEqual(summary.encode_summary_table_name("Foo", []), "Foo_summary")
+    self.assertEqual(summary.encode_summary_table_name("Foo", ["A"]), "Foo_summary_A")
+    self.assertEqual(summary.encode_summary_table_name("Foo", ["A", "B"]), "Foo_summary_A_B")
+    self.assertEqual(summary.encode_summary_table_name("Foo", ["B", "A"]), "Foo_summary_A_B")
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_create_view_section(self):
     self.load_sample(self.sample)
 
@@ -116,7 +102,7 @@ class TestSummary(test_engine.EngineTestCase):
 
     # Verify that a new table gets created, and a new view, with a section for that table,
     # and some auto-generated summary fields.
-    summary_table1 = Table(2, "GristSummary_7_Address", primaryViewId=0, summarySourceTable=1,
+    summary_table1 = Table(2, "Address_summary", primaryViewId=0, summarySourceTable=1,
                            columns=[
       Column(14, "group", "RefList:Address", isFormula=True, summarySourceCol=0,
              formula="table.getSummarySourceGroup(rec)"),
@@ -126,16 +112,16 @@ class TestSummary(test_engine.EngineTestCase):
              formula="SUM($group.amount)"),
     ])
     summary_view1 = View(2, sections=[
-      Section(2, parentKey="record", tableRef=2, fields=[
-        Field(4, colRef=15),
-        Field(5, colRef=16),
+      Section(3, parentKey="record", tableRef=2, fields=[
+        Field(6, colRef=15),
+        Field(7, colRef=16),
       ])
     ])
     self.assertTables([self.starting_table, summary_table1])
     self.assertViews([basic_view, summary_view1])
 
     # Verify the summarized data.
-    self.assertTableData('GristSummary_7_Address', cols="subset", data=[
+    self.assertTableData('Address_summary', cols="subset", data=[
       [ "id", "count",  "amount"],
       [ 1,    11,       66.0    ],
     ])
@@ -145,7 +131,7 @@ class TestSummary(test_engine.EngineTestCase):
 
     # Verify that a new table gets created again, a new view, and a section for that table.
     # Note that we also check that summarySourceTable and summarySourceCol fields are correct.
-    summary_table2 = Table(3, "GristSummary_7_Address2", primaryViewId=0, summarySourceTable=1,
+    summary_table2 = Table(3, "Address_summary_state", primaryViewId=0, summarySourceTable=1,
                            columns=[
       Column(17, "state", "Text", isFormula=False, formula="", summarySourceCol=12),
       Column(18, "group", "RefList:Address", isFormula=True, summarySourceCol=0,
@@ -156,10 +142,10 @@ class TestSummary(test_engine.EngineTestCase):
              formula="SUM($group.amount)"),
     ])
     summary_view2 = View(3, sections=[
-      Section(3, parentKey="record", tableRef=3, fields=[
-        Field(6, colRef=17),
-        Field(7, colRef=19),
-        Field(8, colRef=20),
+      Section(5, parentKey="record", tableRef=3, fields=[
+        Field(11, colRef=17),
+        Field(12, colRef=19),
+        Field(13, colRef=20),
       ])
     ])
     self.assertTables([self.starting_table, summary_table1, summary_table2])
@@ -173,7 +159,7 @@ class TestSummary(test_engine.EngineTestCase):
     ])
 
     # Verify the summarized data.
-    self.assertTableData('GristSummary_7_Address2', cols="subset", data=[
+    self.assertTableData('Address_summary_state', cols="subset", data=[
       [ "id", "state", "count", "amount"          ],
       [ 1,    "NY",     7,      1.+2+6+7+8+10+11  ],
       [ 2,    "WA",     1,      3.                ],
@@ -185,7 +171,7 @@ class TestSummary(test_engine.EngineTestCase):
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [11,12], None])
 
     # Verify the new table and views.
-    summary_table3 = Table(4, "GristSummary_7_Address3", primaryViewId=0, summarySourceTable=1,
+    summary_table3 = Table(4, "Address_summary_city_state", primaryViewId=0, summarySourceTable=1,
                            columns=[
       Column(21, "city", "Text", isFormula=False, formula="", summarySourceCol=11),
       Column(22, "state", "Text", isFormula=False, formula="", summarySourceCol=12),
@@ -197,18 +183,18 @@ class TestSummary(test_engine.EngineTestCase):
              formula="SUM($group.amount)"),
     ])
     summary_view3 = View(4, sections=[
-      Section(4, parentKey="record", tableRef=4, fields=[
-        Field(9, colRef=21),
-        Field(10, colRef=22),
-        Field(11, colRef=24),
-        Field(12, colRef=25),
+      Section(7, parentKey="record", tableRef=4, fields=[
+        Field(18, colRef=21),
+        Field(19, colRef=22),
+        Field(20, colRef=24),
+        Field(21, colRef=25),
       ])
     ])
     self.assertTables([self.starting_table, summary_table1, summary_table2, summary_table3])
     self.assertViews([basic_view, summary_view1, summary_view2, summary_view3])
 
     # Verify the summarized data.
-    self.assertTableData('GristSummary_7_Address3', cols="subset", data=[
+    self.assertTableData('Address_summary_city_state', cols="subset", data=[
       [ "id", "city",     "state", "count", "amount"  ],
       [ 1,    "New York", "NY"   , 3,       1.+6+11   ],
       [ 2,    "Albany",   "NY"   , 1,       2.        ],
@@ -260,6 +246,7 @@ class Address:
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_summary_table_reuse(self):
     # Test that we'll reuse a suitable summary table when already available.
 
@@ -269,7 +256,7 @@ class Address:
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [11,12], None])
 
     # Verify the new table and views.
-    summary_table = Table(2, "GristSummary_7_Address", primaryViewId=0, summarySourceTable=1,
+    summary_table = Table(2, "Address_summary_city_state", primaryViewId=0, summarySourceTable=1,
                            columns=[
       Column(14, "city", "Text", isFormula=False, formula="", summarySourceCol=11),
       Column(15, "state", "Text", isFormula=False, formula="", summarySourceCol=12),
@@ -281,11 +268,11 @@ class Address:
              formula="SUM($group.amount)"),
     ])
     summary_view = View(1, sections=[
-      Section(1, parentKey="record", tableRef=2, fields=[
-        Field(1, colRef=14),
-        Field(2, colRef=15),
-        Field(3, colRef=17),
-        Field(4, colRef=18),
+      Section(2, parentKey="record", tableRef=2, fields=[
+        Field(5, colRef=14),
+        Field(6, colRef=15),
+        Field(7, colRef=17),
+        Field(8, colRef=18),
       ])
     ])
     self.assertTables([self.starting_table, summary_table])
@@ -296,19 +283,19 @@ class Address:
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [12,11], None])
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [11,12], None])
     summary_view2 = View(2, sections=[
-      Section(2, parentKey="record", tableRef=2, fields=[
-        Field(5, colRef=15),
-        Field(6, colRef=14),
-        Field(7, colRef=17),
-        Field(8, colRef=18),
+      Section(3, parentKey="record", tableRef=2, fields=[
+        Field(9, colRef=15),
+        Field(10, colRef=14),
+        Field(11, colRef=17),
+        Field(12, colRef=18),
       ])
     ])
     summary_view3 = View(3, sections=[
-      Section(3, parentKey="record", tableRef=2, fields=[
-        Field(9, colRef=14),
-        Field(10, colRef=15),
-        Field(11, colRef=17),
-        Field(12, colRef=18),
+      Section(4, parentKey="record", tableRef=2, fields=[
+        Field(13, colRef=14),
+        Field(14, colRef=15),
+        Field(15, colRef=17),
+        Field(16, colRef=18),
       ])
     ])
     # Verify that we have a new view, but are reusing the table.
@@ -316,7 +303,7 @@ class Address:
     self.assertViews([summary_view, summary_view2, summary_view3])
 
     # Verify the summarized data.
-    self.assertTableData('GristSummary_7_Address', cols="subset", data=[
+    self.assertTableData('Address_summary_city_state', cols="subset", data=[
       [ "id", "city",     "state", "count", "amount"  ],
       [ 1,    "New York", "NY"   , 3,       1.+6+11   ],
       [ 2,    "Albany",   "NY"   , 1,       2.        ],
@@ -331,6 +318,7 @@ class Address:
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_summary_no_invalid_reuse(self):
     # Verify that if we have some summary tables for one table, they don't mistakenly get used
     # when we need a summary for another table.
@@ -342,12 +330,12 @@ class Address:
 
     self.assertTables([
       self.starting_table,
-      Table(2, "GristSummary_7_Address", 0, 1, columns=[
+      Table(2, "Address_summary", 0, 1, columns=[
         Column(14, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(15, "count",   "Int",      True,   "len($group)", 0),
         Column(16, "amount",  "Numeric",  True,   "SUM($group.amount)", 0),
       ]),
-      Table(3, "GristSummary_7_Address2", 0, 1, columns=[
+      Table(3, "Address_summary_state", 0, 1, columns=[
         Column(17, "state",   "Text",     False,  "", 12),
         Column(18, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(19, "count",   "Int",      True,   "len($group)", 0),
@@ -370,8 +358,8 @@ class Address:
     self.assertTableData("_grist_Tables", cols="subset", data=[
       ['id',    'tableId',  'summarySourceTable'],
       [ 1,      'Address',                  0],
-      [ 2,      'GristSummary_7_Address',   1],
-      [ 3,      'GristSummary_7_Address2',  1],
+      [ 2,      'Address_summary',   1],
+      [ 3,      'Address_summary_state',  1],
       [ 4,      'Address2',                 0],
     ])
 
@@ -382,12 +370,12 @@ class Address:
     # Make sure this creates new section rather than reuses similar ones for the wrong table.
     self.assertTables([
       self.starting_table,
-      Table(2, "GristSummary_7_Address", 0, 1, columns=[
+      Table(2, "Address_summary", 0, 1, columns=[
         Column(14, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(15, "count",   "Int",      True,   "len($group)", 0),
         Column(16, "amount",  "Numeric",  True,   "SUM($group.amount)", 0),
       ]),
-      Table(3, "GristSummary_7_Address2", 0, 1, columns=[
+      Table(3, "Address_summary_state", 0, 1, columns=[
         Column(17, "state",   "Text",     False,  "", 12),
         Column(18, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(19, "count",   "Int",      True,   "len($group)", 0),
@@ -399,12 +387,12 @@ class Address:
         Column(23, "state",   "Text",     False, "", 0),
         Column(24, "amount",  "Numeric",  False, "", 0),
       ]),
-      Table(5, "GristSummary_8_Address2", 0, 4, columns=[
+      Table(5, "Address2_summary", 0, 4, columns=[
         Column(25, "group",   "RefList:Address2", True, "table.getSummarySourceGroup(rec)", 0),
         Column(26, "count",   "Int",      True,   "len($group)", 0),
         Column(27, "amount",  "Numeric",  True,   "SUM($group.amount)", 0),
       ]),
-      Table(6, "GristSummary_8_Address2_2", 0, 4, columns=[
+      Table(6, "Address2_summary_state", 0, 4, columns=[
         Column(28, "state",   "Text",     False,  "", 23),
         Column(29, "group",   "RefList:Address2", True, "table.getSummarySourceGroup(rec)", 0),
         Column(30, "count",   "Int",      True,   "len($group)", 0),
@@ -414,6 +402,7 @@ class Address:
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_summary_updates(self):
     # Verify that summary tables update automatically when we change a value used in a summary
     # formula; or a value in a group-by column; or add/remove a record; that records get
@@ -424,7 +413,7 @@ class Address:
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [11,12], None])
 
     # Verify that the summary table respects all updates to the source table.
-    self._do_test_updates("Address", "GristSummary_7_Address")
+    self._do_test_updates("Address", "Address_summary_city_state")
 
   def _do_test_updates(self, source_tbl_name, summary_tbl_name):
     # This is the main part of test_summary_updates(). It's moved to its own method so that
@@ -459,9 +448,10 @@ class Address:
     self.assertPartialOutActions(out_actions, {
       "stored": [
         actions.UpdateRecord(source_tbl_name, 28, {'state': 'MA'}),
-        actions.BulkUpdateRecord(summary_tbl_name, [5,7], {'amount': [5.0 + 8.0, 0.0]}),
-        actions.BulkUpdateRecord(summary_tbl_name, [5,7], {'count': [2, 0]}),
-        actions.BulkUpdateRecord(summary_tbl_name, [5,7], {'group': [[25, 28], []]}),
+        actions.RemoveRecord(summary_tbl_name, 7),
+        actions.UpdateRecord(summary_tbl_name, 5, {'amount': 5.0 + 8.0}),
+        actions.UpdateRecord(summary_tbl_name, 5, {'count': 2}),
+        actions.UpdateRecord(summary_tbl_name, 5, {'group': [25, 28]}),
       ]
     })
 
@@ -513,6 +503,28 @@ class Address:
       ]
     })
 
+    # Add a new source record which creates a new summary row,
+    # then delete the source row which implicitly deletes the summary row.
+    # Overall this is a no-op, but it tests a specific undo-related bugfix.
+    self.add_record(source_tbl_name, city="Nowhere", state="??", amount=666)
+    out_actions = self.remove_record(source_tbl_name, 34)
+    self.assertOutActions(out_actions, {
+      'calc': [],
+      'direct': [True, False],
+      'stored': [
+        ['RemoveRecord', source_tbl_name, 34],
+        ['RemoveRecord', summary_tbl_name, 12],
+      ],
+      'undo': [
+        ['UpdateRecord', summary_tbl_name, 12, {'group': ['L', 34]}],
+        ['UpdateRecord', summary_tbl_name, 12, {'count': 1}],
+        ['UpdateRecord', summary_tbl_name, 12, {'amount': 666.0}],
+        ['AddRecord', source_tbl_name, 34, {'amount': 666.0, 'city': 'Nowhere', 'state': '??'}],
+        ['AddRecord', summary_tbl_name, 12,
+         {'city': 'Nowhere', 'group': ['L'], 'state': '??'}],
+      ],
+    })
+
     # Verify the resulting data after all the updates.
     self.assertTableData(summary_tbl_name, cols="subset", data=[
       [ "id", "city",     "state", "count", "amount"  ],
@@ -522,7 +534,6 @@ class Address:
       [ 4,    "Chicago",  "IL"   , 1,       4.        ],
       [ 5,    "Bedford",  "MA"   , 1,       108.      ],
       [ 6,    "Buffalo",  "NY"   , 1,       7.        ],
-      [ 7,    "Bedford",  "NY"   , 0,       0.        ],
       [ 8,    "Boston",   "MA"   , 1,       9.        ],
       [ 9,    "Yonkers",  "NY"   , 1,       10.       ],
       [ 10,   "Salem",    "MA"   , 1,       5.0       ],
@@ -531,6 +542,7 @@ class Address:
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_table_rename(self):
     # Verify that summary tables keep working and updating when source table is renamed.
 
@@ -541,22 +553,38 @@ class Address:
     # Check what tables we have now.
     self.assertPartialData("_grist_Tables", ["id", "tableId", "summarySourceTable"], [
       [1, "Address",                  0],
-      [2, "GristSummary_7_Address",   1],
+      [2, "Address_summary_city_state",   1],
     ])
+
+    # Add a column to the summary table with a name that doesn't exist in the source table,
+    # to test a specific bug fix.
+    self.add_column(
+      "Address_summary_city_state", "lookup",
+      formula="Address.lookupRecords(city=$city)", isFormula=True
+    )
 
     # Rename the table: this is what we are really testing in this test case.
     self.apply_user_action(["RenameTable", "Address", "Location"])
 
     self.assertPartialData("_grist_Tables", ["id", "tableId", "summarySourceTable"], [
       [1, "Location",                  0],
-      [2, "GristSummary_8_Location",   1],
+      [2, "Location_summary_city_state",   1],
     ])
 
+    # Check that the summary table column's formula was updated correctly.
+    self.assertTableData("_grist_Tables_column", cols="subset", rows="subset", data=[
+      ["id", "colId", "formula"],
+      [19, "lookup", "Location.lookupRecords(city=$city)"],
+    ])
+    # This column isn't expected in _do_test_updates().
+    self.remove_column("Location_summary_city_state", "lookup")
+
     # Verify that the bigger summary table respects all updates to the renamed source table.
-    self._do_test_updates("Location", "GristSummary_8_Location")
+    self._do_test_updates("Location", "Location_summary_city_state")
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_table_rename_multiple(self):
     # Similar to the above, verify renames, but now with two summary tables.
 
@@ -565,11 +593,11 @@ class Address:
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [], None])
     self.assertPartialData("_grist_Tables", ["id", "tableId", "summarySourceTable"], [
       [1, "Address",                  0],
-      [2, "GristSummary_7_Address",   1],
-      [3, "GristSummary_7_Address2",  1],
+      [2, "Address_summary_city_state",   1],
+      [3, "Address_summary",  1],
     ])
     # Verify the data in the simple totals-only summary table.
-    self.assertTableData('GristSummary_7_Address2', cols="subset", data=[
+    self.assertTableData('Address_summary', cols="subset", data=[
       [ "id", "count",  "amount"],
       [ 1,    11,       66.0    ],
     ])
@@ -578,24 +606,25 @@ class Address:
     self.apply_user_action(["RenameTable", "Address", "Addresses"])
     self.assertPartialData("_grist_Tables", ["id", "tableId", "summarySourceTable"], [
       [1, "Addresses",                  0],
-      [2, "GristSummary_9_Addresses",   1],
-      [3, "GristSummary_9_Addresses2",  1],
+      [2, "Addresses_summary_city_state",   1],
+      [3, "Addresses_summary",  1],
     ])
-    self.assertTableData('GristSummary_9_Addresses2', cols="subset", data=[
+    self.assertTableData('Addresses_summary', cols="subset", data=[
       [ "id", "count",  "amount"],
       [ 1,    11,       66.0    ],
     ])
 
     # Remove one of the tables so that we can use _do_test_updates to verify updates still work.
-    self.apply_user_action(["RemoveTable", "GristSummary_9_Addresses2"])
+    self.apply_user_action(["RemoveTable", "Addresses_summary"])
     self.assertPartialData("_grist_Tables", ["id", "tableId", "summarySourceTable"], [
       [1, "Addresses",                  0],
-      [2, "GristSummary_9_Addresses",   1],
+      [2, "Addresses_summary_city_state",   1],
     ])
-    self._do_test_updates("Addresses", "GristSummary_9_Addresses")
+    self._do_test_updates("Addresses", "Addresses_summary_city_state")
 
   #----------------------------------------------------------------------
 
+  @test_engine.test_undo
   def test_change_summary_formula(self):
     # Verify that changing a summary formula affects all group-by variants, and adding a new
     # summary table gets the changed formula.
@@ -610,14 +639,14 @@ class Address:
     # These are the tables and columns we automatically get.
     self.assertTables([
       self.starting_table,
-      Table(2, "GristSummary_7_Address", 0, 1, columns=[
+      Table(2, "Address_summary_city_state", 0, 1, columns=[
         Column(14, "city",    "Text",     False,  "", 11),
         Column(15, "state",   "Text",     False,  "", 12),
         Column(16, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(17, "count",   "Int",      True,   "len($group)", 0),
         Column(18, "amount",  "Numeric",  True,   "SUM($group.amount)", 0),
       ]),
-      Table(3, "GristSummary_7_Address2", 0, 1, columns=[
+      Table(3, "Address_summary", 0, 1, columns=[
         Column(19, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(20, "count",   "Int",      True,   "len($group)", 0),
         Column(21, "amount",  "Numeric",  True,   "SUM($group.amount)", 0),
@@ -626,7 +655,7 @@ class Address:
 
     # Now change a formula using one of the summary tables. It should trigger an equivalent
     # change in the other.
-    self.apply_user_action(["ModifyColumn", "GristSummary_7_Address", "amount",
+    self.apply_user_action(["ModifyColumn", "Address_summary_city_state", "amount",
                             {"formula": "10*sum($group.amount)"}])
     self.assertTableData('_grist_Tables_column', rows="subset", cols="subset", data=[
       ['id', 'colId',  'type',    'formula',               'widgetOptions', 'label'],
@@ -635,7 +664,7 @@ class Address:
     ])
 
     # Change a formula and a few other fields in the other table, and verify a change to both.
-    self.apply_user_action(["ModifyColumn", "GristSummary_7_Address2", "amount",
+    self.apply_user_action(["ModifyColumn", "Address_summary", "amount",
                             {"formula": "100*sum($group.amount)",
                              "type": "Text",
                              "widgetOptions": "hello",
@@ -649,7 +678,7 @@ class Address:
     ])
 
     # Check the values in the summary tables: they should reflect the new formula.
-    self.assertTableData('GristSummary_7_Address', cols="subset", data=[
+    self.assertTableData('Address_summary_city_state', cols="subset", data=[
       [ "id", "city",     "state", "count", "amount"  ],
       [ 1,    "New York", "NY"   , 3,       str(100*(1+6+11))],
       [ 2,    "Albany",   "NY"   , 1,       "200"        ],
@@ -661,7 +690,7 @@ class Address:
       [ 8,    "Boston",   "MA"   , 1,       "900"        ],
       [ 9,    "Yonkers",  "NY"   , 1,       "1000"       ],
     ])
-    self.assertTableData('GristSummary_7_Address2', cols="subset", data=[
+    self.assertTableData('Address_summary', cols="subset", data=[
       [ "id", "count",  "amount"],
       [ 1,    11,       "6600"],
     ])
@@ -670,19 +699,19 @@ class Address:
     self.apply_user_action(["CreateViewSection", 1, 0, "record", [12], None])
     self.assertTables([
       self.starting_table,
-      Table(2, "GristSummary_7_Address", 0, 1, columns=[
+      Table(2, "Address_summary_city_state", 0, 1, columns=[
         Column(14, "city",    "Text",     False,  "", 11),
         Column(15, "state",   "Text",     False,  "", 12),
         Column(16, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(17, "count",   "Int",      True,   "len($group)", 0),
         Column(18, "amount",  "Text",     True,   "100*sum($group.amount)", 0),
       ]),
-      Table(3, "GristSummary_7_Address2", 0, 1, columns=[
+      Table(3, "Address_summary", 0, 1, columns=[
         Column(19, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(20, "count",   "Int",      True,   "len($group)", 0),
         Column(21, "amount",  "Text",     True,   "100*sum($group.amount)", 0),
       ]),
-      Table(4, "GristSummary_7_Address3", 0, 1, columns=[
+      Table(4, "Address_summary_state", 0, 1, columns=[
         Column(22, "state",   "Text",     False,  "", 12),
         Column(23, "group",   "RefList:Address", True, "table.getSummarySourceGroup(rec)", 0),
         Column(24, "count",   "Int",      True,   "len($group)", 0),
@@ -697,7 +726,7 @@ class Address:
     ])
 
     # Verify the summarized data.
-    self.assertTableData('GristSummary_7_Address3', cols="subset", data=[
+    self.assertTableData('Address_summary_state', cols="subset", data=[
       [ "id", "state", "count", "amount"                    ],
       [ 1,    "NY",     7,      str(int(100*(1.+2+6+7+8+10+11))) ],
       [ 2,    "WA",     1,      "300"                     ],
@@ -706,6 +735,7 @@ class Address:
     ])
 
   #----------------------------------------------------------------------
+  @test_engine.test_undo
   def test_convert_source_column(self):
     # Verify that we can convert the type of a column when there is a summary table using that
     # column to group by. Since converting generates extra summary records, this may cause bugs.
@@ -722,7 +752,7 @@ class Address:
         Column(3, "B",          "Numeric",        False,  "", 0),
         Column(4, "C",          "Any",            True,   "", 0),
       ]),
-      Table(2, "GristSummary_6_Table1", summarySourceTable=1, primaryViewId=0, columns=[
+      Table(2, "Table1_summary_A", summarySourceTable=1, primaryViewId=0, columns=[
         Column(5, "A",          "Numeric",        False,  "", 2),
         Column(6, "group",      "RefList:Table1", True,  "table.getSummarySourceGroup(rec)", 0),
         Column(7, "count",      "Int",            True,  "len($group)", 0),
@@ -735,7 +765,7 @@ class Address:
       [ 2,    2.0,          20,   2.0,    None  ],
       [ 3,    3.0,          10,   3.0,    None  ],
     ])
-    self.assertTableData('GristSummary_6_Table1', data=[
+    self.assertTableData('Table1_summary_A', data=[
       [ "id", "A",  "group",  "count",  "B" ],
       [ 1,    10,   [1,3],    2,        4   ],
       [ 2,    20,   [2],      1,        2   ],
@@ -753,7 +783,7 @@ class Address:
         Column(3, "B",          "Numeric",        False,  "", 0),
         Column(4, "C",          "Any",            True,   "", 0),
       ]),
-      Table(2, "GristSummary_6_Table1", summarySourceTable=1, primaryViewId=0, columns=[
+      Table(2, "Table1_summary_A", summarySourceTable=1, primaryViewId=0, columns=[
         Column(5, "A",          "Text",           False,  "", 2),
         Column(6, "group",      "RefList:Table1", True,  "table.getSummarySourceGroup(rec)", 0),
         Column(7, "count",      "Int",            True,  "len($group)", 0),
@@ -766,7 +796,7 @@ class Address:
       [ 2,    2.0,          "20", 2.0,  None  ],
       [ 3,    3.0,          "10", 3.0,  None  ],
     ])
-    self.assertTableData('GristSummary_6_Table1', data=[
+    self.assertTableData('Table1_summary_A', data=[
       [ "id", "A",  "group",  "count",  "B" ],
       [ 1,    "10", [1,3],    2,        4   ],
       [ 2,    "20", [2],      1,        2   ],
@@ -791,7 +821,7 @@ class Address:
         Column(3, "B",          "Numeric",        False,  "", 0),
         Column(4, "C",          "Numeric",        False,  "", 0),
       ]),
-      Table(2, "GristSummary_6_Table1", summarySourceTable=1, primaryViewId=0, columns=[
+      Table(2, "Table1_summary_A_B", summarySourceTable=1, primaryViewId=0, columns=[
         Column(5, "A",          "Text",           False,  "", 2),
         Column(6, "B",          "Numeric",        False,  "", 3),
         Column(7, "group",      "RefList:Table1", True,  "table.getSummarySourceGroup(rec)", 0),
@@ -805,7 +835,7 @@ class Address:
       [ 2,    2.0,          'b',  1.0,  5   ],
       [ 3,    3.0,          'c',  2.0,  6   ],
     ])
-    self.assertTableData('GristSummary_6_Table1', data=[
+    self.assertTableData('Table1_summary_A_B', data=[
       [ "id", "A",  "B",  "group",  "count",  "C" ],
       [ 1,    'a',  1.0,  [1],      1,        4   ],
       [ 2,    'b',  1.0,  [2],      1,        5   ],
@@ -822,7 +852,7 @@ class Address:
         Column(3, "B",          "Numeric",        False,  "", 0),
         Column(4, "C",          "Numeric",        False,  "", 0),
       ]),
-      Table(3, "GristSummary_6_Table1_2", summarySourceTable=1, primaryViewId=0, columns=[
+      Table(3, "Table1_summary_B", summarySourceTable=1, primaryViewId=0, columns=[
         Column(10, "B",          "Numeric",        False,  "", 3),
         Column(12, "count",      "Int",            True,  "len($group)", 0),
         Column(13, "C",          "Numeric",        True,  "SUM($group.C)", 0),
@@ -835,7 +865,7 @@ class Address:
       [ 2,    2.0,          1.0,  5   ],
       [ 3,    3.0,          2.0,  6   ],
     ])
-    self.assertTableData('GristSummary_6_Table1_2', data=[
+    self.assertTableData('Table1_summary_B', data=[
       [ "id", "B",  "group",  "count",  "C" ],
       [ 1,    1.0,  [1,2],    2,        9   ],
       [ 2,    2.0,  [3],      1,        6   ],

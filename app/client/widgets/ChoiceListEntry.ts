@@ -1,12 +1,12 @@
 import {IToken, TokenField} from 'app/client/lib/TokenField';
-import {cssBlockedCursor} from 'app/client/ui/RightPanel';
+import {cssBlockedCursor} from 'app/client/ui/RightPanelStyles';
 import {basicButton, primaryButton} from 'app/client/ui2018/buttons';
 import {colorButton, ColorOption} from 'app/client/ui2018/ColorSelect';
-import {colors, testId} from 'app/client/ui2018/cssVars';
+import {colors, testId, theme} from 'app/client/ui2018/cssVars';
 import {editableLabel} from 'app/client/ui2018/editableLabel';
 import {icon} from 'app/client/ui2018/icons';
 import {ChoiceOptionsByName, IChoiceOptions} from 'app/client/widgets/ChoiceTextBox';
-import {Computed, Disposable, dom, DomContents, DomElementArg, Holder, Observable, styled} from 'grainjs';
+import {Computed, Disposable, dom, DomContents, DomElementArg, Holder, MultiHolder, Observable, styled} from 'grainjs';
 import {createCheckers, iface, ITypeSuite, opt, union} from 'ts-interface-checker';
 import isEqual = require('lodash/isEqual');
 import uniqBy = require('lodash/uniqBy');
@@ -95,7 +95,8 @@ export class ChoiceListEntry extends Disposable {
     private _values: Observable<string[]>,
     private _choiceOptionsByName: Observable<ChoiceOptionsByName>,
     private _onSave: (values: string[], choiceOptions: ChoiceOptionsByName, renames: Record<string, string>) => void,
-    private _disabled: Observable<boolean>
+    private _disabled: Observable<boolean>,
+    private _mixed: Observable<boolean>,
   ) {
     super();
 
@@ -110,10 +111,12 @@ export class ChoiceListEntry extends Disposable {
   public buildDom(maxRows: number = 6): DomContents {
     return dom.domComputed(this._isEditing, (editMode) => {
       if (editMode) {
+        // If we have mixed values, we can't show any options on the editor.
+        const initialValue = this._mixed.get() ? [] : this._values.get().map(label => {
+          return new ChoiceItem(label, label, this._choiceOptionsByName.get().get(label));
+        });
         const tokenField = TokenField.ctor<ChoiceItem>().create(this._tokenFieldHolder, {
-          initialValue: this._values.get().map(label => {
-            return new ChoiceItem(label, label, this._choiceOptionsByName.get().get(label));
-          }),
+          initialValue,
           renderToken: token => this._renderToken(token),
           createToken: label => new ChoiceItem(label, null),
           clipboardToTokens: clipboardToChoices,
@@ -129,7 +132,8 @@ export class ChoiceListEntry extends Disposable {
           keyBindings: {
             previous: 'ArrowUp',
             next: 'ArrowDown'
-          }
+          },
+          variant: 'vertical',
         });
 
         return cssVerticalFlex(
@@ -154,57 +158,67 @@ export class ChoiceListEntry extends Disposable {
           dom.onKeyDown({Enter$: () => this._save()}),
         );
       } else {
-        const someValues = Computed.create(null, this._values, (_use, values) =>
+        const holder = new MultiHolder();
+        const someValues = Computed.create(holder, this._values, (_use, values) =>
           values.length <= maxRows ? values : values.slice(0, maxRows - 1));
+        const noChoices = Computed.create(holder, someValues, (_use, values) => values.length === 0);
+
 
         return cssVerticalFlex(
-          cssListBoxInactive(
-            dom.cls(cssBlockedCursor.className, this._disabled),
-            dom.autoDispose(someValues),
-            dom.maybe(use => use(someValues).length === 0, () =>
-              row('No choices configured')
-            ),
-            dom.domComputed(this._choiceOptionsByName, (choiceOptions) =>
-              dom.forEach(someValues, val => {
-                return row(
-                  cssTokenColorInactive(
-                    dom.style('background-color', getFillColor(choiceOptions.get(val)) || '#FFFFFF'),
-                    dom.style('color', getTextColor(choiceOptions.get(val)) || '#000000'),
-                    dom.cls('font-bold', choiceOptions.get(val)?.fontBold ?? false),
-                    dom.cls('font-underline', choiceOptions.get(val)?.fontUnderline ?? false),
-                    dom.cls('font-italic', choiceOptions.get(val)?.fontItalic ?? false),
-                    dom.cls('font-strikethrough', choiceOptions.get(val)?.fontStrikethrough ?? false),
-                    'T',
-                    testId('choice-list-entry-color')
-                  ),
-                  cssTokenLabel(
-                    val,
-                    testId('choice-list-entry-label')
+          dom.autoDispose(holder),
+          dom.maybe(this._mixed, () => [
+            cssListBoxInactive(
+              dom.cls(cssBlockedCursor.className, this._disabled),
+              row('Mixed configuration')
+            )
+          ]),
+          dom.maybe(use => !use(this._mixed), () => [
+            cssListBoxInactive(
+              dom.cls(cssBlockedCursor.className, this._disabled),
+              dom.maybe(noChoices, () => row('No choices configured')),
+              dom.domComputed(this._choiceOptionsByName, (choiceOptions) =>
+                dom.forEach(someValues, val => {
+                  return row(
+                    cssTokenColorInactive(
+                      dom.style('background-color', getFillColor(choiceOptions.get(val)) || '#FFFFFF'),
+                      dom.style('color', getTextColor(choiceOptions.get(val)) || '#000000'),
+                      dom.cls('font-bold', choiceOptions.get(val)?.fontBold ?? false),
+                      dom.cls('font-underline', choiceOptions.get(val)?.fontUnderline ?? false),
+                      dom.cls('font-italic', choiceOptions.get(val)?.fontItalic ?? false),
+                      dom.cls('font-strikethrough', choiceOptions.get(val)?.fontStrikethrough ?? false),
+                      'T',
+                      testId('choice-list-entry-color')
+                    ),
+                    cssTokenLabel(
+                      val,
+                      testId('choice-list-entry-label')
+                    )
+                  );
+                }),
+              ),
+              // Show description row for any remaining rows
+              dom.maybe(use => use(this._values).length > maxRows, () =>
+                row(
+                  dom('span',
+                    testId('choice-list-entry-label'),
+                    dom.text((use) => `+${use(this._values).length - (maxRows - 1)} more`)
                   )
-                );
-              }),
-            ),
-            // Show description row for any remaining rows
-            dom.maybe(use => use(this._values).length > maxRows, () =>
-              row(
-                dom('span',
-                  testId('choice-list-entry-label'),
-                  dom.text((use) => `+${use(this._values).length - (maxRows - 1)} more`)
                 )
-              )
+              ),
+              dom.on('click', () => this._startEditing()),
+              cssListBoxInactive.cls("-disabled", this._disabled),
+              testId('choice-list-entry')
             ),
-            dom.on('click', () => this._startEditing()),
-            cssListBoxInactive.cls("-disabled", this._disabled),
-            testId('choice-list-entry')
-          ),
-          dom.maybe(use => !use(this._disabled), () =>
+          ]),
+          dom.maybe(use => !use(this._disabled), () => [
             cssButtonRow(
-              primaryButton('Edit',
+              primaryButton(
+                dom.text(use => use(this._mixed) ? 'Reset' : 'Edit'),
                 dom.on('click', () => this._startEditing()),
                 testId('choice-list-entry-edit')
-              )
-            )
-          )
+              ),
+            ),
+          ]),
         );
       }
     });
@@ -292,13 +306,14 @@ export class ChoiceListEntry extends Disposable {
       focus(tokenField.getTextInput());
     };
 
-    return cssColorAndLabel(
+    const tokenColorAndLabel: HTMLDivElement = cssColorAndLabel(
       dom.autoDispose(fillColorObs),
       dom.autoDispose(textColorObs),
       dom.autoDispose(choiceText),
       colorButton({
-          textColor: new ColorOption(textColorObs, false, '#000000'),
-          fillColor: new ColorOption(fillColorObs, true, '', 'none', '#FFFFFF'),
+          textColor: new ColorOption({color: textColorObs, defaultColor: '#000000'}),
+          fillColor: new ColorOption(
+            {color: fillColorObs, allowsNone: true, noneText: 'none', defaultColor: '#FFFFFF'}),
           fontBold: fontBoldObs,
           fontItalic: fontItalicObs,
           fontUnderline: fontUnderlineObs,
@@ -324,20 +339,36 @@ export class ChoiceListEntry extends Disposable {
           }));
         }
       ),
-      editableLabel(choiceText,
-        rename,
-        testId('token-label'),
-        // Don't bubble up keyboard events, use them for editing the text.
-        // Without this keys like Backspace, or Mod+a will propagate and modify all tokens.
-        dom.on('keydown', stopPropagation),
-        // On enter, focus on the input element.
-        dom.onKeyDown({
-          Enter : focusOnNew
-        }),
-        // Don't bubble up click, as it would change focus.
-        dom.on('click', stopPropagation),
-        dom.cls(cssTokenLabel.className)),
+      editableLabel(choiceText, {
+        save: rename,
+        inputArgs: [
+          testId('token-label'),
+          // Don't bubble up keyboard events, use them for editing the text.
+          // Without this keys like Backspace, or Mod+a will propagate and modify all tokens.
+          dom.on('keydown', stopPropagation),
+          dom.on('copy', stopPropagation),
+          dom.on('cut', stopPropagation),
+          dom.on('paste', stopPropagation),
+          dom.onKeyDown({
+            // On enter, focus on the input element.
+            Enter : focusOnNew,
+            // On escape, focus on the token (i.e. the parent node of this element). That way
+            // the browser will scroll the view if needed, and a subsequent escape will close
+            // the editor.
+            Escape: () => tokenColorAndLabel.parentElement?.focus(),
+          }),
+          // Don't bubble up click, as it would change focus.
+          dom.on('click', stopPropagation),
+          dom.cls(cssEditableLabelInput.className),
+        ],
+        args: [dom.cls(cssEditableLabel.className)],
+      }),
     );
+
+    return [
+      tokenColorAndLabel,
+      dom.onKeyDown({Escape$: () => this._cancel()}),
+    ];
   }
 }
 
@@ -404,17 +435,17 @@ const cssListBox = styled('div', `
   line-height: 1.5;
   padding-left: 4px;
   padding-right: 4px;
-  border: 1px solid ${colors.hover};
+  border: 1px solid ${theme.choiceEntryBorderHover};
   border-radius: 4px;
-  background-color: white;
+  background-color: ${theme.choiceEntryBg};
 `);
 
 const cssListBoxInactive = styled(cssListBox, `
   cursor: pointer;
-  border: 1px solid ${colors.darkGrey};
+  border: 1px solid ${theme.choiceEntryBorder};
 
   &:hover:not(&-disabled) {
-    border: 1px solid ${colors.hover};
+    border: 1px solid ${theme.choiceEntryBorderHover};
   }
   &-disabled {
     opacity: 0.6;
@@ -427,9 +458,8 @@ const cssListRow = styled('div', `
   margin-bottom: 4px;
   padding: 4px 8px;
   color: ${colors.dark};
-  background-color: ${colors.mediumGrey};
+  background-color: ${colors.mediumGreyOpaque};
   border-radius: 3px;
-  overflow: hidden;
   text-overflow: ellipsis;
 `);
 
@@ -457,6 +487,9 @@ const cssToken = styled(cssListRow, `
   .${cssTokenField.className}.token-dragactive & {
     cursor: unset;
   }
+  &:focus {
+    outline: none;
+  }
 `);
 
 const cssTokenColorInactive = styled('div', `
@@ -475,7 +508,22 @@ const cssTokenLabel = styled('span', `
   overflow: hidden;
 `);
 
+const cssEditableLabelInput = styled('input', `
+  display: inline-block;
+  text-overflow: ellipsis;
+  white-space: pre;
+  overflow: hidden;
+`);
+
+const cssEditableLabel = styled('div', `
+  margin-left: 6px;
+  text-overflow: ellipsis;
+  white-space: pre;
+  overflow: hidden;
+`);
+
 const cssTokenInput = styled('input', `
+  background-color: ${theme.choiceEntryBg};
   padding-top: 4px;
   padding-bottom: 4px;
   overflow: hidden;
@@ -500,7 +548,7 @@ const cssFlex = styled('div', `
 `);
 
 const cssColorAndLabel = styled(cssFlex, `
-  max-width: calc(100% - 16px);
+  max-width: calc(100% - 20px);
 `);
 
 const cssVerticalFlex = styled('div', `
@@ -518,7 +566,8 @@ const cssButtonRow = styled('div', `
 
 const cssDeleteButton = styled('div', `
   display: inline;
-  float:right;
+  float: right;
+  margin-left: 4px;
   cursor: pointer;
   .${cssTokenField.className}.token-dragactive & {
     cursor: unset;

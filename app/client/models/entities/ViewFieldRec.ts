@@ -1,7 +1,9 @@
 import {ColumnRec, DocModel, IRowModel, refListRecords, refRecord, ViewSectionRec} from 'app/client/models/DocModel';
 import {formatterForRec} from 'app/client/models/entities/ColumnRec';
 import * as modelUtil from 'app/client/models/modelUtil';
+import {removeRule, RuleOwner} from 'app/client/models/RuleOwner';
 import {Style} from 'app/client/models/Styles';
+import {ViewFieldConfig} from 'app/client/models/ViewFieldConfig';
 import * as UserType from 'app/client/widgets/UserType';
 import {DocumentSettings} from 'app/common/DocumentSettings';
 import {BaseFormatter} from 'app/common/ValueFormatter';
@@ -9,7 +11,7 @@ import {createParser} from 'app/common/ValueParser';
 import * as ko from 'knockout';
 
 // Represents a page entry in the tree of pages.
-export interface ViewFieldRec extends IRowModel<"_grist_Views_section_field"> {
+export interface ViewFieldRec extends IRowModel<"_grist_Views_section_field">, RuleOwner {
   viewSection: ko.Computed<ViewSectionRec>;
   widthDef: modelUtil.KoSaveableObservable<number>;
 
@@ -60,18 +62,23 @@ export interface ViewFieldRec extends IRowModel<"_grist_Views_section_field"> {
   // which takes into account the default options for column's type.
   widgetOptionsJson: modelUtil.SaveableObjObservable<any>;
 
-  // Whether lines should wrap in a cell.
-  wrapping: ko.Computed<boolean>;
 
   disableModify: ko.Computed<boolean>;
   disableEditData: ko.Computed<boolean>;
 
+  // Whether lines should wrap in a cell.
+  wrap: modelUtil.KoSaveableObservable<boolean>;
+  widget: modelUtil.KoSaveableObservable<string|undefined>;
   textColor: modelUtil.KoSaveableObservable<string|undefined>;
   fillColor: modelUtil.KoSaveableObservable<string|undefined>;
   fontBold: modelUtil.KoSaveableObservable<boolean|undefined>;
   fontUnderline: modelUtil.KoSaveableObservable<boolean|undefined>;
   fontItalic: modelUtil.KoSaveableObservable<boolean|undefined>;
   fontStrikethrough: modelUtil.KoSaveableObservable<boolean|undefined>;
+  // Helper computed to change style of a cell without saving it.
+  style: ko.PureComputed<Style>;
+
+  config: ViewFieldConfig;
 
   documentSettings: ko.PureComputed<DocumentSettings>;
 
@@ -86,34 +93,10 @@ export interface ViewFieldRec extends IRowModel<"_grist_Views_section_field"> {
   // `formatter` formats actual cell values, e.g. a whole list from the display column.
   formatter: ko.Computed<BaseFormatter>;
 
-  // Field can have a list of conditional styling rules. Each style is a combination of a formula and options
-  // that must by applied to a field. Style is persisted as a new hidden formula column and the list of such
-  // columns is stored as Reference List property ('rules') in a field or column.
-  // Rule for conditional style is a formula of the hidden column, style options are saved as JSON object in
-  // a styleOptions field (in that hidden formula column).
-
-  // If this field (or column) has a list of conditional styling rules.
-  hasRules: ko.Computed<boolean>;
-  // List of columns that are used as rules for conditional styles.
-  rulesCols: ko.Computed<ColumnRec[]>;
-  // List of columns ids that are used as rules for conditional styles.
-  rulesColsIds: ko.Computed<string[]>;
-  // List of styles used by conditional rules.
-  rulesStyles: modelUtil.KoSaveableObservable<Style[]>;
-
-  // Adds empty conditional style rule. Sets before sending to the server.
-  addEmptyRule(): Promise<void>;
-  // Removes one rule from the collection. Removes before sending update to the server.
-  removeRule(index: number): Promise<void>;
-
   createValueParser(): (value: string) => any;
 
   // Helper which adds/removes/updates field's displayCol to match the formula.
   saveDisplayFormula(formula: string): Promise<void>|undefined;
-
-  // Helper for Choice/ChoiceList columns, that saves widget options and renames values in a document
-  // in one bundle
-  updateChoices(renameMap: Record<string, string>, options: any): Promise<void>;
 }
 
 export function createViewFieldRec(this: ViewFieldRec, docModel: DocModel): void {
@@ -166,17 +149,17 @@ export function createViewFieldRec(this: ViewFieldRec, docModel: DocModel): void
   // Whether this field uses column's widgetOptions (true) or its own (false).
   // During transform, use the transform column's options (which should be initialized to match
   // field or column when the transform starts TODO).
-  this.useColOptions = ko.pureComputed(() => !this.widgetOptions() || this.column().isTransforming());
+  this.useColOptions = this.autoDispose(ko.pureComputed(() => !this.widgetOptions() || this.column().isTransforming()));
 
   // Helper that returns the RowModel for either this field or its column, depending on
   // useColOptions. Field and Column have a few identical fields:
   //    .widgetOptions()        // JSON string of options
   //    .saveDisplayFormula()   // Method to save the display formula
   //    .displayCol()           // Reference to an optional associated display column.
-  this._fieldOrColumn = ko.pureComputed(() => this.useColOptions() ? this.column() : this);
+  this._fieldOrColumn = this.autoDispose(ko.pureComputed(() => this.useColOptions() ? this.column() : this));
 
   // Display col ref to use for the field, defaulting to the plain column itself.
-  this.displayColRef = ko.pureComputed(() => this._fieldOrColumn().displayCol() || this.colRef());
+  this.displayColRef = this.autoDispose(ko.pureComputed(() => this._fieldOrColumn().displayCol() || this.colRef()));
 
   this.visibleColRef = modelUtil.addSaveInterface(ko.pureComputed({
       read: () => this._fieldOrColumn().visibleCol(),
@@ -208,26 +191,23 @@ export function createViewFieldRec(this: ViewFieldRec, docModel: DocModel): void
   };
 
   // The widgetOptions to read and write: either the column's or the field's own.
-  this._widgetOptionsStr = modelUtil.savingComputed({
+  this._widgetOptionsStr = this.autoDispose(modelUtil.savingComputed({
     read: () => this._fieldOrColumn().widgetOptions(),
     write: (setter, val) => setter(this._fieldOrColumn().widgetOptions, val)
-  });
+  }));
 
   // Observable for the object with the current options, either for the field or for the column,
   // which takes into account the default options for this column's type.
-  this.widgetOptionsJson = modelUtil.jsonObservable(this._widgetOptionsStr,
-    (opts: any) => UserType.mergeOptions(opts || {}, this.column().pureType()));
+  this.widgetOptionsJson = this.autoDispose(modelUtil.jsonObservable(this._widgetOptionsStr,
+    (opts: any) => UserType.mergeOptions(opts || {}, this.column().pureType())));
 
-  this.wrapping = ko.pureComputed(() => {
-    // When user has yet to specify a desired wrapping state, we use different defaults for
-    // GridView (no wrap) and DetailView (wrap).
-    // "??" is the newish "nullish coalescing" operator. How cool is that!
-    return this.widgetOptionsJson().wrap ?? (this.viewSection().parentKey() !== 'record');
-  });
-
-  this.disableModify = ko.pureComputed(() => this.column().disableModify());
-  this.disableEditData = ko.pureComputed(() => this.column().disableEditData());
-
+  // When user has yet to specify a desired wrapping state, we use different defaults for
+  // GridView (no wrap) and DetailView (wrap).
+  this.wrap = this.autoDispose(modelUtil.fieldWithDefault(
+    this.widgetOptionsJson.prop('wrap'),
+    () => this.viewSection().parentKey() !== 'record'
+  ));
+  this.widget = this.widgetOptionsJson.prop('widget');
   this.textColor = this.widgetOptionsJson.prop('textColor');
   this.fillColor = this.widgetOptionsJson.prop('fillColor');
   this.fontBold = this.widgetOptionsJson.prop('fontBold');
@@ -236,23 +216,21 @@ export function createViewFieldRec(this: ViewFieldRec, docModel: DocModel): void
   this.fontStrikethrough = this.widgetOptionsJson.prop('fontStrikethrough');
 
   this.documentSettings = ko.pureComputed(() => docModel.docInfoRow.documentSettingsJson());
+  this.style = ko.pureComputed({
+    read: () => ({
+      textColor: this.textColor(),
+      fillColor: this.fillColor(),
+      fontBold: this.fontBold(),
+      fontUnderline: this.fontUnderline(),
+      fontItalic: this.fontItalic(),
+      fontStrikethrough: this.fontStrikethrough(),
+    }) as Style,
+    write: (style: Style) => {
+      this.widgetOptionsJson.update(style);
+    },
+  });
 
-  this.updateChoices = async (renames, widgetOptions) => {
-    // In case this column is being transformed - using Apply Formula to Data, bundle the action
-    // together with the transformation.
-    const actionOptions = {nestInActiveBundle: this.column.peek().isTransforming.peek()};
-    const hasRenames = !!Object.entries(renames).length;
-    const callback = async () => {
-      await Promise.all([
-        this.widgetOptionsJson.setAndSave(widgetOptions),
-        hasRenames ?
-          docModel.docData.sendAction(["RenameChoices", this.column().table().tableId(), this.colId(), renames]) :
-          null
-      ]);
-    };
-    return docModel.docData.bundleActions("Update choices configuration", callback, actionOptions);
-  };
-
+  this.tableId = ko.pureComputed(() => this.column().table().tableId());
   this.rulesCols = refListRecords(docModel.columns, ko.pureComputed(() => this._fieldOrColumn().rules()));
   this.rulesColsIds = ko.pureComputed(() => this.rulesCols().map(c => c.colId()));
   this.rulesStyles = modelUtil.fieldWithDefault(
@@ -274,25 +252,11 @@ export function createViewFieldRec(this: ViewFieldRec, docModel: DocModel): void
     await docModel.docData.sendAction(action, `Update rules for ${this.colId.peek()}`);
   };
 
-  // Helper method to remove a rule.
-  this.removeRule = async (index: number) => {
-    const col = this.rulesCols.peek()[index];
-    if (!col) {
-      throw new Error(`There is no rule at index ${index}`);
-    }
-    const tableData = docModel.dataTables[col.table.peek().tableId.peek()].tableData;
-    const newStyles = this.rulesStyles.peek().slice();
-    if (newStyles.length >= index) {
-      newStyles.splice(index, 1);
-    } else {
-      console.debug(`There are not style options at index ${index}`);
-    }
-    const callback = () =>
-      Promise.all([
-        this.rulesStyles.setAndSave(newStyles),
-        tableData.sendTableAction(['RemoveColumn', col.colId.peek()])
-      ]);
-    const actionOptions = {nestInActiveBundle: this.column.peek().isTransforming.peek()};
-    await docModel.docData.bundleActions("Remove conditional rule", callback, actionOptions);
-  };
+  this.removeRule = (index: number) => removeRule(docModel, this, index);
+  // Externalize widgetOptions configuration, to support changing those options
+  // for multiple fields at once.
+  this.config = new ViewFieldConfig(this, docModel);
+
+  this.disableModify = this.autoDispose(ko.pureComputed(() => this.column().disableModify()));
+  this.disableEditData = this.autoDispose(ko.pureComputed(() => this.column().disableEditData()));
 }

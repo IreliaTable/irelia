@@ -1,13 +1,16 @@
 import {basicButton, primaryButton} from 'app/client/ui2018/buttons';
 import {isLight, swatches} from 'app/client/ui2018/ColorPalette';
-import {colors, testId, vars} from 'app/client/ui2018/cssVars';
+import {colors, testId, theme, vars} from 'app/client/ui2018/cssVars';
 import {textInput} from 'app/client/ui2018/editableLabel';
 import {IconName} from 'app/client/ui2018/IconList';
 import {icon} from 'app/client/ui2018/icons';
 import {cssSelectBtn} from 'app/client/ui2018/select';
 import {isValidHex} from 'app/common/gutil';
-import {Computed, Disposable, dom, Observable, onKeyDown, styled} from 'grainjs';
+import {BindableValue, Computed, Disposable, dom, Observable, onKeyDown, styled} from 'grainjs';
 import {defaultMenuOptions, IOpenController, setPopupToCreateDom} from 'popweasel';
+import {makeT} from 'app/client/lib/localization';
+
+const t = makeT('ui2018.ColorSelect');
 
 export interface StyleOptions {
   textColor: ColorOption,
@@ -19,19 +22,20 @@ export interface StyleOptions {
 }
 
 export class ColorOption {
-  constructor(
-    public color: Observable<string|undefined>,
-    // If the color accepts undefined/empty as a value. Controls empty selector in the picker.
-    public allowsNone: boolean = false,
-    // Default color to show when value is empty or undefined (itself can be empty).
-    public defaultColor: string = '',
-    // Text to be shown in the picker when color is not set.
-    public noneText: string = '',
-    // Preview color to show when value is undefined.
-    public previewNoneColor: string = '',) {
-      if (defaultColor && allowsNone) {
-        throw new Error("Allowing an empty value is not compatible with a default color");
-      }
+  public color: Observable<string|undefined>;
+  // If the color accepts undefined/empty as a value. Controls empty selector in the picker.
+  public allowsNone: boolean = false;
+  // Default color to show when value is empty or undefined (itself can be empty).
+  public defaultColor: string = '';
+  // Text to be shown in the picker when color is not set.
+  public noneText: string = '';
+  constructor(options: {
+    color: Observable<string|undefined>,
+    allowsNone?: boolean,
+    defaultColor?: string,
+    noneText?: string
+  }) {
+    Object.assign(this, options);
   }
 }
 
@@ -43,18 +47,31 @@ export class ColorOption {
  */
 export function colorSelect(
   styleOptions: StyleOptions,
-  onSave: () => Promise<void>,
-  placeholder = 'Default cell style'): Element {
+  options: {
+    // Handler to save the style.
+    onSave: () => Promise<void>,
+    // Invoked when user opens the color picker.
+    onOpen?: () => void,
+    // Invoked when user closes the color picker without saving.
+    onRevert?: () => void,
+    placeholder?: BindableValue<string>
+  }): Element {
   const {
     textColor,
     fillColor,
   } = styleOptions;
+  const {
+    onSave,
+    onOpen,
+    onRevert,
+    placeholder = t('DefaultCellStyle'),
+  } = options;
   const selectBtn = cssSelectBtn(
     cssContent(
       cssButtonIcon(
         'T',
-        dom.style('color', use => use(textColor.color) || textColor.previewNoneColor),
-        dom.style('background-color', (use) => use(fillColor.color)?.slice(0, 7) || fillColor.previewNoneColor),
+        dom.style('color', use => use(textColor.color) || textColor.defaultColor),
+        dom.style('background-color', (use) => use(fillColor.color)?.slice(0, 7) || fillColor.defaultColor),
         dom.cls('font-bold', use => use(styleOptions.fontBold) ?? false),
         dom.cls('font-italic', use => use(styleOptions.fontItalic) ?? false),
         dom.cls('font-underline', use => use(styleOptions.fontUnderline) ?? false),
@@ -62,13 +79,16 @@ export function colorSelect(
         cssLightBorder.cls(''),
         testId('btn-icon'),
       ),
-      placeholder,
+      dom.text(placeholder),
     ),
     icon('Dropdown'),
     testId('color-select'),
   );
 
-  const domCreator = (ctl: IOpenController) => buildColorPicker(ctl, styleOptions, onSave);
+  const domCreator = (ctl: IOpenController) => {
+    onOpen?.();
+    return buildColorPicker(ctl, styleOptions, onSave, onRevert);
+  };
   setPopupToCreateDom(selectBtn, domCreator, {...defaultMenuOptions, placement: 'bottom-end'});
 
   return selectBtn;
@@ -80,8 +100,8 @@ export function colorButton(
   const { textColor, fillColor } = styleOptions;
   const iconBtn = cssIconBtn(
     'T',
-    dom.style('color', use => use(textColor.color) || textColor.previewNoneColor),
-    dom.style('background-color', (use) => use(fillColor.color)?.slice(0, 7) || fillColor.previewNoneColor),
+    dom.style('color', use => use(textColor.color) || textColor.defaultColor),
+    dom.style('background-color', (use) => use(fillColor.color)?.slice(0, 7) || fillColor.defaultColor),
     dom.cls('font-bold', use => use(styleOptions.fontBold) ?? false),
     dom.cls('font-italic', use => use(styleOptions.fontItalic) ?? false),
     dom.cls('font-underline', use => use(styleOptions.fontUnderline) ?? false),
@@ -104,7 +124,9 @@ function buildColorPicker(ctl: IOpenController,
     fontItalic,
     fontStrikethrough
   }: StyleOptions,
-  onSave: () => Promise<void>): Element {
+  onSave: () => Promise<void>,
+  onRevert?: () => void,
+): Element {
   const textColorModel = ColorModel.create(null, textColor.color);
   const fillColorModel = ColorModel.create(null, fillColor.color);
   const fontBoldModel = BooleanModel.create(null, fontBold);
@@ -118,7 +140,10 @@ function buildColorPicker(ctl: IOpenController,
   const notChanged = Computed.create(null, use => models.every(m => use(m.needsSaving) === false));
 
   function revert() {
-    models.forEach(m => m.revert());
+    onRevert?.();
+    if (!onRevert) {
+      models.forEach(m => m.revert());
+    }
     ctl.close();
   }
 
@@ -128,8 +153,10 @@ function buildColorPicker(ctl: IOpenController,
         // TODO: disable the trigger btn while saving
         await onSave();
       } catch (e) {
-        /* Does no logging: onSave() callback is expected to handle their reporting */
-        models.forEach(m => m.revert());
+        onRevert?.();
+        if (!onRevert) {
+          models.forEach(m => m.revert());
+        }
       }
     }
     models.forEach(m => m.dispose());
@@ -161,12 +188,12 @@ function buildColorPicker(ctl: IOpenController,
     }),
 
     cssButtonRow(
-      primaryButton('Apply',
+      primaryButton(t('Apply'),
         dom.on('click', () => ctl.close()),
         dom.boolAttr("disabled", notChanged),
         testId('colors-save')
       ),
-      basicButton('Cancel',
+      basicButton(t('Cancel'),
         dom.on('click', () => revert()),
         testId('colors-cancel')
       )
@@ -228,8 +255,6 @@ interface PickerComponentOptions {
   defaultColor: string;
   // Text to be shown in the picker when color is not set.
   noneText: string;
-  // Preview color to show when value is undefined.
-  previewNoneColor: string;
 }
 class PickerComponent extends Disposable {
 
@@ -349,7 +374,8 @@ const cssFontOption = styled('div', `
   display: grid;
   place-items: center;
   flex-grow: 1;
-  background: white;
+  background: ${colors.light};
+  --icon-color: ${colors.dark};
   height: 24px;
   cursor: pointer;
   &:hover:not(&-selected) {
@@ -419,12 +445,13 @@ const cssContent = styled('div', `
 `);
 
 const cssHexBox = styled(textInput, `
-  border: 1px solid ${colors.darkGrey};
+  border: 1px solid ${theme.inputBorder};
   border-left: none;
   font-size: ${vars.smallFontSize};
   display: flex;
   align-items: center;
-  color: ${colors.slate};
+  color: ${theme.lightText};
+  background-color: ${theme.inputBg};
   width: 56px;
   outline: none;
   padding: 0 3px;

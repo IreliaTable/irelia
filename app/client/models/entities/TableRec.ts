@@ -2,9 +2,10 @@ import {KoArray} from 'app/client/lib/koArray';
 import {DocModel, IRowModel, recordSet, refRecord, ViewSectionRec} from 'app/client/models/DocModel';
 import {ColumnRec, ValidationRec, ViewRec} from 'app/client/models/DocModel';
 import * as modelUtil from 'app/client/models/modelUtil';
+import {summaryGroupByDescription} from 'app/common/ActiveDocAPI';
 import {MANUALSORT} from 'app/common/gristTypes';
 import * as ko from 'knockout';
-import * as randomcolor from 'randomcolor';
+import randomcolor from 'randomcolor';
 
 // Represents a user-defined table.
 export interface TableRec extends IRowModel<"_grist_Tables"> {
@@ -30,6 +31,9 @@ export interface TableRec extends IRowModel<"_grist_Tables"> {
   tableName: modelUtil.KoSaveableObservable<string>;
   // Table name with a default value (which is tableId).
   tableNameDef: modelUtil.KoSaveableObservable<string>;
+  // Like tableNameDef, but formatted to be more suitable for displaying to
+  // users (e.g. including group columns for summary tables).
+  formattedTableName: ko.PureComputed<string>;
   // If user can select this table in various places.
   // Note: Some hidden tables can still be visible on RawData view.
   isHidden: ko.Computed<boolean>;
@@ -48,7 +52,7 @@ export function createTableRec(this: TableRec, docModel: DocModel): void {
   this.summarySource = refRecord(docModel.tables, this.summarySourceTable);
   this.isHidden = this.autoDispose(
     // This is repeated logic from isHiddenTable.
-    ko.pureComputed(() => !!this.summarySourceTable() || this.tableId()?.startsWith("GristHidden"))
+    ko.pureComputed(() => !this.tableId() || !!this.summarySourceTable() || this.tableId().startsWith("GristHidden_"))
   );
 
   // A Set object of colRefs for all summarySourceCols of this table.
@@ -65,8 +69,7 @@ export function createTableRec(this: TableRec, docModel: DocModel): void {
     if (!this.summarySourceTable()) {
       return '';
     }
-    const groupBy = this.groupByColumns();
-    return `[${groupBy.length ? 'by ' + groupBy.map(c => c.label()).join(", ") : "Totals"}]`;
+    return summaryGroupByDescription(this.groupByColumns().map(c => c.label()));
   });
 
   // TODO: We should save this value and let users change it.
@@ -114,4 +117,9 @@ export function createTableRec(this: TableRec, docModel: DocModel): void {
       return table.tableId() || '';
     })
   );
+  this.formattedTableName = ko.pureComputed(() => {
+    return this.summarySourceTable()
+      ? `${this.tableNameDef()} ${this.groupDesc()}`
+      : this.tableNameDef();
+  });
 }

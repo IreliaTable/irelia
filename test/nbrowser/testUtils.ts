@@ -15,7 +15,7 @@
  * Run `bin/mocha 'test/nbrowser/*.ts' -b --no-exit` to open a command-line prompt on
  * first-failure for debugging and quick reruns.
  */
-import * as log from 'app/server/lib/log';
+import log from 'app/server/lib/log';
 import {addToRepl, assert, driver, enableDebugCapture, Key, setOptionsModifyFunc, useServer} from 'mocha-webdriver';
 import * as gu from 'test/nbrowser/gristUtils';
 import {server} from 'test/nbrowser/testServer';
@@ -82,7 +82,9 @@ export function setupTestSuite(options?: TestSuiteOptions) {
   checkForExtraWindows();
 
   // After every suite, clear sessionStorage and localStorage to avoid affecting other tests.
-  after(clearCurrentWindowStorage);
+  if (!process.env.NO_CLEANUP) {
+    after(clearCurrentWindowStorage);
+  }
   // Also, log out, to avoid logins interacting, unless NO_CLEANUP is requested (useful for
   // debugging tests).
   if (!process.env.NO_CLEANUP) {
@@ -231,7 +233,7 @@ export function setupRequirement(options: TestSuiteOptions) {
       const api = gu.createHomeApi('support', 'docs');
       for (const suffix of ['', '2'] as const) {
         let orgName = `test${suffix}-grist`;
-        const deployment = process.env.IRELIA_ID_PREFIX;
+        const deployment = process.env.GRIST_ID_PREFIX;
         if (deployment) { orgName = `${orgName}-${deployment}`; }
         let isNew: boolean = false;
         try {

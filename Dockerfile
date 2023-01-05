@@ -1,8 +1,8 @@
 ################################################################################
-## The Irelia source can be extended. This is a stub that can be overridden
+## The Grist source can be extended. This is a stub that can be overridden
 ## from command line, as:
 ##   docker buildx build -t ... --build-context=ext=<path> .
-## The code in <path> will then be built along with the rest of Irelia.
+## The code in <path> will then be built along with the rest of Grist.
 ################################################################################
 FROM scratch as ext
 
@@ -13,25 +13,26 @@ FROM scratch as ext
 FROM node:14-buster as builder
 
 # Install all node dependencies.
-WORKDIR /irelia
-COPY package.json yarn.lock /irelia/
-RUN yarn install --frozen-lockfile --verbose
+WORKDIR /grist
+COPY package.json yarn.lock /grist/
+RUN yarn install --frozen-lockfile --verbose --network-timeout 600000
 
 # Install any extra node dependencies (at root level, to avoid having to wrestle
 # with merging them).
-COPY --from=ext / /irelia/ext
+COPY --from=ext / /grist/ext
 RUN \
  mkdir /node_modules && \
- cd /irelia/ext && \
- { if [ -e package.json ] ; then yarn install --frozen-lockfile --modules-folder=/node_modules --verbose ; fi }
+ cd /grist/ext && \
+ { if [ -e package.json ] ; then yarn install --frozen-lockfile --modules-folder=/node_modules --verbose --network-timeout 600000 ; fi }
 
 # Build node code.
-COPY tsconfig.json /irelia
-COPY tsconfig-ext.json /irelia
-COPY test/tsconfig.json /irelia/test/tsconfig.json
-COPY app /irelia/app
-COPY stubs /irelia/stubs
-COPY buildtools /irelia/buildtools
+COPY tsconfig.json /grist
+COPY tsconfig-ext.json /grist
+COPY test/tsconfig.json /grist/test/tsconfig.json
+COPY test/chai-as-promised.js /grist/test/chai-as-promised.js
+COPY app /grist/app
+COPY stubs /grist/stubs
+COPY buildtools /grist/buildtools
 RUN yarn run build:prod
 
 ################################################################################
@@ -80,9 +81,9 @@ RUN mkdir -p /persist/docs
 
 # Copy node files.
 COPY --from=builder /node_modules /node_modules
-COPY --from=builder /irelia/node_modules /irelia/node_modules
-COPY --from=builder /irelia/_build /irelia/_build
-COPY --from=builder /irelia/static /irelia/static-built
+COPY --from=builder /grist/node_modules /grist/node_modules
+COPY --from=builder /grist/_build /grist/_build
+COPY --from=builder /grist/static /grist/static-built
 
 # Copy python files.
 COPY --from=collector /usr/bin/python2.7 /usr/bin/python2.7
@@ -101,45 +102,45 @@ RUN \
 COPY --from=sandbox /runsc /usr/bin/runsc
 
 # Add files needed for running server.
-ADD package.json /irelia/package.json
-ADD ormconfig.js /irelia/ormconfig.js
-ADD bower_components /irelia/bower_components
-ADD sandbox /irelia/sandbox
-ADD plugins /irelia/plugins
-ADD static /irelia/static
+ADD package.json /grist/package.json
+ADD ormconfig.js /grist/ormconfig.js
+ADD bower_components /grist/bower_components
+ADD sandbox /grist/sandbox
+ADD plugins /grist/plugins
+ADD static /grist/static
 
 # Finalize static directory
 RUN \
-  mv /irelia/static-built/* /irelia/static && \
-  rmdir /irelia/static-built
+  mv /grist/static-built/* /grist/static && \
+  rmdir /grist/static-built
 
-WORKDIR /irelia
+WORKDIR /grist
 
 # Set some default environment variables to give a setup that works out of the box when
 # started as:
-#   docker run -p 8686:8686 -it <image>
+#   docker run -p 8484:8484 -it <image>
 # Variables will need to be overridden for other setups.
 #
-# IRELIA_SANDBOX_FLAVOR is set to unsandboxed by default, because it
+# GRIST_SANDBOX_FLAVOR is set to unsandboxed by default, because it
 # appears that the services people use to run docker containers have
 # a wide variety of security settings and the functionality needed for
 # sandboxing may not be possible in every case. For default docker
 # settings, you can get sandboxing as follows:
-#   docker run --env IRELIA_SANDBOX_FLAVOR=gvisor -p 8484:8484 -it <image>
-
+#   docker run --env GRIST_SANDBOX_FLAVOR=gvisor -p 8484:8484 -it <image>
+#
 ENV \
   PYTHON_VERSION_ON_CREATION=3 \
-  IRELIA_ORG_IN_PATH=true \
-  IRELIA_HOST=0.0.0.0 \
-  IRELIA_SINGLE_PORT=true \
-  IRELIA_SERVE_SAME_ORIGIN=true \
-  IRELIA_DATA_DIR=/persist/docs \
-  IRELIA_INST_DIR=/persist \
-  IRELIA_SESSION_COOKIE=irelia_core \
+  GRIST_ORG_IN_PATH=true \
+  GRIST_HOST=0.0.0.0 \
+  GRIST_SINGLE_PORT=true \
+  GRIST_SERVE_SAME_ORIGIN=true \
+  GRIST_DATA_DIR=/persist/docs \
+  GRIST_INST_DIR=/persist \
+  GRIST_SESSION_COOKIE=grist_core \
   GVISOR_FLAGS="-unprivileged -ignore-cgroups" \
-  IRELIA_SANDBOX_FLAVOR=unsandboxed \
+  GRIST_SANDBOX_FLAVOR=unsandboxed \
   TYPEORM_DATABASE=/persist/home.sqlite3
 
-EXPOSE 8686
+EXPOSE 8484
 
 CMD ./sandbox/run.sh

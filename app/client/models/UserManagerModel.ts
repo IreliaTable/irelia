@@ -1,3 +1,4 @@
+import {makeT} from 'app/client/lib/localization';
 import {GristDoc} from 'app/client/components/GristDoc';
 import {AppModel} from 'app/client/models/AppModel';
 import {DocPageModel} from 'app/client/models/DocPageModel';
@@ -5,10 +6,13 @@ import {ShareAnnotations, ShareAnnotator} from 'app/common/ShareAnnotator';
 import {normalizeEmail} from 'app/common/emails';
 import {GristLoadConfig} from 'app/common/gristUrls';
 import * as roles from 'app/common/roles';
+import {getGristConfig} from 'app/common/urlUtils';
 import {ANONYMOUS_USER_EMAIL, Document, EVERYONE_EMAIL, FullUser, getRealAccess, Organization,
         PermissionData, PermissionDelta, UserAPI, Workspace} from 'app/common/UserAPI';
 import {computed, Computed, Disposable, obsArray, ObsArray, observable, Observable} from 'grainjs';
 import some = require('lodash/some');
+
+const t = makeT('models.UserManagerModel');
 
 export interface UserManagerModel {
   initData: PermissionData;                    // PermissionData used to initialize the UserManager
@@ -32,6 +36,8 @@ export interface UserManagerModel {
   activeUser: FullUser|null;                   // Populated if current user is logged in.
   gristDoc: GristDoc|null;                     // Populated if there is an open document.
 
+  // Analyze the relation that users have to the resource or site.
+  annotate(): void;
   // Resets all unsaved changes
   reset(): void;
   // Recreate annotations, factoring in any changes on the back-end.
@@ -64,6 +70,7 @@ export interface IEditableMember {
   origAccess: roles.Role|null;
   isNew: boolean;
   isRemoved: boolean;
+  isTeamMember?: boolean;
 }
 
 // An option for the select elements used in the UserManager.
@@ -85,6 +92,7 @@ interface IBuildMemberOptions {
   picture?: string|null;
   access: roles.Role|null;
   parentAccess: roles.BasicRole|null;
+  isTeamMember?: boolean;
 }
 
 /**
@@ -93,28 +101,28 @@ interface IBuildMemberOptions {
 export class UserManagerModelImpl extends Disposable implements UserManagerModel {
   // Select options for each individual user's role dropdown.
   public readonly userSelectOptions: IMemberSelectOption[] = [
-    { value: roles.OWNER,  label: 'Owner'  },
-    { value: roles.EDITOR, label: 'Editor' },
-    { value: roles.VIEWER, label: 'Viewer' }
+    { value: roles.OWNER,  label: t('Owner')  },
+    { value: roles.EDITOR, label: t('Editor') },
+    { value: roles.VIEWER, label: t('Viewer') }
   ];
   // Select options for each individual user's role dropdown in the org.
   public readonly orgUserSelectOptions: IOrgMemberSelectOption[] = [
-    { value: roles.OWNER,  label: 'Owner'  },
-    { value: roles.EDITOR, label: 'Editor' },
-    { value: roles.VIEWER, label: 'Viewer' },
-    { value: roles.MEMBER, label: 'No Default Access' },
+    { value: roles.OWNER,  label: t('Owner')  },
+    { value: roles.EDITOR, label: t('Editor') },
+    { value: roles.VIEWER, label: t('Viewer') },
+    { value: roles.MEMBER, label: t('NoDefaultAccess') },
   ];
   // Select options for the resource's maxInheritedRole dropdown.
   public readonly inheritSelectOptions: IMemberSelectOption[] = [
-    { value: roles.OWNER,  label: 'In Full'     },
-    { value: roles.EDITOR, label: 'View & Edit' },
-    { value: roles.VIEWER, label: 'View Only'   },
-    { value: null,         label: 'None'        }
+    { value: roles.OWNER,  label: t('InFull')     },
+    { value: roles.EDITOR, label: t('ViewAndEdit') },
+    { value: roles.VIEWER, label: t('ViewOnly')   },
+    { value: null,         label: t('None')        }
   ];
   // Select options for the public member's role dropdown.
   public readonly publicUserSelectOptions: IMemberSelectOption[] = [
-    { value: roles.EDITOR, label: 'Editor' },
-    { value: roles.VIEWER, label: 'Viewer' },
+    { value: roles.EDITOR, label: t('Editor') },
+    { value: roles.VIEWER, label: t('Viewer') },
   ];
 
   public activeUser: FullUser|null = this._options.activeUser ?? null;
@@ -171,8 +179,9 @@ export class UserManagerModelImpl extends Disposable implements UserManagerModel
   ) {
     super();
     if (this._options.appModel) {
-      const features = this._options.appModel.currentFeatures;
-      this._shareAnnotator = new ShareAnnotator(features, initData);
+      const product = this._options.appModel.currentProduct;
+      const {supportEmail} = getGristConfig();
+      this._shareAnnotator = new ShareAnnotator(product, initData, {supportEmail});
     }
     this.annotate();
   }
@@ -253,7 +262,6 @@ export class UserManagerModelImpl extends Disposable implements UserManagerModel
     return member.email === this.activeUser?.email;
   }
 
-  // Analyze the relation that users have to the resource or site.
   public annotate() {
     // Only attempt for documents for now.
     // TODO: extend to workspaces.
@@ -308,6 +316,7 @@ export class UserManagerModelImpl extends Disposable implements UserManagerModel
         picture: m.picture,
         access: m.access,
         parentAccess: m.parentAccess || null,
+        isTeamMember: m.isMember,
       })
     );
   }
@@ -374,6 +383,7 @@ export class UserManagerModelImpl extends Disposable implements UserManagerModel
       origAccess: member.access,
       isNew: false,
       isRemoved: false,
+      isTeamMember: member.isTeamMember,
     };
   }
 }

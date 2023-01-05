@@ -1,4 +1,5 @@
-// version tracking not set up in irelia-core yet
-export const version = "0.8.1";
+import * as packageJson from 'package.json';
+
+export const version = packageJson.version;
 export const channel = "core";
 export const gitcommit = "unknown";

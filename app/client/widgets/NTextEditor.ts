@@ -5,7 +5,7 @@ import {createGroup} from 'app/client/components/commands';
 import {testId} from 'app/client/ui2018/cssVars';
 import {createMobileButtons, getButtonMargins} from 'app/client/widgets/EditorButtons';
 import {EditorPlacement, ISize} from 'app/client/widgets/EditorPlacement';
-import {NewBaseEditor, Options} from 'app/client/widgets/NewBaseEditor';
+import {FieldOptions, NewBaseEditor} from 'app/client/widgets/NewBaseEditor';
 import {CellValue} from "app/common/DocActions";
 import {undef} from 'app/common/gutil';
 import {dom, Observable} from 'grainjs';
@@ -19,13 +19,13 @@ export class NTextEditor extends NewBaseEditor {
   protected commandGroup: any;
 
   private _dom: HTMLElement;
-  private _editorPlacement: EditorPlacement;
+  private _editorPlacement!: EditorPlacement;
   private _contentSizer: HTMLElement;
   private _alignment: string;
 
   // Note: TextEditor supports also options.placeholder for use by derived classes, but this is
   // easy to apply to this.textInput without needing a separate option.
-  constructor(options: Options) {
+  constructor(protected options: FieldOptions) {
     super(options);
 
     const initialValue: string = undef(
@@ -135,6 +135,7 @@ export class NTextEditor extends NewBaseEditor {
     // but we got same enough spaces, we will force browser to check the available space once more time.
     if (enoughSpace(rect, size) && hasScroll(textInput)) {
       textInput.style.overflow = "hidden";
+      // eslint-disable-next-line no-unused-expressions
       textInput.clientHeight; // just access metrics is enough to repaint
       textInput.style.overflow = "auto";
     }

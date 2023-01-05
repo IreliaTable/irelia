@@ -1,5 +1,5 @@
 import * as gu from 'test/nbrowser/gristUtils';
-import { setupTestSuite } from 'test/nbrowser/testUtils';
+import { server, setupTestSuite } from 'test/nbrowser/testUtils';
 
 import { assert, driver, Key } from 'mocha-webdriver';
 
@@ -25,10 +25,10 @@ describe("DuplicateDocument", function() {
     assert.equal(await driver.find('.test-modal-confirm').getAttribute('disabled'), 'true');
     // As soon as the textbox is non-empty, the Save button should become enabled.
     await nameElem.sendKeys('a');
-    assert.equal(await driver.find('.test-modal-confirm').getAttribute('disabled'), null);
+    await driver.findWait('.test-modal-confirm:not(:disabled)', 5000);
 
     // Save a copy with a proper name.
-    await gu.completeCopy({destName: 'DuplicateTest1'});
+    await gu.completeCopy({destName: 'DuplicateTest1', destWorkspace: 'Test Workspace'});
 
     // check the breadcrumbs reflect new document name, and the doc is not empty.
     assert.equal(await driver.find('.test-bc-doc').value(), 'DuplicateTest1');
@@ -62,7 +62,7 @@ describe("DuplicateDocument", function() {
 
     await driver.find('.test-tb-share').click();
     await driver.find('.test-save-copy').click();
-    await gu.completeCopy({destName: 'DuplicateTest2'});
+    await gu.completeCopy({destName: 'DuplicateTest2', destWorkspace: 'Test Workspace'});
     urlId = (await gu.getCurrentUrlId())!;
 
     // check the breadcrumbs reflect new document name, and the doc contains our change.
@@ -71,6 +71,9 @@ describe("DuplicateDocument", function() {
   });
 
   it("should offer a choice of orgs when user is owner", async function() {
+    if (server.isExternalServer()) {
+      this.skip();
+    }
     await driver.find('.test-tb-share').click();
     await driver.find('.test-save-copy').click();
     await driver.findWait('.test-modal-dialog', 1000);
@@ -123,6 +126,9 @@ describe("DuplicateDocument", function() {
   });
 
   it("should offer a choice of orgs when doc is public", async function() {
+    if (server.isExternalServer()) {
+      this.skip();
+    }
     const session = await gu.session().teamSite.login();
     const api = session.createHomeApi();
     // But if the doc is public, then users can copy it out.
@@ -173,6 +179,9 @@ describe("DuplicateDocument", function() {
   });
 
   it("should allow saving a public doc to the personal org", async function() {
+    if (server.isExternalServer()) {
+      this.skip();
+    }
     const session2 = gu.session().teamSite.user('user2');
     await session2.login();
     await session2.loadDoc(`/doc/${urlId}`);
@@ -199,5 +208,9 @@ describe("DuplicateDocument", function() {
     assert.equal(await driver.find('.test-bc-workspace').getText(), 'Home');
     assert.equal(await gu.getCell({col: 'A', rowNum: 1}).getText(), 'hello to duplicates');
     assert.notEqual(await gu.getCurrentUrlId(), urlId);
+
+    // Remove document
+    await driver.find(".test-bc-workspace").click();
+    await gu.removeDoc(`DuplicateTest2 ${name} Copy`);
   });
 });

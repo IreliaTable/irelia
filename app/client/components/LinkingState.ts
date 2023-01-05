@@ -1,5 +1,5 @@
 import {DataRowModel} from "app/client/models/DataRowModel";
-import * as DataTableModel from "app/client/models/DataTableModel";
+import DataTableModel from "app/client/models/DataTableModel";
 import {DocModel} from 'app/client/models/DocModel';
 import {ColumnRec} from "app/client/models/entities/ColumnRec";
 import {TableRec} from "app/client/models/entities/TableRec";
@@ -7,14 +7,14 @@ import {ViewSectionRec} from "app/client/models/entities/ViewSectionRec";
 import {RowId} from "app/client/models/rowset";
 import {LinkConfig} from "app/client/ui/selectBy";
 import {ClientQuery, QueryOperation} from "app/common/ActiveDocAPI";
-import {isList, isRefListType} from "app/common/gristTypes";
+import {isList, isListType, isRefListType} from "app/common/gristTypes";
 import * as gutil from "app/common/gutil";
 import {encodeObject} from 'app/plugin/objtypes';
 import {Disposable, toKo} from "grainjs";
 import * as  ko from "knockout";
+import identity = require('lodash/identity');
 import mapValues = require('lodash/mapValues');
 import pickBy = require('lodash/pickBy');
-import identity = require('lodash/identity');
 
 
 /**
@@ -107,9 +107,8 @@ export class LinkingState extends Disposable {
       this.filterColValues = this.autoDispose(ko.computed(() => _filterColValues()));
 
       // source data table could still be loading (this could happen after changing the group by
-      // columns of a linked summary table for instance), hence the below listeners.
+      // columns of a linked summary table for instance), hence the below listener.
       this.autoDispose(srcTableData.dataLoadedEmitter.addListener(_update));
-      this.autoDispose(srcTableData.tableActionEmitter.addListener(_update));
 
       _update();
       function _update() {
@@ -119,23 +118,18 @@ export class LinkingState extends Disposable {
         }
         const srcRowId = srcSection.activeRowId();
         for (const c of srcSection.table().groupByColumns()) {
-          const col = c.summarySource();
-          const colId = col.colId();
+          const colId = c.colId();
           const srcValue = srcTableData.getValue(srcRowId as number, colId);
           result.filters[colId] = [srcValue];
           result.operations[colId] = 'in';
-          if (isDirectSummary) {
-            const tgtColType = col.type();
-            if (tgtColType === 'ChoiceList' || tgtColType.startsWith('RefList:')) {
-              result.operations[colId] = 'intersects';
-            }
+          if (isDirectSummary && isListType(c.summarySource().type())) {
+            // If the source groupby column is a ChoiceList or RefList, then null or '' in the summary table
+            // should match against an empty list in the source table.
+            result.operations[colId] = srcValue ? 'intersects' : 'empty';
           }
         }
         _filterColValues(result);
       }
-    } else if (isSummaryOf(tgtSection.table(), srcSection.table())) {
-      // TODO: We should move the cursor, but don't currently it for summaries. For that, we need a
-      // column or map representing the inverse of summary table's "group" column.
     } else if (srcSection.parentKey() === 'custom') {
       this.filterColValues = this._srcCustomFilter('id', 'in');
     } else {

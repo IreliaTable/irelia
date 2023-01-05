@@ -9,10 +9,10 @@ import itertools
 
 import six
 
+import functions
 import records
 import usertypes
 import relabeling
-import lookup
 import table
 import moment
 from schema import RecalcWhen
@@ -31,7 +31,7 @@ def _record_ref_list_set(table_id, group_by, sort_by=None):
   @usertypes.formulaType(usertypes.ReferenceList(table_id))
   def func(rec, table):
     lookup_table = table.docmodel.get_table(table_id)
-    return lookup_table.lookupRecords(sort_by=sort_by, **{group_by: lookup._Contains(rec.id)})
+    return lookup_table.lookupRecords(sort_by=sort_by, **{group_by: functions.CONTAINS(rec.id)})
   return func
 
 
@@ -73,8 +73,13 @@ class MetaTableExtras(object):
               if rec.summarySourceTable else None)
 
     def setAutoRemove(rec, table):
-      """Marks the table for removal if it's a summary table with no more view sections."""
-      table.docmodel.setAutoRemove(rec, rec.summarySourceTable and not rec.viewSections)
+      """
+      Marks the table for removal if it's a summary table with no more (non-raw) view sections.
+      """
+      is_summary_table = rec.summarySourceTable
+      view_sections_table = table.docmodel.get_table('_grist_Views_section')
+      has_view_sections = view_sections_table.lookupOne(isRaw=False, tableRef=rec.id)
+      table.docmodel.setAutoRemove(rec, is_summary_table and not has_view_sections)
 
 
   class _grist_Tables_column(object):
@@ -84,6 +89,7 @@ class MetaTableExtras(object):
     usedByFields = _record_set('_grist_Views_section_field', 'displayCol')
     ruleUsedByCols = _record_ref_list_set('_grist_Tables_column', 'rules')
     ruleUsedByFields = _record_ref_list_set('_grist_Views_section_field', 'rules')
+    ruleUsedByTables = _record_ref_list_set('_grist_Views_section', 'rules')
 
     def tableId(rec, table):
       return rec.parentId.tableId
@@ -96,9 +102,15 @@ class MetaTableExtras(object):
 
     def numRuleColUsers(rec, table):
       """
-      Returns the number of cols and fields using this col as a rule col
+      Returns the number of cols and fields using this col as a rule
       """
       return len(rec.ruleUsedByCols) + len(rec.ruleUsedByFields)
+
+    def numRuleTableUsers(rec, table):
+      """
+      Returns the number of tables using this col as a rule
+      """
+      return len(rec.ruleUsedByTables)
 
     def recalcOnChangesToSelf(rec, table):
       """
@@ -110,8 +122,11 @@ class MetaTableExtras(object):
     def setAutoRemove(rec, table):
       """Marks the col for removal if it's a display/rule helper col with no more users."""
       as_display = rec.colId.startswith('gristHelper_Display') and rec.numDisplayColUsers == 0
-      as_rule = rec.colId.startswith('gristHelper_Conditional') and rec.numRuleColUsers == 0
-      table.docmodel.setAutoRemove(rec, as_display or as_rule)
+      as_col_rule = rec.colId.startswith('gristHelper_ConditionalRule') and rec.numRuleColUsers == 0
+      as_row_rule = (
+        rec.colId.startswith('gristHelper_RowConditionalRule') and rec.numRuleTableUsers == 0
+      )
+      table.docmodel.setAutoRemove(rec, as_display or as_col_rule or as_row_rule)
 
 
   class _grist_Views(object):
@@ -130,6 +145,21 @@ class MetaTableExtras(object):
     def setAutoRemove(rec, table):
       """Marks the filter for removal if its column no longer exists."""
       table.docmodel.setAutoRemove(rec, not rec.colRef)
+
+
+  class _grist_Cells(object):
+    def setAutoRemove(rec, table):
+      if rec.type == 1: # Cell info of type 1 == Comments
+        # Remove if discussion is removed.
+        noParent = not rec.root and not rec.parentId
+        if rec.tableRef and rec.rowId:
+          tableRef = table.docmodel.get_table(rec.tableRef.tableId)
+          row = tableRef.lookupOne(id=rec.rowId)
+        else:
+          row = False
+        # Remove if row is removed, column is removed, table is removed or all comments are removed.
+        no_cell = not rec.colRef or not rec.tableRef or not row
+        table.docmodel.setAutoRemove(rec, noParent or no_cell)
 
 
 def enhance_model(model_class):
@@ -183,6 +213,7 @@ class DocModel(object):
     self.aclResources            = self._prep_table("_grist_ACLResources")
     self.aclRules                = self._prep_table("_grist_ACLRules")
     self.filters                 = self._prep_table("_grist_Filters")
+    self.cells                   = self._prep_table("_grist_Cells")
 
   def _prep_table(self, name):
     """
@@ -216,7 +247,8 @@ class DocModel(object):
     Marks a record for automatic removal. To use, create a formula in your table, e.g.
     'setAutoRemove', which calls `table.docmodel.setAutoRemove(boolean_value)`. Whenever it gets
     reevaluated and the boolean_value is true, the record will be automatically removed.
-    For now, it is only usable in metadata tables, although we could extend to user tables.
+    It's mostly used for metadata tables. It's also used for summary table rows with empty groups,
+    which requires a bit of extra care.
     """
     if yes_or_no:
       self._auto_remove_set.add(record)
@@ -230,7 +262,9 @@ class DocModel(object):
     # Sort to make sure removals are done in deterministic order.
     gone_records = sorted(self._auto_remove_set)
     self._auto_remove_set.clear()
-    self.remove(gone_records)
+    # setAutoRemove is called by formulas, notably summary tables, and shouldn't be blocked by ACL.
+    with self._engine.user_actions.indirect_actions():
+      self.remove(gone_records)
     return bool(gone_records)
 
   def remove(self, records):

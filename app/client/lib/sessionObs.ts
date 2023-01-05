@@ -4,6 +4,11 @@
  */
 import {safeJsonParse} from 'app/common/gutil';
 import {IDisposableOwner, Observable} from 'grainjs';
+import {getSessionStorage} from 'app/client/lib/storage';
+
+export interface SessionObs<T> extends Observable<T> {
+  pauseSaving(yesNo: boolean): void;
+}
 
 /**
  * Creates and returns an Observable tied to sessionStorage, to make its value stick across
@@ -20,13 +25,19 @@ import {IDisposableOwner, Observable} from 'grainjs';
  *    import {StringUnion} from 'app/common/StringUnion';
  *    const SomeTab = StringUnion("foo", "bar", "baz");
  *    tab = createSessionObs(owner, "tab", "baz", SomeTab.guard);  // Type Observable<"foo"|"bar"|"baz">
+ *
+ * You can disable saving to sessionStorage:
+ *    panelWidth.pauseSaving(true);
+ *    doStuff();
+ *    panelWidth.pauseSaving(false);
+ *
  */
 export function createSessionObs<T>(
   owner: IDisposableOwner|null,
   key: string,
   _default: T,
   isValid: (val: any) => val is T,
-) {
+): SessionObs<T> {
   function fromString(value: string|null): T {
     const parsed = value == null ? null : safeJsonParse(value, null);
     return isValid(parsed) ? parsed : _default;
@@ -34,17 +45,19 @@ export function createSessionObs<T>(
   function toString(value: T): string|null {
     return value === _default || !isValid(value) ? null : JSON.stringify(value);
   }
-
-  const obs = Observable.create<T>(owner, fromString(window.sessionStorage.getItem(key)));
+  let _pauseSaving = false;
+  const storage = getSessionStorage();
+  const obs = Observable.create<T>(owner, fromString(storage.getItem(key)));
   obs.addListener((value: T) => {
+    if (_pauseSaving) { return; }
     const stored = toString(value);
     if (stored == null) {
-      window.sessionStorage.removeItem(key);
+      storage.removeItem(key);
     } else {
-      window.sessionStorage.setItem(key, stored);
+      storage.setItem(key, stored);
     }
   });
-  return obs;
+  return Object.assign(obs, {pauseSaving(yesNo: boolean) { _pauseSaving = yesNo; }});
 }
 
 /** Helper functions to check simple types, useful for the `isValid` argument to createSessionObs. */

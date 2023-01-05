@@ -1,14 +1,13 @@
 import {urlState} from 'app/client/models/gristUrlState';
+// @ts-ignore
+import {buildAppMenuBillingItem} from 'app/client/ui/BillingButtons';
 import {getTheme} from 'app/client/ui/CustomThemes';
 import {cssLeftPane} from 'app/client/ui/PagePanels';
-import {colors, testId, vars} from 'app/client/ui2018/cssVars';
-// @ts-ignore
-import {shouldHideUiElement} from 'app/common/gristUrls';
+import {colors, testId, theme, vars} from 'app/client/ui2018/cssVars';
 import * as version from 'app/common/version';
-import {BindableValue, Disposable, styled} from "grainjs";
 // @ts-ignore
 import {menu, menuItem, menuItemLink, menuSubHeader} from 'app/client/ui2018/menus';
-import {isTemplatesOrg, Organization, SUPPORT_EMAIL} from 'app/common/UserAPI';
+import {isTemplatesOrg, Organization} from 'app/common/UserAPI';
 import {AppModel} from 'app/client/models/AppModel';
 import {icon} from 'app/client/ui2018/icons';
 import {DocPageModel} from 'app/client/models/DocPageModel';
@@ -18,7 +17,11 @@ import * as roles from 'app/common/roles';
 import {manageTeamUsersApp} from 'app/client/ui/OpenUserManager';
 // @ts-ignore
 import {maybeAddSiteSwitcherSection} from 'app/client/ui/SiteSwitcher';
-import {DomContents} from 'grainjs';
+import {BindableValue, Disposable, DomContents, styled} from 'grainjs';
+import {makeT} from 'app/client/lib/localization';
+
+// @ts-ignore
+const t = makeT('AppHeader');
 
 // Maps a name of a Product (from app/gen-server/entity/Product.ts) to a tag (pill) to show next
 // to the org name.
@@ -38,19 +41,20 @@ export class AppHeader extends Disposable {
   }
 
   public buildDom() {
-    const theme = getTheme(this._appModel.topAppModel.productFlavor);
+    const productFlavor = getTheme(this._appModel.topAppModel.productFlavor);
 
-    const user = this._appModel.currentValidUser;
-    const currentOrg = this._appModel.currentOrg;
     // @ts-ignore
-    const isBillingManager = Boolean(currentOrg && currentOrg.billingAccount &&
-      (currentOrg.billingAccount.isManager || user?.email === SUPPORT_EMAIL));
+    const currentOrg = this._appModel.currentOrg;
 
     return cssAppHeader(
-      cssAppHeader.cls('-widelogo', theme.wideLogo || false),
+      cssAppHeader.cls('-widelogo', productFlavor.wideLogo || false),
       // Show version when hovering over the application icon.
+      // Include gitcommit when known. Cast version.gitcommit since, depending
+      // on how Grist is compiled, tsc may believe it to be a constant and
+      // believe that testing it is unnecessary.
       cssAppLogo(
-        {title: `Ver ${version.version} (${version.gitcommit})`},
+        {title: `Version ${version.version}` +
+          ((version.gitcommit as string) !== 'unknown' ? ` (${version.gitcommit})` : '')},
         urlState().setLinkUrl({}),
         testId('dm-logo')
       ),
@@ -59,8 +63,12 @@ export class AppHeader extends Disposable {
       //   productPill(currentOrg),
       //   this._orgName && cssDropdownIcon('Dropdown'),
       //   menu(() => [
-      //     menuSubHeader(`${this._appModel.isTeamSite ? 'Team' : 'Personal'} Site`, testId('orgmenu-title')),
-      //     menuItemLink(urlState().setLinkUrl({}), 'Home Page', testId('orgmenu-home-page')),
+      //     menuSubHeader(
+      //       this._appModel.isTeamSite ? t('TeamSite') : t('PersonalSite')
+      //         + (this._appModel.isLegacySite ? ` (${t('Legacy')})` : ''),
+      //       testId('orgmenu-title'),
+      //     ),
+      //     menuItemLink(urlState().setLinkUrl({}), t('HomePage'), testId('orgmenu-home-page')),
       //
       //     // Show 'Organization Settings' when on a home page of a valid org.
       //     (!this._docPageModel && currentOrg && !currentOrg.owner ?
@@ -70,15 +78,7 @@ export class AppHeader extends Disposable {
       //       // Don't show on doc pages, or for personal orgs.
       //       null),
       //
-      //     // Show link to billing pages.
-      //     currentOrg && !currentOrg.owner && !shouldHideUiElement("billing") ?
-      //       // For links, disabling with just a class is hard; easier to just not make it a link.
-      //       // TODO weasel menus should support disabling menuItemLink.
-      //       (isBillingManager ?
-      //         menuItemLink(urlState().setLinkUrl({billing: 'billing'}), 'Billing Account') :
-      //         menuItem(() => null, 'Billing Account', dom.cls('disabled', true), testId('orgmenu-billing'))
-      //       ) :
-      //       null,
+      //     buildAppMenuBillingItem(this._appModel, testId('orgmenu-billing')),
       //
       //     maybeAddSiteSwitcherSection(this._appModel),
       //   ], { placement: 'bottom-start' }),
@@ -109,20 +109,21 @@ const cssAppHeader = styled('div', `
   width: 100%;
   height: 100%;
   align-items: center;
+  background-color: ${theme.topHeaderBg};
   &, &:hover, &:focus {
     text-decoration: none;
     outline: none;
-    color: ${colors.dark};
+    color: ${theme.text};
   }
 `);
 
 const cssAppLogo = styled('a', `
   flex: none;
-  height: 47px;
+  height: 49px;
   width: 60px;
   // background-image: var(--icon-GristLogo);
   background-image: url("ui-icons/Logo/GristLogo2.svg");
-  background-size: 60px 47px;
+  background-size: 60px 49px;
   background-repeat: no-repeat;
   background-position: center;
   // background-color: ${vars.logoBg};
@@ -135,31 +136,31 @@ const cssAppLogo = styled('a', `
   .${cssLeftPane.className}-open .${cssAppHeader.className}-widelogo & {
     background-image: var(--icon-GristWideLogo, var(--icon-GristLogo));
   }
-  .${cssLeftPane.className}-open & {
-    width: 150px;
-    background-size: 150px 47px;
-    background-image: url("ui-icons/Logo/GristLogo3.svg");
-  }
 `);
 
 // @ts-ignore
 const cssDropdownIcon = styled(icon, `
+  --icon-color: ${theme.text};
   flex-shrink: 0;
   margin-right: 8px;
 `);
 
 // @ts-ignore
 const cssOrg = styled('div', `
-  display: flex;
+  display: none;
   flex-grow: 1;
   align-items: center;
   max-width: calc(100% - 48px);
   cursor: pointer;
   height: 100%;
   font-weight: 500;
-  background-color: ${colors.light};
+
   &:hover {
-    background-color: ${colors.light};
+    background-color: ${theme.hover};
+  }
+
+  .${cssLeftPane.className}-open & {
+    display: flex;
   }
 `);
 

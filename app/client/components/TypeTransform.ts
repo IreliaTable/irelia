@@ -10,13 +10,16 @@ import {ColumnTransform} from 'app/client/components/ColumnTransform';
 import {GristDoc} from 'app/client/components/GristDoc';
 import * as TypeConversion from 'app/client/components/TypeConversion';
 import {reportError} from 'app/client/models/errors';
-import {cssButtonRow} from 'app/client/ui/RightPanel';
+import {cssButtonRow} from 'app/client/ui/RightPanelStyles';
 import {basicButton, primaryButton} from 'app/client/ui2018/buttons';
 import {testId} from 'app/client/ui2018/cssVars';
 import {FieldBuilder} from 'app/client/widgets/FieldBuilder';
 import {NewAbstractWidget} from 'app/client/widgets/NewAbstractWidget';
 import {UserAction} from 'app/common/DocActions';
 import {Computed, dom, fromKo, Observable} from 'grainjs';
+import {makeT} from 'app/client/lib/localization';
+
+const t = makeT('components.TypeTransformation');
 
 // To simplify diff (avoid rearranging methods to satisfy private/public order).
 /* eslint-disable @typescript-eslint/member-ordering */
@@ -47,7 +50,10 @@ export class TypeTransform extends ColumnTransform {
     const disableButtons = Observable.create(null, false);
 
     this._reviseTypeChange.set(false);
-    this.editor = this.autoDispose(AceEditor.create({ observable: this.transformColumn.formula }));
+    this.editor = this.autoDispose(AceEditor.create({
+      gristDoc: this.gristDoc,
+      observable: this.transformColumn.formula,
+    }));
     return dom('div',
       testId('type-transform-top'),
       dom.maybe(this._transformWidget, transformWidget => transformWidget.buildTransformConfigDom()),
@@ -58,25 +64,25 @@ export class TypeTransform extends ColumnTransform {
       ),
       cssButtonRow(
         basicButton(dom.on('click', () => { this.cancel().catch(reportError); disableButtons.set(true); }),
-          'Cancel', testId("type-transform-cancel"),
+          t('Cancel'), testId("type-transform-cancel"),
           dom.cls('disabled', disableButtons)
         ),
         dom.domComputed(this._reviseTypeChange, revising => {
           if (revising) {
             return basicButton(dom.on('click', () => this.editor.writeObservable()),
-              'Preview', testId("type-transform-update"),
+              t('Preview'), testId("type-transform-update"),
               dom.cls('disabled', (use) => use(disableButtons) || use(this.formulaUpToDate)),
-              { title: 'Update formula (Shift+Enter)' }
+              { title: t('UpdateFormula') }
             );
           } else {
             return basicButton(dom.on('click', () => { this._reviseTypeChange.set(true); }),
-              'Revise', testId("type-transform-revise"),
+              t('Revise'), testId("type-transform-revise"),
               dom.cls('disabled', disableButtons)
             );
           }
         }),
         primaryButton(dom.on('click', () => { this.execute().catch(reportError); disableButtons.set(true); }),
-          'Apply', testId("type-transform-apply"),
+          t('Apply'), testId("type-transform-apply"),
           dom.cls('disabled', disableButtons)
         )
       )
@@ -93,7 +99,7 @@ export class TypeTransform extends ColumnTransform {
     const colInfo = await TypeConversion.prepTransformColInfo(docModel, this.origColumn, this.origDisplayCol, toType);
     // NOTE: We could add rules with AddColumn action, but there are some optimizations that converts array values.
     const rules = colInfo.rules;
-    delete colInfo.rules;
+    delete (colInfo as any).rules;
     const newColInfos = await this._tableData.sendTableActions([
       ['AddColumn', 'gristHelper_Converted', {...colInfo, isFormula: false, formula: ''}],
       ['AddColumn', 'gristHelper_Transform', colInfo],
