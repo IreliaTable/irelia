@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="700px" height="700px" viewBox="0 0 700 700" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>irelia</title>
+    <g id="irelia" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g transform="translate(111.000000, 91.000000)" fill-rule="nonzero">
+            <polygon id="Path-8" fill="#235DFF" points="234.948368 0 8.45335324e-15 259.58209 0 518 170.213566 518 170.213566 184.720528 478 184.720528 478 0"></polygon>
+            <polygon id="Path-9" fill="#3BE3B2" points="340.765592 216 200 363.790556 340.765592 518 478 363.790556"></polygon>
+        </g>
+    </g>
+</svg>

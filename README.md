@@ -1,8 +1,8 @@
 <div align="right">
-    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/ui-icons/Logo/guinsoolab-badge.png" width="60" alt="badge">
+    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/guinsoolab-badge.png" width="60" alt="badge">
 </div>
 <div align="center">
-    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/ui-icons/Logo/GristLogo.svg" width="120" alt="logo" />
+    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia.svg" width="120" alt="logo" />
     <br />
     <small>a modern relational spreadsheet</small>
 </div>
