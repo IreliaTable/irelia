@@ -135,7 +135,7 @@ export const cssPageLink = styled('a', `
     color: inherit;
   }
   .${cssTools.className}-collapsed & {
-    padding-left: 22px;
+    padding-left: 16px;
   }
 `);
 

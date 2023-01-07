@@ -12,7 +12,7 @@
 > Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a
 database to organize your data and make you more productive.
 
-![overview](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia-ecosystem-final.jpg)
+![overview](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia-overview.png)
 
 ## Quickstart
 

@@ -20,7 +20,7 @@ describe('HomeIntro', function() {
       await session.loadDocMenu('/');
 
       // Check message specific to anon
-      assert.equal(await driver.find('.test-welcome-title').getText(), 'Welcome to Grist!');
+      assert.equal(await driver.find('.test-welcome-title').getText(), 'Welcome to Irelia!');
       assert.match(await driver.find('.test-welcome-text').getText(), /Sign up.*Visit our Help Center/);
 
       // Check the sign-up link.
@@ -106,7 +106,7 @@ describe('HomeIntro', function() {
 
     // Check link to Help Center
     assert.include(await driver.findContent('.test-welcome-text a', /Help Center/).getAttribute('href'),
-      'support.getgrist.com');
+      'support.irelia.com');
 
     if (options.team) {
       assert.equal(await driver.find('.test-intro-invite').getText(), 'Invite Team Members');

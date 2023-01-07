@@ -97,7 +97,7 @@ function initBeacon(): void {
         // have a log of the error. (Note: might not report all failures due to ad-blockers.)
         dom.on('error', (e) => {
           reportWarning("Support form failed to load. " +
-            "Please email support@getgrist.com with questions instead.");
+            "Please email support@irelia.com with questions instead.");
         }),
       ));
       _beacon('init', beaconId);

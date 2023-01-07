@@ -94,7 +94,7 @@ export class WelcomePage extends Disposable {
       handleSubmitForm(pending, () => _redirectToSiblingPage('verify')),
       dom('p',
           `Welcome Sumo-ling! ` +  // This flow currently only used with AppSumo.
-          `Your Grist site is almost ready. Let's get your account set up and verified. ` +
+          `Your Irelia site is almost ready. Let's get your account set up and verified. ` +
           `If you already have a Grist account as `,
           dom('b', email.get()),
           ` you can just `,

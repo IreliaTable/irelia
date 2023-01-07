@@ -133,7 +133,7 @@ describe("DuplicateDocument", function() {
     const api = session.createHomeApi();
     // But if the doc is public, then users can copy it out.
     await api.updateDocPermissions(urlId, {users: {
-      'everyone@getgrist.com': 'viewers',
+      'everyone@irelia.com': 'viewers',
     }});
     const session2 = gu.session().teamSite.user('user2');
     await gu.session().teamSite2.createHomeApi().updateOrgPermissions('current', {users: {

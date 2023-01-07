@@ -118,7 +118,6 @@ const cssLogo = styled('div', `
   display: inline-block;
   height: 48px;
   width: 48px;
-  // background-image: var(--icon-GristLogo);
   background-image: url("ui-icons/Logo/GristLogo.svg");
   background-size: 32px 32px;
   background-repeat: no-repeat;

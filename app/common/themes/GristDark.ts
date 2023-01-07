@@ -20,21 +20,21 @@ export const GristDark: ThemeColors = {
   'page-panels-top-header-bg': '#32323F',
   'page-panels-bottom-footer-bg': '#32323F',
   'page-panels-border': '#57575F',
-  'page-panels-border-resizing': '#1DA270',
+  'page-panels-border-resizing': '#235dff',
   'page-panels-side-panel-opener-fg': '#A4A4A4',
   'page-panels-side-panel-opener-active-fg': '#FFFFFF',
-  'page-panels-side-panel-opener-active-bg': '#1DA270',
+  'page-panels-side-panel-opener-active-bg': '#235dff',
 
   /* Add New */
   'add-new-circle-fg': '#FFFFFF',
-  'add-new-circle-bg': '#157A54',
+  'add-new-circle-bg': '#1f41c6',
   'add-new-circle-hover-bg': '#0A5438',
   'add-new-circle-small-fg': '#FFFFFF',
-  'add-new-circle-small-bg': '#1DA270',
-  'add-new-circle-small-hover-bg': '#157A54',
+  'add-new-circle-small-bg': '#235dff',
+  'add-new-circle-small-hover-bg': '#1f41c6',
 
   /* Top Bar */
-  'top-bar-button-primary-fg': '#1DA270',
+  'top-bar-button-primary-fg': '#235dff',
   'top-bar-button-secondary-fg': '#A4A4A4',
   'top-bar-button-disabled-fg': '#69697D',
   'top-bar-button-error-fg': 'FF6666',
@@ -50,13 +50,13 @@ export const GristDark: ThemeColors = {
   'toast-bg': '#040404',
   'toast-error-icon': '#D0021B',
   'toast-error-bg': '#D0021B',
-  'toast-success-icon': '#009058',
-  'toast-success-bg': '#009058',
+  'toast-success-icon': '#1f41c6',
+  'toast-success-bg': '#1f41c6',
   'toast-warning-icon': '#F9AE41',
   'toast-warning-bg': '#DD962C',
   'toast-info-icon': '#3B82F6',
   'toast-info-bg': '#3B82F6',
-  'toast-control-fg': '#16B378',
+  'toast-control-fg': '#235dff',
   'toast-control-info-fg': '#87B2F9',
 
   /* Tooltips */
@@ -67,7 +67,7 @@ export const GristDark: ThemeColors = {
   'tooltip-close-button-hover-fg': 'black',
   'tooltip-close-button-hover-bg': 'white',
   'tooltip-popup-header-fg': '#EFEFEF',
-  'tooltip-popup-header-bg': '#1DA270',
+  'tooltip-popup-header-bg': '#235dff',
 
   /* Modals */
   'modal-bg': '#32323F',
@@ -78,8 +78,8 @@ export const GristDark: ThemeColors = {
   'modal-shadow-inner': '#000000',
   'modal-shadow-outer': '#000000',
   'modal-close-button-fg': '#A4A4A4',
-  'modal-backdrop-close-button-fg': '#1DA270',
-  'modal-backdrop-close-button-hover-fg': '#157A54',
+  'modal-backdrop-close-button-fg': '#235dff',
+  'modal-backdrop-close-button-hover-fg': '#B1FFE2',
 
   /* Popups */
   'popup-bg': '#32323F',
@@ -88,13 +88,13 @@ export const GristDark: ThemeColors = {
   'popup-close-button-fg': '#A4A4A4',
 
   /* Progress Bars */
-  'progress-bar-fg': '#1DA270',
+  'progress-bar-fg': '#235dff',
   'progress-bar-error-fg': '#FF6666',
   'progress-bar-bg': '#69697D',
 
   /* Links */
-  'link': '#1DA270',
-  'link-hover': '#1DA270',
+  'link': '#235dff',
+  'link-hover': '#235dff',
 
   /* Hover */
   'hover': 'rgba(111,111,117,0.6)',
@@ -105,7 +105,7 @@ export const GristDark: ThemeColors = {
   'cell-editor-bg': '#32323F',
 
   /* Cursor */
-  'cursor': '#1DA270',
+  'cursor': '#235dff',
   'cursor-inactive': 'rgba(29,162,112,0.5)',
   'cursor-readonly': '#A4A4A4',
 
@@ -149,7 +149,7 @@ export const GristDark: ThemeColors = {
   /* Widgets */
   'widget-bg': '#32323F',
   'widget-border': '#57575F',
-  'widget-active-border': '#1DA270',
+  'widget-active-border': '#235dff',
   'widget-inactive-stripes-light': '#262633',
   'widget-inactive-stripes-dark': '#32323F',
 
@@ -164,18 +164,18 @@ export const GristDark: ThemeColors = {
   'raw-data-table-border-hover': '#A4A4A4',
 
   /* Controls */
-  'control-fg': '#1DA270',
+  'control-fg': '#235dff',
   'control-primary-fg': '#FFFFFF',
-  'control-primary-bg': '#1DA270',
+  'control-primary-bg': '#235dff',
   'control-secondary-fg': '#A4A4A4',
-  'control-hover-fg': '#157A54',
-  'control-primary-hover-bg': '#157A54',
+  'control-hover-fg': '#1f41c6',
+  'control-primary-hover-bg': '#1f41c6',
   'control-secondary-hover-fg': '#EFEFEF',
   'control-secondary-hover-bg': '#57575F',
   'control-disabled-fg': '#A4A4A4',
   'control-disabled-bg': '#69697D',
-  'control-primary-disabled': '#5F8C7B',
-  'control-border': '#11B683',
+  'control-primary-disabled': '#A2E1C9',
+  'control-border': '#235dff',
 
   /* Checkboxes */
   'checkbox-bg': '#32323F',
@@ -185,7 +185,7 @@ export const GristDark: ThemeColors = {
 
   /* Move Docs */
   'move-docs-selected-fg': '#FFFFFF',
-  'move-docs-selected-bg': '#1DA270',
+  'move-docs-selected-bg': '#235dff',
   'move-docs-disabled-bg': '#69697D',
 
   /* Filter Bar */
@@ -195,8 +195,8 @@ export const GristDark: ThemeColors = {
 
   /* Icon Buttons */
   'icon-button-fg': '#FFFFFF',
-  'icon-button-primary-bg': '#1DA270',
-  'icon-button-primary-hover-bg': '#157A54',
+  'icon-button-primary-bg': '#235dff',
+  'icon-button-primary-hover-bg': '#1f41c6',
   'icon-button-secondary-bg': '#69697D',
   'icon-button-secondary-hover-bg': '#A4A4A4',
 
@@ -216,16 +216,16 @@ export const GristDark: ThemeColors = {
   'right-panel-tab-fg': '#EFEFEF',
   'right-panel-tab-bg': '#262633',
   'right-panel-tab-icon': '#A4A4A4',
-  'right-panel-tab-icon-hover': '#1DA270',
+  'right-panel-tab-icon-hover': '#235dff',
   'right-panel-tab-hover-bg': 'rgba(111,111,117,0.6)',
   'right-panel-tab-selected-fg': '#FFFFFF',
-  'right-panel-tab-selected-bg': '#1DA270',
-  'right-panel-tab-button-hover-bg': '#157A54',
-  'right-panel-subtab-fg': '#1DA270',
+  'right-panel-tab-selected-bg': '#235dff',
+  'right-panel-tab-button-hover-bg': '#1f41c6',
+  'right-panel-subtab-fg': '#235dff',
   'right-panel-subtab-selected-fg': '#EFEFEF',
-  'right-panel-subtab-selected-underline': '#1DA270',
-  'right-panel-subtab-hover-fg': '#157A54',
-  'right-panel-subtab-hover-underline': '#1DA270',
+  'right-panel-subtab-selected-underline': '#235dff',
+  'right-panel-subtab-hover-fg': '#1f41c6',
+  'right-panel-subtab-hover-underline': '#235dff',
   'right-panel-disabled-overlay': '#262633',
   'right-panel-toggle-button-enabled-fg': '#FFFFFF',
   'right-panel-toggle-button-enabled-bg': '#555563',
@@ -245,9 +245,9 @@ export const GristDark: ThemeColors = {
   'document-history-activity-text-light': '#A4A4A4',
 
   /* Accents */
-  'accent-icon': '#1DA270',
-  'accent-border': '#1DA270',
-  'accent-text': '#1DA270',
+  'accent-icon': '#235dff',
+  'accent-border': '#235dff',
+  'accent-text': '#235dff',
 
   /* Inputs */
   'input-fg': '#EFEFEF',
@@ -256,7 +256,7 @@ export const GristDark: ThemeColors = {
   'input-disabled-bg': '#262633',
   'input-placeholder-fg': '#A4A4A4',
   'input-border': '#69697D',
-  'input-valid': '#1DA270',
+  'input-valid': '#235dff',
   'input-invalid': '#FF6666',
   'input-focus': '#5E9ED6',
   'input-readonly-bg': '#262633',
@@ -286,16 +286,16 @@ export const GristDark: ThemeColors = {
   /* Menu Items */
   'menu-item-fg': '#FFFFFF',
   'menu-item-selected-fg': '#FFFFFF',
-  'menu-item-selected-bg': '#1DA270',
+  'menu-item-selected-bg': '#235dff',
   'menu-item-disabled-fg': '#69697D',
   'menu-item-icon-fg': '#A4A4A4',
   'menu-item-icon-selected-fg': '#FFFFFF',
-  'menu-item-link-fg': '#1DA270',
-  'menu-item-link-selected-fg': '#157A54',
+  'menu-item-link-fg': '#235dff',
+  'menu-item-link-selected-fg': '#1f41c6',
   'menu-item-link-selected-bg': '#484859',
 
   /* Autocomplete */
-  'autocomplete-match-text': '#1DA270',
+  'autocomplete-match-text': '#235dff',
   'autocomplete-selected-match-text': '#0A5438',
   'autocomplete-item-selected-bg': '#69697D',
 
@@ -305,7 +305,7 @@ export const GristDark: ThemeColors = {
   'search-prev-next-button-bg': '#24242F',
 
   /* Loading Spinners */
-  'loader-fg': '#1DA270',
+  'loader-fg': '#235dff',
   'loader-bg': '#69697D',
 
   /* Site Switcher */
@@ -319,7 +319,7 @@ export const GristDark: ThemeColors = {
 
   /* Shortcut Keys */
   'shortcut-key-fg': '#FFFFFF',
-  'shortcut-key-primary-fg': '#17B378',
+  'shortcut-key-primary-fg': '#235dff',
   'shortcut-key-secondary-fg': '#A4A4A4',
   'shortcut-key-bg': '#32323F',
   'shortcut-key-border': '#A4A4A4',
@@ -336,8 +336,8 @@ export const GristDark: ThemeColors = {
   'widget-picker-item-selected-bg': 'rgba(111,111,117,0.6)',
   'widget-picker-item-disabled-bg': 'rgba(111,111,117,0.6)',
   'widget-picker-icon': '#A4A4A4',
-  'widget-picker-primary-icon': '#1DA270',
-  'widget-picker-summary-icon': '#1DA270',
+  'widget-picker-primary-icon': '#235dff',
+  'widget-picker-summary-icon': '#235dff',
   'widget-picker-border': 'rgba(111,111,117,0.6)',
   'widget-picker-shadow': '#000000',
 
@@ -359,8 +359,8 @@ export const GristDark: ThemeColors = {
 
   /* Menu Toggles */
   'menu-toggle-fg': '#A4A4A4',
-  'menu-toggle-hover-fg': '#1DA270',
-  'menu-toggle-active-fg': '#157A54',
+  'menu-toggle-hover-fg': '#235dff',
+  'menu-toggle-active-fg': '#1f41c6',
   'menu-toggle-bg': '#32323F',
   'menu-toggle-border': '#A4A4A4',
 
@@ -372,7 +372,7 @@ export const GristDark: ThemeColors = {
   'button-group-border': '#69697D',
   'button-group-border-hover': '#555563',
   'button-group-selected-fg': '#EFEFEF',
-  'button-group-light-selected-fg': '#1DA270',
+  'button-group-light-selected-fg': '#235dff',
   'button-group-selected-bg': '#555563',
   'button-group-selected-border': '#555563',
 

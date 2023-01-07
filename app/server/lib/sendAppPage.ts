@@ -42,7 +42,7 @@ export function makeGristConfig(homeUrl: string|null, extra: Partial<GristLoadCo
     org: process.env.GRIST_SINGLE_ORG || (mreq && mreq.org),
     baseDomain,
     singleOrg: process.env.GRIST_SINGLE_ORG,
-    helpCenterUrl: process.env.GRIST_HELP_CENTER || "https://support.getgrist.com",
+    helpCenterUrl: process.env.GRIST_HELP_CENTER || "https://ciusji.gitbook.io/irelia/",
     pathOnly,
     supportAnon: shouldSupportAnon(),
     supportEngines: getSupportedEngineChoices(),
