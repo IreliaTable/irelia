@@ -174,7 +174,7 @@ export const GristBehavioralPrompts: Record<BehavioralPrompt, BehavioralPromptCo
     title: 'Linking Widgets',
     content: (...args: DomElementArg[]) => cssTooltipContent(
       dom('div', 'Link your new widget to an existing widget on this page.'),
-      dom('div', `This is the secret to Grist's dynamic and productive layouts.`),
+      dom('div', `This is the secret to Irelia's dynamic and productive layouts.`),
       dom('div', cssLink({href: commonUrls.helpLinkingWidgets, target: '_blank'}, 'Learn more.')),
       ...args,
     ),

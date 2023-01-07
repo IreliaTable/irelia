@@ -2,7 +2,7 @@
 <svg width="1500px" height="470px" viewBox="0 0 1500 470" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
     <title>GristLogo3</title>
     <g id="GristLogo3" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <text id="Irelia" font-family="Arial-Black, Arial Black" font-size="280" font-weight="700" fill="#333">
+        <text id="irelia-logo-text" font-family="Arial-Black, Arial Black" font-size="280" font-weight="700" fill="#333">
             <tspan x="526" y="345">Irelia</tspan>
         </text>
         <g id="Group" transform="translate(171.000000, 95.000000)">

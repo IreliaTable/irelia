@@ -40,7 +40,7 @@ Here is an example of a language resource file `en.client.json` currently used b
     "MoreExamplesAndTemplates": "More Examples and Templates"
   },
   "HomeIntro": {
-    "Welcome": "Welcome to Grist!",
+    "Welcome": "Welcome to Irelia!",
     "SignUp": "Sign up"
   }
 }

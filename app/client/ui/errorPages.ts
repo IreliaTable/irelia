@@ -134,7 +134,8 @@ const cssBigIcon = styled('div', `
   display: inline-block;
   width: 100%;
   height: 64px;
-  background-image: var(--icon-GristLogo);
+  // background-image: var(--icon-GristLogo);
+  background-image: url("ui-icons/Logo/GristLogo3.svg");
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
