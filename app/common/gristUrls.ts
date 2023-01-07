@@ -595,7 +595,7 @@ export function shouldHideUiElement(elem: IHideableUiElement): boolean {
 }
 
 export function getPageTitleSuffix(config?: GristLoadConfig) {
-  return config?.pageTitleSuffix ?? " - Grist";
+  return config?.pageTitleSuffix ?? " - Irelia";
 }
 
 /**
