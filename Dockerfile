@@ -141,6 +141,6 @@ ENV \
   GRIST_SANDBOX_FLAVOR=unsandboxed \
   TYPEORM_DATABASE=/persist/home.sqlite3
 
-EXPOSE 8484
+EXPOSE 8686
 
 CMD ./sandbox/run.sh
