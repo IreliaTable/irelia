@@ -131,10 +131,10 @@ export function pagePanels(page: PageContents) {
         cssLeftPane.cls('-open', left.panelOpen),
         transition(use => (use(isNarrowScreenObs()) ? false : use(left.panelOpen)), {
           prepare(elem, open) {
-            elem.style.width = (open ? 60 : left.panelWidth.get()) + 'px';
+            elem.style.width = (open ? 48 : left.panelWidth.get()) + 'px';
           },
           run(elem, open) {
-            elem.style.width = contentWrapper.style.width = (open ? left.panelWidth.get() : 60) + 'px';
+            elem.style.width = contentWrapper.style.width = (open ? left.panelWidth.get() : 48) + 'px';
           },
           finish() {
             onResize();
@@ -371,7 +371,7 @@ const cssContentMain = styled(cssHBox, `
 export const cssLeftPane = styled(cssVBox, `
   position: relative;
   background-color: ${theme.mainPanelBg};
-  width: px;
+  width: 48px;
   margin-right: 0px;
   transition: width 0.4s;
   will-change: width;
@@ -432,7 +432,7 @@ const cssMainPane = styled(cssVBox, `
   background-color: ${theme.mainPanelBg};
   z-index: 1;
   &-left-overlap {
-    margin-left: 60px;
+    margin-left: 48px;
   }
 `);
 const cssRightPane = styled(cssVBox, `
@@ -543,6 +543,7 @@ const cssResizeFlexVHandle = styled(resizeFlexVHandle, `
 `);
 const cssResizeDisabledBorder = styled('div', `
   flex: none;
+  margin-top: ${bottomFooterHeightPx}px;
   width: 1px;
   height: 100%;
   background-color: ${theme.pagePanelsBorder};

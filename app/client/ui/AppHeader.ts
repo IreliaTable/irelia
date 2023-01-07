@@ -119,14 +119,12 @@ const cssAppHeader = styled('div', `
 
 const cssAppLogo = styled('a', `
   flex: none;
-  height: 49px;
-  width: 60px;
-  // background-image: var(--icon-GristLogo);
-  background-image: url("ui-icons/Logo/GristLogo2.svg");
-  background-size: 60px 49px;
+  height: 47px;
+  width: 150px;
+  background-image: url("ui-icons/Logo/GristLogo3.svg");
+  background-size: 150px 47px;
   background-repeat: no-repeat;
   background-position: center;
-  // background-color: ${vars.logoBg};
   .${cssAppHeader.className}-widelogo & {
     width: 100%;
     background-size: contain;

@@ -106,7 +106,7 @@ describe('HomeIntro', function() {
 
     // Check link to Help Center
     assert.include(await driver.findContent('.test-welcome-text a', /Help Center/).getAttribute('href'),
-      'support.getgrist.com');
+      'support.irelia.com');
 
     if (options.team) {
       assert.equal(await driver.find('.test-intro-invite').getText(), 'Invite Team Members');

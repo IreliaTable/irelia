@@ -2,7 +2,7 @@
 
 ## General description
 
-Localization support (translations) in Grist is implemented via
+Localization support (translations) in Irelia is implemented via
 [https://www.i18next.com](https://www.i18next.com/overview/plugins-and-utils) javascript library. It
 is used both on the server (node) and the client side (browser). It has very good documentation,
 supports all needed features (like interpolation, pluralization and context), and has a rich plugin
@@ -10,7 +10,7 @@ ecosystem. It is also very popular and widely used.
 
 ## Localization setup
 
-Resource files are located in a `static/locales` directory, but Grist can be configured to read them
+Resource files are located in a `static/locales` directory, but Irelia can be configured to read them
 from any other location by using the `GRIST_LOCALES_DIR` environmental variable. All resource files
 are read when the server starts. The default and required language code is `en` (English), all other
 languages are optional and will be supported if server can find a resource file with proper language
@@ -18,13 +18,13 @@ code. Languages are resolved hierarchically, from most specific to a general one
 Polish code _pl-PL_, the library will first try _pl-PL_, then _pl_, and then will fallback to a
 default language _en_ (https://www.i18next.com/principles/translation-resolution).
 
-All language variants (e.g., _fr-FR_, _pl-PL_, _en-UK_) are supported if Grist can find a main
-language resource file. For example, to support a _fr-FR_ language code, Grist expects to have at
+All language variants (e.g., _fr-FR_, _pl-PL_, _en-UK_) are supported if Irelia can find a main
+language resource file. For example, to support a _fr-FR_ language code, Irelia expects to have at
 least _fr.client.json_ file. The main language file will be used as a default fallback for all French
-language codes like _fr-FR_ or _fr-CA_, in case there is no resource file for a specif variant (like
+language codes like _fr-FR_ or _fr-CA_, in case there is no resource file for a specific variant (like
 `fr-CA.client.json`) or some keys are missing from the variant file.
 
-Here is an example of a language resource file `en.client.json` currently used by Grist:
+Here is an example of a language resource file `en.client.json` currently used by Irelia:
 
 ```json
 {
@@ -53,7 +53,7 @@ https://www.i18next.com/translation-function/context.
 
 Client and server code (node.js) use separate resource files. A resource file name format
 follows a pattern: [language code].[product].json (e.g. `pl-Pl.client.json`, `en-US.client.json`,
-`en.client.json`). Grist can be packaged as several different products, and each product can have its
+`en.client.json`). Irelia can be packaged as several different products, and each product can have its
 own translation files that are added to the core. Products are supported by leveraging `i18next`
 feature called `namespaces` https://www.i18next.com/principles/namespaces.
 
@@ -115,16 +115,16 @@ dom('span', t('Argument', {
 Some things are not supported at this moment and will need to be addressed in future development
 tasks:
 
-- Date time picker component. It has its own resource files that are already imported by Grist but
+- Date time picker component. It has its own resource files that are already imported by Irelia but
   not used in the main application. https://bootstrap-datepicker.readthedocs.io/en/latest/i18n.html
 - Static HTML files used as a placeholder (for example, for Custom widgets).
-- Formatting dates. Grist is using `moment.js` library, which has its own i18n support. Date formats
-  used by Grist are shared between client, server and sandbox code and are not compatible with
+- Formatting dates. Irelia is using `moment.js` library, which has its own i18n support. Date formats
+  used by Irelia are shared between client, server and sandbox code and are not compatible with
   `i18next` library.
 
 ### Server
 
-For server-side code, Grist is using https://github.com/i18next/i18next-http-middleware plugin,
+For server-side code, Irelia is using https://github.com/i18next/i18next-http-middleware plugin,
 which exposes `i18next` API in the `Request` object. It automatically detects user language (from
 request headers) and configures all API methods to use the proper language (either requested by the
 client or a default one). `Comm` object and `webSocket` API use a very similar approach, each
