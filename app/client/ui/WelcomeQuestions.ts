@@ -53,7 +53,7 @@ export function showWelcomeQuestions(userPrefsObs: Observable<UserPrefs>): boole
     return {
       title: [cssLogo(), dom('div', t('WelcomeToGrist'))],
       body: buildInfoForm(selection, otherText),
-      saveLabel: 'Start using Grist',
+      saveLabel: 'Start using Irelia',
       saveFunc: onConfirm,
       hideCancel: true,
       width: 'fixed-wide',

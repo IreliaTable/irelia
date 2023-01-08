@@ -1,6 +1,6 @@
 name: core
 version: 0.0.0
-description: Grist core features
+description: Irelia core features
 components:
   safePython: sandbox/main.py
 contributions:
