@@ -1,7 +1,7 @@
 import {GristLoadConfig} from 'app/common/gristUrls';
 import {styled} from 'grainjs';
 
-export type ProductFlavor = 'grist' | 'efcr' | 'fieldlink';
+export type ProductFlavor = 'irelia' | 'efcr' | 'fieldlink';
 
 export interface CustomTheme {
   bodyClassName?: string;
@@ -23,7 +23,7 @@ export function getFlavor(org?: string): ProductFlavor {
   } else if (org && /^nioxus(-.*)?$/.test(org)) {
     return 'efcr';
   }
-  return 'grist';
+  return 'irelia';
 }
 
 export function getTheme(flavor: ProductFlavor): CustomTheme {

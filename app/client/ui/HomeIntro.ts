@@ -75,7 +75,7 @@ function makeViewerTeamSiteIntro(homeModel: HomeModel) {
       t('WelcomeInfoAppearHere'),
     ),
     cssIntroLine(
-      t('WelcomeTextVistGrist'), docLink, '.',
+      t('WelcomeTextVisitGrist'), docLink, '.',
       testId('welcome-text')
     )
   ];
@@ -102,8 +102,10 @@ function makeTeamSiteIntro(homeModel: HomeModel) {
 
 function makePersonalIntro(homeModel: HomeModel, user: FullUser) {
   return [
-    css.docListHeader(t('WelcomeUser', {name: user.name}), testId('welcome-title')),
-    cssIntroLine(t('PersonalIntroGetStarted')),
+    // css.docListHeader(t('WelcomeUser', {name: user.name}), testId('welcome-title')),
+    css.docListHeader('Welcome to Irelia, ', user.name, '!', testId('welcome-title')),
+    // cssIntroLine(t('PersonalIntroGetStarted')),
+    cssIntroLine('Get started by creating your first Irelia document.'),
     (shouldHideUiElement('helpCenter') ? null :
       cssIntroLine(t('VisitHelpCenter', { link: helpCenterLink() }),
         testId('welcome-text'))
