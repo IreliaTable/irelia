@@ -19,8 +19,8 @@ database to organize your data and make you more productive.
 There are docker images set up for individual use, or (with some configuration) for self-hosting.
 
 ```bash
-docker pull jicius/irelia
-docker run -p 8686:8686 -it jicius/irelia
+docker pull guinsoolab/irelia
+docker run -p 8686:8686 -it guinsoolab/irelia
 ```
 
 Then visit `http://localhost:8686` in your browser. You'll be able to create, edit, import, and export documents.
