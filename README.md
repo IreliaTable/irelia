@@ -2,14 +2,14 @@
     <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/guinsoolab-badge.png" width="60" alt="badge">
 </div>
 <div align="center">
-    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia.svg" width="120" alt="logo" />
+    <img src="https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia.svg" width="100" alt="logo" />
     <br />
-    <small>a modern relational spreadsheet</small>
+    <small>A modern relational spreadsheet</small>
 </div>
 
 # Irelia
 
-> Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a
+Irelia is a modern relational spreadsheet. It combines the flexibility of a spreadsheet with the robustness of a
 database to organize your data and make you more productive.
 
 ![overview](https://raw.githubusercontent.com/IreliaTable/irelia/main/static/img/irelia-overview.png)
@@ -87,17 +87,16 @@ Here are some specific feature highlights of Irelia:
     - [Intro to Formulas](https://ciusji.gitbook.io/irelia/using-formulas/intro-to-formulas)
     - [Python Versions](https://ciusji.gitbook.io/irelia/using-formulas/python-versions)
     - [Function Reference](https://ciusji.gitbook.io/irelia/using-formulas/function-reference)
-- Templates 🔥
-    - [Personal](https://ciusji.gitbook.io/irelia/templates/personal)
-    - [Business](https://ciusji.gitbook.io/irelia/templates/business)
-    - [Industry](https://ciusji.gitbook.io/irelia/templates/industry)
-    - [Funding](https://ciusji.gitbook.io/irelia/templates/funding)
-    - [Finance](https://ciusji.gitbook.io/irelia/templates/finance)
-    - [Sales](https://ciusji.gitbook.io/irelia/templates/sales)
-    - [Customers](https://ciusji.gitbook.io/irelia/templates/customers)
+- Solutions 🔥
+    - [Personal](https://ciusji.gitbook.io/irelia/solutions/personal)
+    - [Business](https://ciusji.gitbook.io/irelia/solutions/business)
+    - [Industry](https://ciusji.gitbook.io/irelia/solutions/industry)
+    - [Funding](https://ciusji.gitbook.io/irelia/solutions/funding)
+    - [Finance](https://ciusji.gitbook.io/irelia/solutions/finance)
+    - [Sales](https://ciusji.gitbook.io/irelia/solutions/sales)
+    - [Customers](https://ciusji.gitbook.io/irelia/solutions/customers)
 - Appendix
     - [Ecosystem](https://ciusji.gitbook.io/irelia/ecosystem/ecosystem)
-    - [Solutions](https://ciusji.gitbook.io/irelia/solutions/solutions)
     - [FAQs](https://ciusji.gitbook.io/irelia/appendix/faq)
     - [Help](https://ciusji.gitbook.io/irelia/appendix/help)
 
@@ -127,3 +126,5 @@ This repository is released under the [Apache License, Version
 2.0](http://www.apache.org/licenses/LICENSE-2.0), which is an
 [OSI](https://opensource.org/)-approved free software license.
 See LICENSE.txt and NOTICE.txt for more information.
+
+<img src="https://raw.githubusercontent.com/GuinsooLab/glab/main/src/images/guinsoolab-group.svg" width="120" alt="license" />
